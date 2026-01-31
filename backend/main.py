@@ -3,6 +3,8 @@ Agentium Main Application
 FastAPI backend for AI governance system with hierarchical agents.
 """
 
+from datetime import datetime
+import json
 import logging
 from contextlib import asynccontextmanager
 from backend.api.routes import models as model_routes
@@ -424,6 +426,47 @@ async def get_current_constitution(db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="No active constitution found")
     
     return constitution.to_dict()
+
+class ConstitutionUpdate(BaseModel):
+    preamble: str
+    articles: str  # JSON string
+    prohibited_actions: List[str]
+    sovereign_preferences: Dict[str, Any]
+
+@app.post("/constitution/update")
+async def update_constitution(data: ConstitutionUpdate, db: Session = Depends(get_db)):
+    """Update constitution creating a new version."""
+    
+    # 1. Archive current
+    current = db.query(Constitution).filter_by(is_active='Y').order_by(Constitution.effective_date.desc()).first()
+    
+    new_version = "v1.0.0"
+    if current:
+        current.is_active = 'N'
+        # Parse version and increment
+        try:
+            v_parts = current.version.lstrip('v').split('.')
+            if len(v_parts) == 3:
+                new_version = f"v{v_parts[0]}.{v_parts[1]}.{int(v_parts[2]) + 1}"
+        except:
+             pass # Fallback to default or handle better
+    
+    # 2. Create new
+    new_constitution = Constitution(
+        version=new_version,
+        preamble=data.preamble,
+        articles=json.loads(data.articles) if isinstance(data.articles, str) else data.articles,
+        prohibited_actions=data.prohibited_actions,
+        sovereign_preferences=data.sovereign_preferences,
+        is_active='Y',
+        effective_date=datetime.utcnow()
+    )
+    
+    db.add(new_constitution)
+    db.commit()
+    db.refresh(new_constitution)
+    
+    return new_constitution.to_dict()
 
 # ==================== WebSocket for Real-time Updates ====================
 

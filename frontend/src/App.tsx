@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
+import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import { useAuthStore } from '@/store/authStore';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { LoginPage } from '@/pages/LoginPage';
@@ -7,44 +8,18 @@ import { Dashboard } from '@/pages/Dashboard';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { ChatPage } from '@/pages/ChatPage';
 import { ChannelsPage } from '@/pages/ChannelsPage';
+import { ModelsPage } from '@/pages/ModelsPage';
 
 
-// Placeholder pages for routes
-function AgentsPage() {
-  return (
-    <div>
-      <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Agents</h1>
-      <p className="text-gray-600 dark:text-gray-400">Agent management interface coming soon...</p>
-    </div>
-  );
-}
+import { AgentsPage } from '@/pages/AgentsPage';
 
-function TasksPage() {
-  return (
-    <div>
-      <h1 className="text-3xl font-bold teximport { ChannelsPage } from '@/pages/ChannelsPage';t-gray-900 dark:text-white mb-4">Tasks</h1>
-      <p className="text-gray-600 dark:text-gray-400">Task management interface coming soon...</p>
-    </div>
-  );
-}
+import { TasksPage } from '@/pages/TasksPage';
+import { MonitoringPage } from '@/pages/MonitoringPage';
 
-function ConstitutionPage() {
-  return (
-    <div>
-      <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Constitution</h1>
-      <p className="text-gray-600 dark:text-gray-400">Constitution viewer coming soon...</p>
-    </div>
-  );
-}
 
-function ModelsPage() {
-  return (
-    <div>
-      <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">AI Models</h1>
-      <p className="text-gray-600 dark:text-gray-400">Model configuration interface coming soon...</p>
-    </div>
-  );
-}
+import { ConstitutionPage } from '@/pages/ConstitutionPage';
+
+
 
 export default function App() {
   const { user } = useAuthStore();
@@ -59,28 +34,31 @@ export default function App() {
         }}
       />
 
-      <Routes>
-        <Route
-          path="/login"
-          element={!user?.isAuthenticated ? <LoginPage /> : <Navigate to="/" replace />}
-        />
+      <ErrorBoundary>
+        <Routes>
+          <Route
+            path="/login"
+            element={!user?.isAuthenticated ? <LoginPage /> : <Navigate to="/" replace />}
+          />
 
-        <Route
-          path="/"
-          element={user?.isAuthenticated ? <MainLayout /> : <Navigate to="/login" replace />}
-        >
-          <Route index element={<Dashboard />} />
-          <Route path="chat" element={<ChatPage />} />
-          <Route path="agents" element={<AgentsPage />} />
-          <Route path="tasks" element={<TasksPage />} />
-          <Route path="constitution" element={<ConstitutionPage />} />
-          <Route path="models" element={<ModelsPage />} />
-          <Route path="channels" element={<ChannelsPage />} />
-          <Route path="settings" element={<SettingsPage />} />
-        </Route>
+          <Route
+            path="/"
+            element={user?.isAuthenticated ? <MainLayout /> : <Navigate to="/login" replace />}
+          >
+            <Route index element={<Dashboard />} />
+            <Route path="chat" element={<ChatPage />} />
+            <Route path="agents" element={<AgentsPage />} />
+            <Route path="tasks" element={<TasksPage />} />
+            <Route path="constitution" element={<ConstitutionPage />} />
+            <Route path="models" element={<ModelsPage />} />
+            <Route path="channels" element={<ChannelsPage />} />
+            <Route path="monitoring" element={<MonitoringPage />} />
+            <Route path="settings" element={<SettingsPage />} />
+          </Route>
 
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </ErrorBoundary>
     </Router>
   );
 }

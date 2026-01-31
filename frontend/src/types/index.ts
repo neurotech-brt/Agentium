@@ -85,3 +85,39 @@ export interface Constitution {
     sovereign_preferences: Record<string, any>;
     effective_date: string;
 }
+
+export interface AgentHealthReport {
+    id: string;
+    monitor: string;
+    subject: string;
+    status: 'healthy' | 'degraded' | 'non_responsive' | 'violation_detected' | 'termination_recommended';
+    health_score: number;
+    metrics: {
+        success_rate: number;
+        avg_duration: number;
+        violations: number;
+        response_time: number;
+    };
+    created_at: string;
+}
+
+export interface ViolationReport {
+    id: string;
+    reporter: string;
+    violator: string;
+    severity: 'minor' | 'moderate' | 'major' | 'critical';
+    type: string;
+    article?: string;
+    description: string;
+    status: string;
+    action_taken?: string;
+    created_at: string;
+}
+
+export interface MonitoringDashboard {
+    system_health: number;
+    active_alerts: number;
+    agent_health_breakdown: Record<string, number>;
+    recent_violations: ViolationReport[];
+    latest_health_reports: AgentHealthReport[];
+}

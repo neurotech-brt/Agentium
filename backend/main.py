@@ -20,6 +20,9 @@ from backend.api.routes import chat as chat_routes
 from backend.services.monitoring_service import MonitoringService
 from backend.api.routes import channels as channels_routes
 from backend.api.routes import webhooks as webhooks_router
+from fastapi.middleware.cors import CORSMiddleware
+from backend.core.auth import get_current_user
+from backend.api.routes import websocket as websocket_routes
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -57,16 +60,21 @@ app.include_router(model_routes.router)
 app.include_router(chat_routes.router)
 app.include_router(channels_routes.router)
 app.include_router(webhooks_router.router)
+app.include_router(websocket_routes.router)
 
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],  # Frontend dev servers
+    allow_origins=["http://localhost:3000", "http://localhost:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Protect sensitive routes
+@app.get("/api/protected-route")
+async def protected_route(current_user: dict = Depends(get_current_user)):
+    return {"message": "Hello", "user": current_user}
 # ==================== Health & System ====================
 
 @app.get("/health")

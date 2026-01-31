@@ -6,6 +6,7 @@ import { LoginPage } from '@/pages/LoginPage';
 import { Dashboard } from '@/pages/Dashboard';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { ChatPage } from '@/pages/ChatPage';
+import { ChannelsPage } from '@/pages/ChannelsPage';
 
 
 // Placeholder pages for routes
@@ -21,7 +22,7 @@ function AgentsPage() {
 function TasksPage() {
   return (
     <div>
-      <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-4">Tasks</h1>
+      <h1 className="text-3xl font-bold teximport { ChannelsPage } from '@/pages/ChannelsPage';t-gray-900 dark:text-white mb-4">Tasks</h1>
       <p className="text-gray-600 dark:text-gray-400">Task management interface coming soon...</p>
     </div>
   );

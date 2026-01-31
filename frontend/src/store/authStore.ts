@@ -1,6 +1,13 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { User } from '@/types';
+import { api } from '@/services/api';
+
+interface User {
+    id: string;
+    username: string;
+    role: string;
+    isAuthenticated: boolean;
+}
 
 interface AuthState {
     user: User | null;
@@ -9,12 +16,8 @@ interface AuthState {
     changePassword: (oldPassword: string, newPassword: string) => Promise<boolean>;
     isLoading: boolean;
     error: string | null;
+    checkAuth: () => Promise<boolean>;
 }
-
-const INITIAL_CREDENTIALS = {
-    username: 'admin',
-    password: 'admin'
-};
 
 export const useAuthStore = create<AuthState>()(
     persist(
@@ -26,47 +29,89 @@ export const useAuthStore = create<AuthState>()(
             login: async (username: string, password: string) => {
                 set({ isLoading: true, error: null });
 
-                // Simulate API call delay
-                await new Promise(resolve => setTimeout(resolve, 500));
+                try {
+                    const response = await api.post('/auth/login', {
+                        username,
+                        password
+                    });
 
-                if (username === get().user?.username || (username === INITIAL_CREDENTIALS.username && password === INITIAL_CREDENTIALS.password)) {
+                    const { access_token, user } = response.data;
+
+                    // Store JWT token
+                    localStorage.setItem('access_token', access_token);
+
                     set({
                         user: {
-                            id: '1',
-                            username: username,
-                            role: 'sovereign',
+                            ...user,
                             isAuthenticated: true
                         },
+                        isLoading: false,
+                        error: null
+                    });
+
+                    return true;
+                } catch (error: any) {
+                    set({
+                        error: error.response?.data?.detail || 'Invalid credentials',
                         isLoading: false
                     });
-                    return true;
+                    return false;
                 }
-
-                set({ error: 'Invalid credentials', isLoading: false });
-                return false;
             },
 
             logout: () => {
+                localStorage.removeItem('access_token');
                 set({ user: null, error: null });
             },
 
             changePassword: async (oldPassword: string, newPassword: string) => {
                 set({ isLoading: true, error: null });
 
-                await new Promise(resolve => setTimeout(resolve, 500));
+                try {
+                    // Call backend to change password (endpoint would need to be created)
+                    await api.post('/auth/change-password', {
+                        old_password: oldPassword,
+                        new_password: newPassword
+                    });
 
-                // In reality, verify oldPassword against stored hash
-                const currentUser = get().user;
-                if (!currentUser) {
-                    set({ error: 'Not authenticated', isLoading: false });
+                    set({ isLoading: false, error: null });
+                    return true;
+                } catch (error: any) {
+                    set({
+                        error: error.response?.data?.detail || 'Failed to change password',
+                        isLoading: false
+                    });
+                    return false;
+                }
+            },
+
+            checkAuth: async () => {
+                const token = localStorage.getItem('access_token');
+                if (!token) {
+                    set({ user: null });
                     return false;
                 }
 
-                // Update stored credentials (in memory for this demo, would be API call)
-                INITIAL_CREDENTIALS.password = newPassword;
+                try {
+                    // Verify token with backend
+                    const response = await api.post('/auth/verify', { token });
 
-                set({ isLoading: false });
-                return true;
+                    if (response.data.valid) {
+                        set({
+                            user: { ...response.data.user, isAuthenticated: true },
+                            error: null
+                        });
+                        return true;
+                    } else {
+                        localStorage.removeItem('access_token');
+                        set({ user: null });
+                        return false;
+                    }
+                } catch (error) {
+                    localStorage.removeItem('access_token');
+                    set({ user: null });
+                    return false;
+                }
             }
         }),
         {

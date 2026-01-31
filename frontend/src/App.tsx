@@ -7,6 +7,7 @@ import { Dashboard } from '@/pages/Dashboard';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { ChatPage } from '@/pages/ChatPage';
 
+
 // Placeholder pages for routes
 function AgentsPage() {
   return (
@@ -73,6 +74,7 @@ export default function App() {
           <Route path="tasks" element={<TasksPage />} />
           <Route path="constitution" element={<ConstitutionPage />} />
           <Route path="models" element={<ModelsPage />} />
+          <Route path="channels" element={<ChannelsPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>
 

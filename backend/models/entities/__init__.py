@@ -12,6 +12,15 @@ Hierarchy:
 - Audit: Transparency and compliance logging
 - Monitoring: Hierarchical oversight and agent health tracking
 """
+from backend.models.entities.channels import (
+    ExternalChannel,
+    ExternalMessage,
+    ChannelType,
+    ChannelStatus
+)
+
+
+
 from backend.models.entities.tasks import (
     Task,
     SubTask,
@@ -97,6 +106,12 @@ __all__ = [
     'AmendmentVoting',
     'DocumentType',
     'AmendmentStatus',
+
+
+    'ExternalChannel',
+    'ExternalMessage', 
+    'ChannelType',
+    'ChannelStatus'
     
     # Agents
     'Agent',

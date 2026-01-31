@@ -18,6 +18,8 @@ from backend.models.entities import (
 from backend.services.model_provider import ModelService
 from backend.api.routes import chat as chat_routes
 from backend.services.monitoring_service import MonitoringService
+from backend.api.routes import channels as channels_routes
+from backend.api.routes import webhooks as webhooks_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -53,6 +55,8 @@ app = FastAPI(
 )
 app.include_router(model_routes.router)
 app.include_router(chat_routes.router)
+app.include_router(channels_routes.router)
+app.include_router(webhooks_router.router)
 
 # CORS middleware
 app.add_middleware(

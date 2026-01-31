@@ -15,6 +15,15 @@ aiofiles==23.2.1
 email-validator==2.1.0
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# 📱 CHANNEL INTEGRATIONS 
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+httpx[http2]==0.26.0           # Async HTTP for WhatsApp/Slack APIs
+aiosmtplib==3.0.1              # Async SMTP for Email
+python-telegram-bot==20.8      # Telegram Bot API (optional, or use httpx)
+twilio==8.13.0                 # Twilio for SMS/WhatsApp fallback
+slack-sdk==3.27.0              # Official Slack SDK (optional)
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # 🗄️ DATABASE
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 sqlalchemy==2.0.25

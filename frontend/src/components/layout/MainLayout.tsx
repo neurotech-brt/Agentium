@@ -9,7 +9,8 @@ import {
     LogOut,
     Shield,
     Cpu,
-    Crown
+    Crown,
+    MessageCircle
 } from 'lucide-react';
 import { useEffect } from 'react';
 
@@ -33,6 +34,7 @@ export function MainLayout() {
         { path: '/chat', label: 'Command Interface', icon: Crown },
         { path: '/agents', label: 'Agents', icon: Users },
         { path: '/tasks', label: 'Tasks', icon: FileText },
+        { path: '/channels', label: 'Channels', icon: MessageCircle },
         { path: '/constitution', label: 'Constitution', icon: Shield },
         { path: '/models', label: 'AI Models', icon: Cpu },
         { path: '/settings', label: 'Settings', icon: Settings },

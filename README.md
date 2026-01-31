@@ -4,6 +4,8 @@
 
 Agentium transforms AI task management into a structured democracy. Your AI system mirrors a government hierarchy: a **Head of Council** (Prime Minister), **Council Members** (Parliament), and **Agents** (civil servants) work together to handle your tasks efficiently and transparently.
 
+It is a fully Dockerized, cross-platform AI system that runs on any computer, offering a complete web-based interface for control, monitoring, and governance, while also supporting command execution through channels like WhatsApp, Telegram, and more using a democratic, council-governed hierarchy of AI agents for safe, auditable automation.
+
 
 ![Development Status](https://img.shields.io/badge/status-active--development-brightgreen)
 

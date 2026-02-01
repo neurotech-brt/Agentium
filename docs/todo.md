@@ -8,7 +8,7 @@
 
 ---
 
-## Phase 0: Foundation Verification ✅ (Current)
+## Phase 0: Foundation Verification ✅ (Done)
 **Goal:** Ensure existing infrastructure is solid before building atop it.
 
 ### Checklist:
@@ -33,7 +33,7 @@ alembic init alembic
 
 ---
 
-## Phase 0.5: Knowledge Infrastructure 🧠 (Priority: CRITICAL - Parallel with Phase 1)
+## Phase 0.5: Knowledge Infrastructure 🧠 (Priority: CRITICAL - Parallel with Phase 1) (Current) 
 **Goal:** Establish the dual-storage architecture. Structured data in PostgreSQL, collective knowledge in Vector DB.  
 **Other systems Parallel:** They use local Markdown files for memory; you use Vector DB for shared agent memory + RAG.
 

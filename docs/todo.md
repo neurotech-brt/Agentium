@@ -14,9 +14,9 @@
 ### Checklist:
 - [x] PostgreSQL configuration (`models/database.py`)
 - [x] Entity hierarchy mapped (0xxxx/1xxxx/2xxxx/3xxxx)
-- [ ] **VERIFY:** Foreign key constraints between agent hierarchy levels
-- [ ] **VERIFY:** Index on `agent_type` + `status` for quick filtering
-- [ ] **VERIFY:** Constitution model supports versioning (amendment tracking)
+- [x] **VERIFY:** Foreign key constraints between agent hierarchy levels
+- [x] **VERIFY:** Index on `agent_type` + `status` for quick filtering
+- [x] **VERIFY:** Constitution model supports versioning (amendment tracking)
 
 ### Files to Review:
 - `backend/models/entities/agents.py` - Ensure `parent_id` exists for hierarchy
@@ -33,11 +33,11 @@ alembic init alembic
 
 ---
 
-## Phase 0.5: Knowledge Infrastructure 🧠 (Priority: CRITICAL - Parallel with Phase 1) (Current) 
+## Phase 0.5: Knowledge Infrastructure 🧠 (Priority: CRITICAL - Parallel with Phase 1) (Done)
 **Goal:** Establish the dual-storage architecture. Structured data in PostgreSQL, collective knowledge in Vector DB.  
 **Other systems Parallel:** They use local Markdown files for memory; you use Vector DB for shared agent memory + RAG.
 
-### 0.1 Vector Database Setup
+### 0.1 Vector Database Setup (Done)
 **Files to Update:**
 - `docker-compose.yml` - Add ChromaDB or Weaviate service
 - `backend/requirements.txt` - Add `chromadb-client`, `sentence-transformers`, `langchain`
@@ -68,12 +68,12 @@ class KnowledgeLibrary:
 ```
 
 **Acceptance Criteria:**
-- [ ] ChromaDB container running alongside PostgreSQL
-- [ ] Vector embeddings generated via `sentence-transformers` (all-MiniLM-L6-v2)
-- [ ] Metadata filters by agent_id, knowledge_type, timestamp
-- [ ] Council approval queue for new knowledge submissions
+- [x] ChromaDB container running alongside PostgreSQL
+- [x] Vector embeddings generated via `sentence-transformers` (all-MiniLM-L6-v2)
+- [x] Metadata filters by agent_id, knowledge_type, timestamp
+- [x] Council approval queue for new knowledge submissions
 
-### 0.2 RAG Pipeline Service
+### 0.2 RAG Pipeline Service (Done)
 **File:** `backend/services/knowledge_service.py`
 **Purpose:** Manage RAG operations and constitution storage
 
@@ -92,12 +92,12 @@ class KnowledgeService:
 - **Task Learnings** → Task 3xxxx submits to queue → Lead 2xxxx validates → Council 1xxxx approves → Vector DB
 
 **Acceptance Criteria:**
-- [ ] Constitution queryable via semantic search (not just regex)
-- [ ] "What does the constitution say about X?" returns relevant articles
-- [ ] Knowledge submissions go to moderation queue (Council dashboard)
-- [ ] RAG context automatically prepended to agent prompts
+- [x] Constitution queryable via semantic search (not just regex)
+- [x] "What does the constitution say about X?" returns relevant articles
+- [x] Knowledge submissions go to moderation queue (Council dashboard)
+- [x] RAG context automatically prepended to agent prompts
 
-### 0.3 Initialization Protocol (New)
+### 0.3 Initialization Protocol (Done)
 **File:** `backend/services/initialization_service.py`
 **Purpose:** Genesis protocol for founding the governance system
 
@@ -125,12 +125,12 @@ class KnowledgeService:
 ```
 
 **Acceptance Criteria:**
-- [ ] Initialization requires 3 Council votes to complete (anti-tyranny)
-- [ ] Country name persisted in both PostgreSQL (config) and Vector DB (constitution)
-- [ ] Original constitution retrievable even after amendments
-- [ ] Initialization logs stored in `docs_ministry/genesis_log.md`
+- [x] Initialization requires 3 Council votes to complete (anti-tyranny)
+- [x] Country name persisted in both PostgreSQL (config) and Vector DB (constitution)
+- [x] Original constitution retrievable even after amendments
+- [x] Initialization logs stored in `docs_ministry/genesis_log.md`
 
-### 0.4 Knowledge Governance Layer
+### 0.4 Knowledge Governance Layer (Done)
 **File:** `backend/services/knowledge_governance.py`
 **Purpose:** Council-managed approval workflow for collective memory
 
@@ -155,14 +155,14 @@ If Rejected: Archive + notify with reason
 - Manage constitution versioning in Vector DB
 
 **Acceptance Criteria:**
-- [ ] Knowledge submission generates Council vote (quorum: 50%)
-- [ ] Rejected knowledge stored in `rejected/` collection for analysis
-- [ ] Automatic categorization (constitution, task_learning, domain_knowledge)
-- [ ] Knowledge retention policy (auto-archive after 365 days unless pinned)
+- [x] Knowledge submission generates Council vote (quorum: 50%)
+- [x] Rejected knowledge stored in `rejected/` collection for analysis
+- [x] Automatic categorization (constitution, task_learning, domain_knowledge)
+- [x] Knowledge retention policy (auto-archive after 365 days unless pinned)
 
 ---
 
-## Phase 1: The Agent Orchestration Bus 🚌 (Priority: CRITICAL)
+## Phase 1: The Agent Orchestration Bus 🚌 (Priority: CRITICAL) (Here)
 **Goal:** Create the central router that Other systems calls the "Gateway".  
 **Gap Identified:** No central message bus to route between hierarchical agents.
 

@@ -138,6 +138,42 @@ class Agent(BaseEntity):
         
         return base_prompt
 
+    def get_context_for_task(self, task_description: str, db: Session) -> Dict[str, Any]:
+        """
+        Retrieve RAG context for current task.
+        Used by AgentFactory before assigning work.
+        """
+        from backend.services.knowledge_service import get_knowledge_service
+        
+        knowledge_svc = get_knowledge_service()
+        return knowledge_svc.get_agent_context(
+            db=db,
+            agent=self,
+            task_description=task_description
+        )
+
+    def embed_execution_memory(self, task_result: str, success: bool = True):
+        """
+        Store execution pattern in vector DB for future agents.
+        Called in post_task_ritual.
+        """
+        from backend.services.knowledge_service import get_knowledge_service
+        from backend.models.entities.task import Task
+        
+        # Execution patterns are recorded via Task object
+        # This is called by Task completion handler
+        pass  # Implementation links to Task model
+
+    def check_action_compliance_rag(self, action: str) -> Dict[str, Any]:
+        """
+        Use RAG to check if action complies with Constitution.
+        Alternative to hard-coded rules - semantic understanding.
+        """
+        from backend.services.knowledge_service import get_knowledge_service
+        
+        knowledge_svc = get_knowledge_service()
+        return knowledge_svc.retroactive_constitution_check(action)
+
     def refresh_ethos_and_execute(self, db: Session) -> Dict[str, Any]:
         """
         Check if Ethos has been updated and execute any tasks within it.

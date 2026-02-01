@@ -13,6 +13,7 @@ services:
       POSTGRES_PASSWORD: agentium
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     ports:
       - "5432:5432"
     healthcheck:
@@ -24,44 +25,149 @@ services:
       - agentium-network
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # ChromaDB Vector Store (Phase 0.5)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: agentium-chroma
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+      - ANONYMIZED_TELEMETRY=FALSE
+    ports:
+      - "8001:8000" # Changed to 8001 to avoid conflict with backend
+    networks:
+      - agentium-network
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Redis (Celery Task Queue)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  redis:
+    image: redis:7-alpine
+    container_name: agentium-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - agentium-network
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # Backend API (FastAPI)
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile # We placed it in backend/, not docker/backend/
+      dockerfile: Dockerfile
     container_name: agentium-backend
     environment:
-      # Database (matches our database.py defaults)
+      # Database
       - DATABASE_URL=postgresql://agentium:agentium@postgres:5432/agentium
 
-      # Security (required for API key encryption)
+      # Vector Store (Phase 0.5)
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - CHROMA_PERSIST_DIR=/app/chroma_data
+
+      # Redis/Celery
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+
+      # Security
       - SECRET_KEY=${SECRET_KEY:-your-super-secret-key-change-in-production}
       - ENCRYPTION_KEY=${ENCRYPTION_KEY:-generate-with-python-cryptography}
 
       # Application
       - DEBUG=${DEBUG:-false}
       - APP_NAME=Agentium
+      - ENVIRONMENT=${ENVIRONMENT:-development}
 
       # CORS
       - ALLOWED_ORIGINS=http://localhost:3000,http://localhost:5173,http://frontend:3000
 
-      # AI Providers (optional - can also be set via frontend UI)
-      # These are only used for initial seeding if needed
+      # AI Providers
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
 
     ports:
       - "8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
+      chromadb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     volumes:
-      - ./backend:/app # For development hot-reload
+      - ./backend:/app
+      - chroma_data:/app/chroma_data:ro # Read access to persist Chroma data
     networks:
       - agentium-network
     restart: unless-stopped
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload # Remove --reload for production
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Celery Worker (Background Tasks)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: agentium-celery
+    environment:
+      - DATABASE_URL=postgresql://agentium:agentium@postgres:5432/agentium
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - redis
+      - postgres
+      - chromadb
+    networks:
+      - agentium-network
+    command: celery -A main.celery worker --loglevel=info --concurrency=4
+    restart: unless-stopped
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # Celery Beat (Scheduler)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: agentium-celery-beat
+    environment:
+      - DATABASE_URL=postgresql://agentium:agentium@postgres:5432/agentium
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - redis
+      - postgres
+      - chromadb
+    networks:
+      - agentium-network
+    command: celery -A main.celery beat --loglevel=info
+    restart: unless-stopped
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # Frontend (React)
@@ -69,7 +175,7 @@ services:
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile # Create minimal React Dockerfile
+      dockerfile: Dockerfile
     container_name: agentium-frontend
     ports:
       - "3000:3000"
@@ -81,21 +187,15 @@ services:
     networks:
       - agentium-network
     restart: unless-stopped
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  # Optional: Redis (for future caching)
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  # redis:
-  #   image: redis:7-alpine
-  #   container_name: agentium-redis
-  #   ports:
-  #     - "6379:6379"
-  #   volumes:
-  #     - redis_data:/data
-  #   networks:
-  #     - agentium-network
 
 volumes:
   postgres_data:
+    driver: local
+  chroma_data:
+    # Phase 0.5: Vector store persistence
+    driver: local
+  redis_data:
+    # Phase 0.5: Redis persistence
     driver: local
 
 networks:

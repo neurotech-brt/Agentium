@@ -122,7 +122,7 @@ When Agentium boots for the first time:
 
 **Storage**: Dual-mode  
 - **PostgreSQL**: Version control, amendment history, audit trail  
-- **ChromaDB**: Semantic embeddings for RAG queries
+- **ChromaDB**: Semantic embeddings for RAG queries world knowledge.
 
 **Access Control**:
 - **Read**: All agents (via `query_constitution()`)
@@ -136,7 +136,7 @@ When Agentium boots for the first time:
 
 ### 2. Individual Agent Ethos
 
-Every agent has a personalized Ethos document (stored in Vector DB):
+Every agent has a personalized Ethos document:
 - Created by parent agent upon spawning using template
 - Defines should/should-not rules for that agent's role
 - Task agents: reviewed by Lead Agents

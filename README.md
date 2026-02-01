@@ -321,7 +321,7 @@ Results aggregated back to Head → You
 | **Vector Knowledge** | ChromaDB, Sentence-Transformers | RAG, constitution, learnings |
 | **AI Models** | Local (Kimi, GPT4, All) + API (OpenAI, Anthropic) | Agent intelligence |
 | **Container** | Docker, Compose, Healthchecks | Cross-platform deployment |
-| **Security** | JWT, OAuth2, AES-256 | Per-agent authentication |
+| **Security** | JWT | Per-agent authentication |
 
 ---
 

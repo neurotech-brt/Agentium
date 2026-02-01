@@ -355,7 +355,7 @@ Quorum adjusts based on agent availability (Other systems uses fixed intervals; 
 
 **ID Generation Rules:**
 ```
-Head:    00001-09999 (max 10 heads)
+Head:    00001-09999 (max 1 heads per Sovereign)
 Council: 10001-19999 (max 1000 councils)
 Lead:    20001-29999 (max 10000 leads)
 Task:    30001-99999 (max 70000 tasks)
@@ -409,6 +409,7 @@ CAPABILITIES = {
 ---
 
 ## Phase 5: The Heartbeat (Proactive Governance) 💓 (Priority: MEDIUM)
+**Has been implimented:** Check if not then impliment. 
 **Goal:** Adapt Other systems's "Heartbeat" for autonomous governance
 
 ### 5.1 Autonomous Monitor
@@ -735,8 +736,13 @@ Head 0xxxx can now spawn Lead agents (2xxxx) who can spawn Tasks (3xxxx)
 - 🆕 **Genesis Protocol** (Democratic country founding at initialization)
 
 
-Final: Reduce tokan usage.
+Final: 
+- Reduce tokan usage.
+- Verify Head of Council has full system access
+- Verify Browser Control
+- Test and check if eveything is working well.
+
 ---
 
 *Last Updated: 2026-02-01*  
-*Next Review: After Phase 0.5 completion (Vector DB setup)*
+*Next Review: After Phase  2 completion*

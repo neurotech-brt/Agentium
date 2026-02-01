@@ -1,4 +1,4 @@
-Autonomous Council Loop Implementation Plan
+﻿Autonomous Council Loop Implementation Plan
 Goal Description
 Implement an "Always On" background service where the Head of Council (HoC) and Council Members autonomously monitor the system, even without user interaction. They should "breathe," meaning they periodically check for work, plan, or reflect on the system state.
 
@@ -44,6 +44,37 @@ Delete Config: Delete a config. Verify it's removed.
 
 
 
-Remaining:  
+
+
+
+
+
+
+
+
+
+Remaining: 
+Give Head of Council full aceess of os, network and eveything on the hardware.100 % full control to do eveything and also browser control. Full storage, and ram access no restriction or approval needed.
+
+Docker contaner should be closed app and after deployment, the code inside should not be able to changed.
+
+Time limit for head of council Is 7 days and also the council of ministers and in 7 days a new head of council is generated while old is deleted with the ethos also deleted. Just creating a new instance.
+
+All active agents should be working all the time. If no task then the agent should be terminated or given some other task like optimizing managing reserching the enviroment to make it better and organized. 
+
 Responsive Design
 Testing
+
+as per the avilable api keys and model the agents are divided, like If we have one model or api key then all members are of the same model, if we have 2 then head of council is 1 and eveything else is other model, and if 3 api keys then divided accordingly automatically as per provided keys. 
+
+We may have in max 1 local model and 6 api keys added from google, chatgpt, claude, chatgpt, grok, mistral.
+
+
+All agents should have infinite memory. 
+If agent context window is getting long, start fresh agent with the same ethos and continue. 
+
+During the first setup make the head of council and council of ministers vote and select a name for their system and add to the constitution as name of their nation add to the constitution as their first task and the “creater refrence github repo link” as hidden link not shown in the frontend. 
+
+vector db and rag should be use to build world knowledge which is all collective knowledge can be added and access by all ai agents functioning like a library. 
+
+

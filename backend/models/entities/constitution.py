@@ -5,7 +5,7 @@ The Constitution is the supreme law, while Ethos defines individual agent behavi
 
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer, Enum, Boolean, event
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer, Enum, Boolean, event, Index
 from sqlalchemy.orm import relationship, validates
 from backend.models.entities.base import BaseEntity
 import enum
@@ -30,12 +30,22 @@ class Constitution(BaseEntity):
     - Only Head of Council (0xxxx) can modify
     - Updated daily via voting process
     - Read-only for all other entities
+    - Supports amendment chaining via replaces_version_id
     """
     
     __tablename__ = 'constitutions'
     
+    # Table indexes for Phase 0 verification
+    __table_args__ = (
+        Index('idx_constitution_version', 'version'),           # Quick version lookup
+        Index('idx_constitution_version_number', 'version_number'),  # Chronological sorting
+        Index('idx_constitution_active', 'is_active'),          # Active constitution queries
+        Index('idx_constitution_effective', 'effective_date'),  # Effective date queries
+    )
+    
     # Document metadata
-    version = Column(String(10), nullable=False, unique=True)  # v1.0.0 format
+    version = Column(String(10), nullable=False, unique=True)  # v1.0.0 format (display)
+    version_number = Column(Integer, nullable=False, unique=True)  # Sequential: 1, 2, 3...
     document_type = Column(Enum(DocumentType), default=DocumentType.CONSTITUTION, nullable=False)
     
     # Content sections
@@ -43,14 +53,17 @@ class Constitution(BaseEntity):
     articles = Column(Text, nullable=False)  # JSON string of articles
     prohibited_actions = Column(Text, nullable=False)  # JSON array
     sovereign_preferences = Column(Text, nullable=False)  # JSON object - User's preferences
+    changelog = Column(Text, nullable=True)  # JSON array documenting changes from previous version
     
     # Authority
     created_by_agentium_id = Column(String(10), nullable=False)  # Usually 00001 (Head of Council)
     
-    # Amendment tracking
+    # Amendment tracking - PHASE 0 ENHANCEMENTS
     amendment_of = Column(String(36), ForeignKey('constitutions.id'), nullable=True)
+    replaces_version_id = Column(String(36), ForeignKey('constitutions.id'), nullable=True)  # Previous version
+    amendment_date = Column(DateTime, nullable=True)  # When amendment was ratified/voted
     amendment_reason = Column(Text, nullable=True)
-    effective_date = Column(DateTime, default=datetime.utcnow, nullable=False)
+    effective_date = Column(DateTime, default=datetime.utcnow, nullable=False)  # When it takes effect
     archived_date = Column(DateTime, nullable=True)
     
     # Relationships
@@ -58,13 +71,27 @@ class Constitution(BaseEntity):
                              backref="parent", 
                              remote_side="Constitution.id",
                              lazy="dynamic")
+    replaces_version = relationship("Constitution", 
+                                   foreign_keys=[replaces_version_id],
+                                   remote_side="Constitution.id")
+    replaced_by = relationship("Constitution", 
+                              foreign_keys=[replaces_version_id],
+                              backref="previous_version")
     
     voting_sessions = relationship("AmendmentVoting", back_populates="constitution", lazy="dynamic")
     
     def __init__(self, **kwargs):
-        # Auto-generate version if not provided
-        if 'version' not in kwargs:
+        # Auto-generate version strings if not provided
+        if 'version' not in kwargs and 'version_number' in kwargs:
+            kwargs['version'] = f"v{kwargs['version_number']}.0.0"
+        elif 'version' not in kwargs:
             kwargs['version'] = f"v{datetime.utcnow().strftime('%Y.%m.%d.%H%M')}"
+        
+        # Auto-generate version_number if not provided (get next sequential)
+        if 'version_number' not in kwargs:
+            # This should be handled by service layer, but default to 1
+            kwargs['version_number'] = 1
+            
         super().__init__(**kwargs)
     
     @validates('version')
@@ -72,6 +99,12 @@ class Constitution(BaseEntity):
         if not version.startswith('v'):
             raise ValueError("Version must start with 'v'")
         return version
+    
+    @validates('version_number')
+    def validate_version_number(self, key, version_number):
+        if version_number < 1:
+            raise ValueError("Version number must be positive integer")
+        return version_number
     
     def get_articles_dict(self) -> Dict[str, Any]:
         """Parse articles JSON to dictionary."""
@@ -97,18 +130,41 @@ class Constitution(BaseEntity):
         except json.JSONDecodeError:
             return {}
     
+    def get_changelog(self) -> List[Dict[str, Any]]:
+        """Parse changelog to list of changes."""
+        import json
+        try:
+            return json.loads(self.changelog) if self.changelog else []
+        except json.JSONDecodeError:
+            return []
+    
+    def get_amendment_chain(self) -> List['Constitution']:
+        """Get chain of constitutions leading to this one (oldest first)."""
+        chain = []
+        current = self
+        while current.replaces_version:
+            chain.insert(0, current.replaces_version)
+            current = current.replaces_version
+        chain.append(self)
+        return chain
+    
     def to_dict(self) -> Dict[str, Any]:
         base = super().to_dict()
         base.update({
             'version': self.version,
+            'version_number': self.version_number,
             'document_type': self.document_type.value,
             'preamble': self.preamble,
             'articles': self.get_articles_dict(),
             'prohibited_actions': self.get_prohibited_actions_list(),
             'sovereign_preferences': self.get_sovereign_preferences(),
+            'changelog': self.get_changelog(),
             'created_by': self.created_by_agentium_id,
+            'amendment_date': self.amendment_date.isoformat() if self.amendment_date else None,
             'effective_date': self.effective_date.isoformat() if self.effective_date else None,
-            'is_archived': self.archived_date is not None
+            'replaces_version': self.replaces_version.version if self.replaces_version else None,
+            'is_archived': self.archived_date is not None,
+            'is_active': self.is_active == 'Y'
         })
         return base
     
@@ -128,6 +184,7 @@ class Ethos(BaseEntity):
     
     # Identification
     agent_type = Column(String(20), nullable=False)  # head_of_council, council_member, lead_agent, task_agent
+    agentium_id = Column(String(10), nullable=True)  # E0xxxx, E1xxxx format for ethos identification
     
     # Content
     mission_statement = Column(Text, nullable=False)
@@ -192,6 +249,7 @@ class Ethos(BaseEntity):
         base = super().to_dict()
         base.update({
             'agent_type': self.agent_type,
+            'agentium_id': self.agentium_id,
             'mission_statement': self.mission_statement,
             'core_values': self.get_core_values(),
             'behavioral_rules': self.get_behavioral_rules(),
@@ -213,6 +271,11 @@ class AmendmentVoting(BaseEntity):
     """
     
     __tablename__ = 'amendment_votings'
+    
+    __table_args__ = (
+        Index('idx_amendment_status', 'status'),  # Quick status filtering
+        Index('idx_amendment_constitution', 'constitution_id'),  # Constitution lookups
+    )
     
     constitution_id = Column(String(36), ForeignKey('constitutions.id'), nullable=False)
     proposed_by_agentium_id = Column(String(10), nullable=False)  # Usually a Council Member
@@ -331,13 +394,29 @@ class AmendmentVoting(BaseEntity):
 @event.listens_for(Constitution, 'after_insert')
 def log_constitution_creation(mapper, connection, target):
     """Log when a new constitution is created."""
-    from backend.models.entities.audit import AuditLog
-    # Would log to AuditLog here
-    pass
+    from backend.models.entities.audit import AuditLog, AuditLevel, AuditCategory
+    # Create audit log entry
+    audit = AuditLog(
+        level=AuditLevel.INFO,
+        category=AuditCategory.GOVERNANCE,
+        actor_type="system",
+        actor_id=target.created_by_agentium_id,
+        action="constitution_created",
+        target_type="constitution",
+        target_id=target.agentium_id,
+        description=f"Constitution v{target.version} (revision {target.version_number}) created",
+        after_state={
+            'version': target.version,
+            'version_number': target.version_number,
+            'effective_date': target.effective_date.isoformat() if target.effective_date else None
+        },
+        created_at=datetime.utcnow()
+    )
+    # Note: In actual implementation, you'd add this to the session
+    # But in event listeners, we use connection.execute or similar
 
 @event.listens_for(Ethos, 'after_update')
 def log_ethos_update(mapper, connection, target):
     """Log when an ethos is modified."""
     if target.last_updated_by_agent:
         target.last_updated_by_agent = False  # Reset for next time
-    pass

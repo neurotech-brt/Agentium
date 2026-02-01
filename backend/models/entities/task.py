@@ -8,6 +8,7 @@ from typing import Optional, List, Dict, Any
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer, Enum, Boolean, JSON
 from sqlalchemy.orm import relationship, validates
 from backend.models.entities.base import BaseEntity
+from backend.models.entities.agents import Agent  
 import enum
 
 class TaskPriority(str, enum.Enum):
@@ -46,6 +47,7 @@ class TaskType(str, enum.Enum):
     AUTOMATION = "automation"
     ANALYSIS = "analysis"
     COMMUNICATION = "communication"
+    CONSTITUTION_READ = "constitution_read" 
     # IDLE OPTIMIZATION TASKS (NEW)
     VECTOR_MAINTENANCE = "vector_maintenance"      # ChromaDB optimization
     STORAGE_DEDUPE = "storage_dedupe"              # Database deduplication
@@ -241,11 +243,61 @@ class Task(BaseEntity):
         return [subtask]
     
     def assign_to_task_agents(self, task_agent_ids: List[str]):
-        """Assign subtasks to Task Agents."""
+        """
+        Assign subtasks to Task Agents - IMMEDIATE assignment.
+        Pre-task ritual is FAST (Constitution awareness only).
+        """
+        # Assign immediately - no blocking operations
         self.assigned_task_agent_ids = task_agent_ids
         self.status = TaskStatus.IN_PROGRESS
         self.started_at = datetime.utcnow()
+        
+        # Quick pre-task check (non-blocking)
+        from backend.models.database import get_db_context
+        with get_db_context() as db:
+            for agent_id in task_agent_ids:
+                agent = db.query(Agent).filter_by(agentium_id=agent_id).first()
+                if agent:
+                    # FAST: Only Constitution awareness, no ethos execution
+                    ritual = agent.pre_task_ritual(db)
+                    if ritual["constitution_refreshed"]:
+                        print(f"📖 Agent {agent_id} refreshed Constitution awareness (v{ritual['constitution_version']})")
+        
         self._log_status_change("execution_started", self.lead_agent_id)
+
+    def complete(self, result_summary: str, result_data: Dict = None):
+        """Mark task as completed - Ethos execution happens here (post-task)."""
+        from backend.models.database import get_db_context
+        
+        self.status = TaskStatus.COMPLETED
+        self.result_summary = result_summary
+        self.result_data = result_data or {}
+        self.completion_percentage = 100
+        self.completed_at = datetime.utcnow()
+        
+        if self.started_at:
+            self.time_actual = int((self.completed_at - self.started_at).total_seconds())
+        
+        # Update agents and trigger post-task rituals (ethos execution)
+        with get_db_context() as db:
+            if self.assigned_task_agent_ids:
+                for agent_id in self.assigned_task_agent_ids:
+                    agent = db.query(Agent).filter_by(agentium_id=agent_id).first()
+                    if agent:
+                        # Mark task complete on agent
+                        agent.complete_task(success=True)
+                        
+                        # POST-TASK: Execute ethos updates (self-improvement)
+                        # This doesn't block next assignment since task is already done
+                        post_results = agent.post_task_ritual(db)
+                        
+                        if post_results["ethos_executed"]:
+                            print(f"✨ Agent {agent_id} completed {post_results['ethos_tasks_completed']} ethos improvements")
+                        if post_results["constitution_refreshed"]:
+                            print(f"📖 Agent {agent_id} refreshed Constitution (post-task)")
+        
+        self._log_status_change("completed", self.assigned_task_agent_ids[0] if self.assigned_task_agent_ids else "System")
+        self._update_agent_stats(success=True)
     
     def update_progress(self, percentage: int, note: str = None):
         """Update task completion percentage."""

@@ -1,54 +1,176 @@
 """
 Chat service for Head of Council interactions.
-Handles message processing, task creation, and context management.
+Handles message processing, task creation, context management, and reincarnation.
 """
 
-import re
 from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 
 from backend.models.entities import Agent, HeadOfCouncil, Task, TaskPriority, TaskType
 from backend.models.entities.audit import AuditLog, AuditLevel, AuditCategory
+from backend.services.context_manager import context_manager
+from backend.services.reincarnation_service import reincarnation_service
+from backend.services.clarification_service import clarification_service
+from backend.services.model_provider import ModelService
 
 class ChatService:
-    """Service for handling Sovereign ↔ Head of Council chat."""
+    """Service for handling Sovereign ↔ Head of Council chat with reincarnation support."""
     
     @staticmethod
-    async def process_message(
-        head: HeadOfCouncil,
-        message: str,
-        db: Session
-    ) -> Dict[str, Any]:
+    async def process_message(head: HeadOfCouncil, message: str, db: Session):
         """
-        Process a message and return response.
-        Non-streaming version.
+        Process message with context management and potential reincarnation.
+        Preserves task state across reincarnations.
         """
+        # Register context tracking if not exists
+        config = head.get_model_config(db)
+        model_name = config.default_model if config else "default"
+        
+        context_manager.register_agent(
+            head.agentium_id, 
+            model_name
+        )
+        
+        # Get provider
         provider = await ModelService.get_provider("sovereign")
         if not provider:
             raise ValueError("No model provider available")
         
+        # Get predecessor context if this agent recently reincarnated
+        predecessor_context = clarification_service.get_predecessor_context(head, db)
+        
+        # Get system prompt and context
         system_prompt = head.get_system_prompt()
         context = await ChatService.get_system_context(db)
+        
+        # If confused about task, consult parent (for reincarnated agents)
+        consultation_result = None
+        if "[System: I've evolved" in message or "predecessor" in message.lower():
+            consultation_result = clarification_service.consult_supervisor(head, db, 
+                "I was just reincarnated. What was my predecessor doing?", 
+                "Post-reincarnation clarification")
         
         full_prompt = f"""{system_prompt}
 
 Current System State:
 {context}
 
-Address the Sovereign respectfully. If they issue a command that requires execution, indicate that you will create a task."""
+{if consultation_result}
+Recent consultation with parent: {consultation_result['guidance']}
+{/if}
 
+Address the Sovereign respectfully. If they issue a command that requires execution, indicate that you will create a task."""
+        
+        # Generate response
         result = await provider.generate(full_prompt, message)
+        
+        # Update context usage
+        tokens_used = result.get("tokens_used", 0)
+        context_status = context_manager.update_usage(head.agentium_id, tokens_used)
         
         # Analyze if we should create a task
         task_info = await ChatService.analyze_for_task(head, message, result["content"], db)
         
+        # Get current task ID if any (for preservation during reincarnation)
+        current_task_id = head.current_task_id
+        task_progress = None
+        if current_task_id:
+            current_task = db.query(Task).filter_by(id=current_task_id).first()
+            if current_task:
+                task_progress = current_task.completion_percentage
+        
+        # Check if reincarnation needed (context critical)
+        if context_status and context_status.is_critical:
+            print(f"🔄 Context critical for {head.agentium_id}, triggering reincarnation...")
+            
+            # Get conversation context for summarization
+            conversation_context = f"""User: {message}
+Agent: {result['content']}
+System Context: {context}
+Task Created: {task_info.get('created', False)}
+Current Task: {current_task_id or 'None'}
+Progress: {task_progress or 'N/A'}%"""
+            
+            # Execute reincarnation WITH task preservation
+            reincarnation_result = await reincarnation_service.check_and_trigger_reincarnation(
+                agent=head,
+                db=db,
+                conversation_context=conversation_context,
+                current_task_id=current_task_id,
+                task_progress=str(task_progress) if task_progress else None
+            )
+            
+            if reincarnation_result and reincarnation_result["successor_spawned"]:
+                # Continue with successor
+                new_head_id = reincarnation_result["successor_id"]
+                new_head = db.query(HeadOfCouncil).filter_by(agentium_id=new_head_id).first()
+                
+                if new_head:
+                    # Get lineage for the new agent
+                    lineage_info = clarification_service.get_lineage(new_head, db)
+                    
+                    response_text = f"""{result["content"]}
+
+[System Notice: I have evolved from {head.agentium_id} to {new_head_id} to serve you with renewed clarity. My context window has been refreshed through reincarnation.]
+
+[Agent Reference: This is incarnation #{reincarnation_result.get('incarnation_number', 1) + 1}. {f"Task {reincarnation_result.get('task_transferred')} transferred to successor." if reincarnation_result.get('task_transferred') else "No active task transferred."}]
+
+[If confused: New agent can consult parent {new_head.parent.agentium_id if new_head.parent else 'None'} or check inherited ethos for predecessor wisdom.]"""
+                    
+                    return {
+                        "content": response_text,
+                        "model": result["model"],
+                        "reincarnated": True,
+                        "old_agent_id": head.agentium_id,
+                        "new_agent_id": new_head_id,
+                        "incarnation_number": reincarnation_result.get("incarnation_number", 1) + 1,
+                        "task_transferred": reincarnation_result.get("task_transferred"),
+                        "lineage": lineage_info,
+                        "predecessor_context": predecessor_context if predecessor_context.get("has_predecessor") else None,
+                        "task_created": task_info.get("created"),
+                        "task_id": task_info.get("task_id")
+                    }
+        
         return {
             "content": result["content"],
             "model": result["model"],
-            "task_created": task_info["created"],
-            "task_id": task_info.get("task_id")
+            "tokens_used": result.get("tokens_used"),
+            "latency_ms": result.get("latency_ms"),
+            "task_created": task_info.get("created"),
+            "task_id": task_info.get("task_id"),
+            "reincarnated": False,
+            "consultation": consultation_result if consultation_result else None
         }
     
+    @staticmethod
+    async def process_confused_agent_query(
+        agent: Agent,
+        query: str,
+        db: Session
+    ) -> Dict[str, Any]:
+        """
+        Handle query from reincarnated agent who is confused about task.
+        Consults supervisor and returns guidance.
+        """
+        # Consult parent/supervisor
+        consultation = clarification_service.consult_supervisor(
+            agent=agent,
+            db=db,
+            question=query,
+            context="Post-reincarnation confusion"
+        )
+        
+        # Also get predecessor context
+        predecessor = reincarnation_service.get_predecessor_context(agent, db)
+        
+        return {
+            "consultation": consultation,
+            "predecessor_info": predecessor,
+            "recommendation": consultation.get("recommendation"),
+            "can_escalate": consultation.get("escalation_available"),
+            "advice": "Follow parent's guidance or review inherited ethos behavioral rules for [LIFE_X_WISDOM] entries."
+        }
+        
     @staticmethod
     async def get_system_context(db: Session) -> str:
         """Get current system state for context."""
@@ -63,11 +185,19 @@ Address the Sovereign respectfully. If they issue a command that requires execut
         # Get active tasks
         pending_tasks = db.query(Task).filter(Task.status.in_(["pending", "deliberating", "in_progress"])).count()
         
+        # Get reincarnation stats
+        reincarnation_info = ""
+        for agent in agents:
+            if agent.is_active == 'Y':
+                stats = context_manager.get_stats(agent.agentium_id)
+                if stats and stats.get('incarnation', 1) > 1:
+                    reincarnation_info += f"\n  {agent.agentium_id}: Incarnation {stats['incarnation']}"
+        
         return f"""- Head of Council: {'Active' if head_count > 0 else 'Inactive'}
 - Council Members: {council_count} active
 - Lead Agents: {lead_count} active  
 - Task Agents: {task_count} active
-- Pending Tasks: {pending_tasks}"""
+- Pending Tasks: {pending_tasks}{reincarnation_info if reincarnation_info else ""}"""
     
     @staticmethod
     async def analyze_for_task(

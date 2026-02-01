@@ -141,6 +141,7 @@ Every agent has a personalized Ethos document:
 - Task agents: reviewed by Lead Agents
 - Lead agents: reviewed by Head of Council
 - Agents may query parent for clarification
+- Agent Ethos is stored in PostgreSQL
 
 ### 3. Democratic Voting System
 

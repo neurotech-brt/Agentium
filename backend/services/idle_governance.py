@@ -52,7 +52,25 @@ class IdleGovernanceEngine:
             'council_members': ['00001', '10001', '10002'],
             'timestamp': datetime.utcnow().isoformat()
         })
-    
+
+    async def _execute_constitution_read(self, db: Session, agent: Agent) -> Dict[str, Any]:
+        """Execute constitution awareness reading during idle - NO ACTIONS, just awareness."""
+        # Force constitution read even if not 24h (idle time is good for study)
+        refreshed = agent.check_constitution_freshness(db, force=True)
+        
+        if refreshed:
+            return {
+                'summary': f"Agent {agent.agentium_id} refreshed awareness of Constitution v{agent.constitution_version} during idle period. No actions taken - pure awareness.",
+                'constitution_version': agent.constitution_version,
+                'read_count': agent.constitution_read_count,
+                'awareness_only': True
+            }
+        else:
+            return {
+                'summary': "Constitution still fresh, no re-read needed",
+                'constitution_version': agent.constitution_version
+            }
+        
     async def stop(self):
         """Stop the idle governance engine."""
         if not self.is_running:
@@ -136,14 +154,18 @@ class IdleGovernanceEngine:
         if agent.agentium_id == '00001':
             # Head of Council - Coordination and high-level optimization
             task_type = random.choice([
-                TaskType.CONSTITUTION_REFINE,
-                TaskType.ETHOS_OPTIMIZATION,
-                TaskType.PREDICTIVE_PLANNING
+                TaskType.CONSTITUTION_REFINE,    # Propose improvements
+                TaskType.CONSTITUTION_READ,       # Study/awareness
+                TaskType.PREDICTIVE_PLANNING,
+                TaskType.ETHOS_OPTIMIZATION
             ])
-        elif agent.persistent_role == PersistentAgentRole.SYSTEM_OPTIMIZER.value:
+        elif agent.persistent_role in [PersistentAgentRole.SYSTEM_OPTIMIZER.value, 
+                               PersistentAgentRole.STRATEGIC_PLANNER.value]:
             # Council 10001 - System optimization
             task_type = random.choice([
                 TaskType.VECTOR_MAINTENANCE,
+                TaskType.CONSTITUTION_READ,
+                TaskType.ETHOS_OPTIMIZATION,
                 TaskType.STORAGE_DEDUPE,
                 TaskType.AUDIT_ARCHIVAL,
                 TaskType.CACHE_OPTIMIZATION
@@ -196,6 +218,7 @@ class IdleGovernanceEngine:
             TaskType.CONSTITUTION_REFINE: self._execute_constitution_refine,
             TaskType.AGENT_HEALTH_SCAN: self._execute_health_scan,
             TaskType.ETHOS_OPTIMIZATION: self._execute_ethos_optimization,
+            TaskType.CONSTITUTION_READ: self._execute_constitution_read,
             TaskType.CACHE_OPTIMIZATION: self._execute_cache_optimization
         }
         

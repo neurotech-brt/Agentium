@@ -104,7 +104,7 @@ When Agentium boots for the first time:
 ```bash
 1. Docker Compose initializes PostgreSQL + ChromaDB + Redis
 2. Head of Council (0xxxx) is instantiated
-3. 5 Council Members (1xxxx) are spawned
+3. Two Council Members (1xxxx) are spawned
 4. Head prompts Council: "What shall we name our Nation?"
 5. Council votes (first democratic process)
 6. Constitution template loaded with Country Name in preamble
@@ -179,42 +179,95 @@ Every agent has a personalized Ethos document:
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Start (Any OS)
 
-### Prerequisites
-- Docker Engine 20.10+
-- Docker Compose 2.0+
-- 8GB RAM minimum (16GB recommended for local LLMs)
-- 10GB free disk space
+Follow these steps to run **Agentium** on Linux, macOS, or Windows.
 
-### Installation
+--
 
-```bash
-# Clone the repository
-git clone https://github.com/yourusername/agentium.git
-cd agentium
+### 📦 Prerequisites
 
-# Configure environment (optional)
+Make sure the following are installed on your system:
+
+-   **Docker Engine** `20.10+`
+-   **Docker Compose** `2.0+`
+-   **Minimum 8GB RAM**\
+    *(16GB recommended if running local LLMs)*
+-   **At least 10GB free disk space**
+
+> 💡 Docker Desktop includes Docker Engine + Docker Compose and works on
+> Windows, macOS, and Linux.
+
+---
+
+### 🛠 Installation & Setup
+
+``` bash
+# 1. Clone the repository
+git clone https://github.com/AshminDhungana/Agentium.git
+cd Agentium
+
+# 2. (Optional) Configure environment variables
 cp .env.example .env
-# Edit .env to add your API keys (OpenAI, Anthropic, etc.)
+# Open .env and add API keys (OpenAI, Anthropic, etc.) if required
 
-# Launch the governance system
+# 3. Build and start all services
 docker-compose up --build
-
-# Access the dashboard
-open http://localhost:3000
-
-# Default credentials
-Username: admin
-Password: admin
 ```
 
-**Services Started**:
-- `http://localhost:3000` — React Dashboard
-- `http://localhost:8000` — FastAPI + WebSocket
-- `localhost:6379` — Redis (Message Bus)
-- `localhost:5432` — PostgreSQL (Entities)
-- `localhost:8001` — ChromaDB (Vector Knowledge)
+⏳ The first build may take a few minutes depending on your internet
+speed and system.
+
+---
+
+### 🌐 Access the Application
+
+Once everything is running, open your browser and visit:
+
+-   **Dashboard:** http://localhost:3000\
+-   **Backend API:** http://localhost:8000
+
+#### 🔐 Default Login Credentials
+
+    Username: admin
+    Password: admin
+
+> ⚠️ Change these credentials in production environments.
+
+---
+
+### 🧩 Services Started
+
+  Service           URL / Port              Description
+  ----------------- ----------------------- --------------------
+  React Dashboard   http://localhost:3000   Web UI
+  FastAPI Backend   http://localhost:8000   API + WebSocket
+  Redis             localhost:6379          Message Bus
+  PostgreSQL        localhost:5432          Persistent Storage
+  ChromaDB          http://localhost:8001   Vector Database
+
+---
+
+### 🛑 Stopping the Services
+
+``` bash
+docker-compose down
+```
+
+To remove volumes as well (⚠️ deletes stored data):
+
+``` bash
+docker-compose down -v
+```
+
+---
+
+### 🧠 Notes
+
+-   Works the same on **Windows, macOS, and Linux**
+-   No local Python/Node setup required --- everything runs in Docker
+-   Ideal for local development, experimentation, and self-hosting
+
 
 ---
 
@@ -255,90 +308,6 @@ Results aggregated back to Head → You
 - Lead Agents can have other Lead Agents below them if task agent count increases.
 - Lead agents can have many layers of Leads below them as per required.
 
-### 3. Knowledge Management
-
-**For Task Agents (3xxxx)**:
-```python
-# After completing task, submit learning
-await knowledge_service.share_lesson_learned(
-    task_id="task_30452",
-    content="Q3 analysis shows vendor X delays correlate with Y metric",
-    agent_id="30042"
-)
-# Goes to Council moderation queue
-```
-
-**For Council (1xxxx)**:
-- Review pending knowledge submissions in dashboard
-- Vote: Approve (add) / Reject (archived) / Request Changes
-- Curate "canonical" best practices (pinned, never auto-archived)
-
-**Querying Collective Intelligence**:
-```python
-# Any agent can query
-context = await knowledge_service.query_constitution(
-    "What are our data privacy obligations when handling financial records?"
-)
-# Returns relevant articles from Constitution via semantic similarity
-```
-
----
-
-## ⚙️ Configuration
-
-### Model Configuration (`config/models.yaml`)
-
-```yaml
-head_of_council:
-  model: gpt-4-turbo
-  provider: openai
-  temperature: 0.2  # Low for consistency
-
-council_members:
-  model: kimi-2.5
-  provider: local
-  count: 5  # Auto-scale up to 15
-
-lead_agents:
-  model: claude-3-sonnet
-  provider: anthropic
-  max_agents: 20
-
-task_agents:
-  model: gpt-3.5-turbo
-  provider: openai
-  max_agents: 100
-  spawn_threshold: 10  # New agent per 10 queued tasks
-```
-
-### Storage Configuration (`config/storage.yaml`)
-
-```yaml
-postgresql:
-  url: postgresql://agentium:secret@db:5432/agentium
-  pool_size: 20
-
-chromadb:
-  host: chromadb
-  port: 8001Multi-user RBAC
-  collection_name: "agentium_knowledge"
-  embedding_model: "all-MiniLM-L6-v2"
-
-redis:
-  host: redis
-  port: 6379
-  channels:
-    - "agent_bus"
-    - "council_chamber"
-    - "emergency_alerts"Multi-user RBAC
-```
-
-### Constitutional Templates (`docs_ministry/templates/`)
-
-- `constitution_sample.md` — Base legal framework
-- `agent_ethos_sample.md` — Role-specific ethics templates
-- `genesis_log.md` — Auto-generated initialization record
-
 ---
 
 ## 🛠️ Technology Stack
@@ -356,42 +325,6 @@ redis:
 
 ---
 
-## 📋 API Endpoints
-
-### Governance
-```
-POST   /api/v1/council/propose-amendment
-POST   /api/v1/council/vote/{vote_id}
-GET    /api/v1/council/pending-votes
-POST   /api/v1/council/knowledge/{id}/approve
-```
-
-### Agents
-```
-POST   /api/v1/agents/spawn              # With parent validation
-POST   /api/v1/agents/{id}/escalate      # To parent tier
-DELETE /api/v1/agents/{id}/liquidate     # Vote verification required
-GET    /api/v1/agents/tree               # Hierarchy visualization
-```
-
-### Knowledge Library ⭐
-```
-POST   /api/v1/knowledge/submit          # Task/Lead submit
-GET    /api/v1/knowledge/query           # RAG search
-GET    /api/v1/knowledge/constitution    # Semantic search
-GET    /api/v1/knowledge/pending         # Council moderation queue
-DELETE /api/v1/knowledge/{id}            # Council only
-```
-
-### Constitution
-```
-GET    /api/v1/constitution/active       # Current markdown
-GET    /api/v1/constitution/history      # Version history
-POST   /api/v1/constitution/query        # Natural language query
-```
-
----
-
 ## 🧪 Development Roadmap
 
 ### Phase 0: Foundation ✅ 
@@ -400,10 +333,11 @@ POST   /api/v1/constitution/query        # Natural language query
 - [x] Docker compose setup
 
 ### Phase 1: Knowledge Infrastructure 🚧 **Current Focus**
-- [ ] ChromaDB integration World Knowledge
-- [ ] Knowledge Library service
-- [ ] Initialization Protocol (Country naming)
-- [ ] RAG pipeline World Knowledge
+- [x] ChromaDB integration World Knowledge
+- [x] Knowledge Library service
+- [x] Initialization Protocol (Country naming)
+- [x] RAG pipeline World Knowledge
+- [ ] Phase 1 - Testing 
 
 ### Phase 2: Governance Core
 - [ ] Message Bus (Redis)
@@ -419,7 +353,7 @@ POST   /api/v1/constitution/query        # Natural language query
 
 ### Phase 4: Intelligence
 - [ ] Multi-model provider support
-- [] Browser automation integration
+- [ ] Browser automation integration
 - [ ] Advanced RAG with source citations
 - [ ] Voice interface 
 
@@ -442,7 +376,7 @@ Agentium is built for the community. We welcome:
 - 📖 **Documentation**: Tutorials, constitutional examples
 - 🐛 **Bug Reports**: Help us maintain integrity
 
-Read our [Contributing Guide](CONTRIBUTING.md) and [Constitution Template](docs_ministry/templates/constitution_sample.md).
+Read our [Contributing Guide](./CONTRIBUTING.md)
 
 ---
 

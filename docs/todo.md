@@ -1,7 +1,7 @@
 # Agentium Implementation Roadmap
 ## From Entity Models to Living Governance System
 
-**Reference Architecture:** OpenClaw (Personal AI Assistant Runtime)  
+**Reference Architecture:**  (Personal AI Assistant Runtime)  
 **Current Status:** Database layer + Entity models complete  
 **Strategy:** One file at a time, bottom-up priority
 **Storage Architecture:** Dual-mode (PostgreSQL for entities + Vector DB for knowledge)

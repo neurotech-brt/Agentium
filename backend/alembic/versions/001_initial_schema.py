@@ -29,7 +29,51 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(), default=sa.func.now()),
         sa.Column('updated_at', sa.DateTime(), default=sa.func.now(), onupdate=sa.func.now()),
     )
+    op.create_table(
+        'scheduled_tasks',
+        sa.Column('id', sa.String(36), primary_key=True),
+        sa.Column('agentium_id', sa.String(10), unique=True, nullable=False),  # R0001 format
+        sa.Column('name', sa.String(200), nullable=False),
+        sa.Column('description', sa.Text(), nullable=True),
+        sa.Column('cron_expression', sa.String(100), nullable=False),  # "0 9 * * *"
+        sa.Column('task_payload', sa.Text(), nullable=False),  # JSON: {action, params, constraints}
+        sa.Column('owner_agentium_id', sa.String(10), nullable=False, default='00001'),  # Head 00001 owns all schedules
+        sa.Column('executing_agent_id', sa.String(36), sa.ForeignKey('agents.id'), nullable=True),  # Current 3xxxx running it
+        sa.Column('status', sa.String(20), default='active'),  # active, paused, completed, error
+        sa.Column('priority', sa.Integer(), default=1),
+        sa.Column('last_execution_at', sa.DateTime(), nullable=True),
+        sa.Column('next_execution_at', sa.DateTime(), nullable=True),
+        sa.Column('execution_count', sa.Integer(), default=0),
+        sa.Column('failure_count', sa.Integer(), default=0),
+        sa.Column('max_retries', sa.Integer(), default=3),
+        sa.Column('timezone', sa.String(50), default='UTC'),
+        sa.Column('is_active', sa.String(1), default='Y'),
+        sa.Column('created_at', sa.DateTime(), default=sa.func.now()),
+        sa.Column('updated_at', sa.DateTime(), default=sa.func.now(), onupdate=sa.func.now()),
+    )
+    op.create_index('idx_scheduled_next_run', 'scheduled_tasks', ['next_execution_at'])
+    op.create_index('idx_scheduled_owner', 'scheduled_tasks', ['owner_agentium_id'])
+    op.create_index('idx_scheduled_status', 'scheduled_tasks', ['status'])
     
+    # Scheduled Task Executions (History of runs)
+    op.create_table(
+        'scheduled_task_executions',
+        sa.Column('id', sa.String(36), primary_key=True),
+        sa.Column('scheduled_task_id', sa.String(36), sa.ForeignKey('scheduled_tasks.id')),
+        sa.Column('execution_agentium_id', sa.String(10), nullable=False),  # Which 3xxxx executed it
+        sa.Column('execution_agent_id', sa.String(36), sa.ForeignKey('agents.id'), nullable=True),
+        sa.Column('started_at', sa.DateTime(), default=sa.func.now()),
+        sa.Column('completed_at', sa.DateTime(), nullable=True),
+        sa.Column('status', sa.String(20), default='running'),  # running, success, failed, timeout
+        sa.Column('result_payload', sa.Text(), nullable=True),  # JSON result
+        sa.Column('error_message', sa.Text(), nullable=True),
+        sa.Column('retry_number', sa.Integer(), default=0),
+        sa.Column('is_active', sa.String(1), default='Y'),
+        sa.Column('created_at', sa.DateTime(), default=sa.func.now()),
+    )
+    op.create_index('idx_sched_exec_task', 'scheduled_task_executions', ['scheduled_task_id'])
+    op.create_index('idx_sched_exec_time', 'scheduled_task_executions', ['started_at'])
+
     # User model configs
     op.create_table(
         'user_model_configs',
@@ -311,3 +355,5 @@ def downgrade() -> None:
     op.drop_table('constitutions')
     op.drop_table('user_model_configs')
     op.drop_table('users')
+    op.drop_table('scheduled_task_executions')
+    op.drop_table('scheduled_tasks')

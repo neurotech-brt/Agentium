@@ -19,6 +19,13 @@ from backend.models.entities.channels import (
     ChannelStatus
 )
 
+from backend.models.entities.scheduled_task import (
+    ScheduledTask, 
+    ScheduledTaskExecution,
+    ScheduledTaskStatus,
+    ScheduledTaskExecutionStatus
+)
+
 
 
 from backend.models.entities.tasks import (
@@ -106,6 +113,11 @@ __all__ = [
     'AmendmentVoting',
     'DocumentType',
     'AmendmentStatus',
+
+    'ScheduledTask',
+    'ScheduledTaskExecution', 
+    'ScheduledTaskStatus',
+    'ScheduledTaskExecutionStatus',
 
 
     'ExternalChannel',

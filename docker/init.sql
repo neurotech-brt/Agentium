@@ -5,6 +5,68 @@
 -- Create extensions if needed
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
+-- Insert example scheduled task (Daily Constitution Check by Head 00001)
+INSERT INTO scheduled_tasks (
+    id,
+    agentium_id,
+    name,
+    description,
+    cron_expression,
+    timezone,
+    task_payload,
+    owner_agentium_id,
+    status,
+    priority,
+    is_active,
+    created_at,
+    updated_at
+) VALUES (
+    '550e8400-e29b-41d4-a716-446655440400',
+    'R0001',
+    'Daily Constitution Audit',
+    'Head 00001 reviews system compliance with Constitution every morning at 9 AM UTC',
+    '0 9 * * *',
+    'UTC',
+    '{"action_type": "constitution_audit", "scope": "full_system", "report_to": "sovereign", "constraints": ["check_ethos_compliance", "verify_hierarchy_integrity"]}',
+    '00001',  -- Owned by Head (persistent)
+    'active',
+    5,  -- High priority
+    'Y',
+    NOW(),
+    NOW()
+) ON CONFLICT (agentium_id) DO NOTHING;
+
+-- Log the scheduled task creation
+INSERT INTO audit_logs (
+    id,
+    agentium_id,
+    level,
+    category,
+    actor_type,
+    actor_id,
+    action,
+    target_type,
+    target_id,
+    description,
+    after_state,
+    is_active,
+    created_at
+) VALUES (
+    '550e8400-e29b-41d4-a716-446655440401',
+    'A00002',
+    'INFO',
+    'GOVERNANCE',
+    'agent',
+    '00001',
+    'scheduled_task_created',
+    'scheduled_task',
+    'R0001',
+    'Head 00001 created recurring task R0001: Daily Constitution Audit',
+    '{"cron": "0 9 * * *", "timezone": "UTC", "owner": "00001"}',
+    'Y',
+    NOW()
+);
+
 -- Insert default user (Sovereign)
 INSERT INTO users (id, username, email, hashed_password, is_active, is_admin, created_at, updated_at)
 VALUES (

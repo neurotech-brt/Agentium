@@ -12,28 +12,75 @@ export interface BackendStatus {
     latency?: number;
 }
 
+// Provider Types
+export type ProviderType =
+    | 'openai'
+    | 'anthropic'
+    | 'gemini'
+    | 'groq'
+    | 'mistral'
+    | 'together'
+    | 'cohere'
+    | 'fireworks'
+    | 'moonshot'  // Kimi 2.5
+    | 'deepseek'
+    | 'azure_openai'
+    | 'local'      // Ollama, LM Studio
+    | 'custom';    // Any OpenAI-compatible
+
+export interface ProviderInfo {
+    id: ProviderType;
+    name: string;
+    display_name: string;
+    requires_api_key: boolean;
+    requires_base_url: boolean;
+    default_base_url?: string;
+    description: string;
+    popular_models: string[];
+}
+
 export interface ModelConfig {
     id: string;
-    provider: 'openai' | 'anthropic' | 'gemini' | 'local' | 'azure' | 'custom';
+    provider: ProviderType;
+    provider_name?: string;
     config_name: string;
     default_model: string;
     available_models: string[];
-    status: 'active' | 'inactive' | 'error' | 'testing';
+    api_base_url?: string;
+    local_server_url?: string;
+    status: 'active' | 'inactive' | 'testing' | 'error';
     is_default: boolean;
     settings: {
         max_tokens: number;
         temperature: number;
+        top_p?: number;
         timeout: number;
     };
-    local_config?: {
-        model_path?: string;
-        server_url?: string;
-    };
-    usage: {
-        tokens_total: number;
+    total_usage: {
         requests: number;
+        tokens: number;
+        cost_usd: number;
     };
     last_tested?: string;
+    api_key_masked?: string;
+}
+
+export interface TestResult {
+    success: boolean;
+    message: string;
+    latency_ms?: number;
+    model?: string;
+    tokens?: number;
+    error?: string;
+}
+
+export interface UniversalProviderInput {
+    provider_name: string;
+    api_base_url: string;
+    api_key?: string;
+    default_model: string;
+    config_name?: string;
+    is_default?: boolean;
 }
 
 export interface Agent {

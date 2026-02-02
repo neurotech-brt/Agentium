@@ -38,11 +38,10 @@ services:
     networks:
       - agentium-network
     healthcheck:
-      test: [ "CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/heartbeat')" ]
+      test: [ "CMD", "chroma", "help" ] # If this fails, go with Option 1
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 10s
+      retries: 3
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # Redis (Celery Task Queue)
@@ -184,8 +183,7 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - REACT_APP_API_URL=http://localhost:8000
-      - REACT_APP_WS_URL=ws://localhost:8000
+      - VITE_API_URL=http://backend:8000
     depends_on:
       - backend
     networks:

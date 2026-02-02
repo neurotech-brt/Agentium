@@ -2,7 +2,11 @@ import { useEffect } from 'react';
 import { useBackendStore } from '@/store/backendStore';
 import { Wifi, WifiOff, Loader2 } from 'lucide-react';
 
-export function ConnectionStatus() {
+interface ConnectionStatusProps {
+    compact?: boolean; // New prop for compact mode (just circle)
+}
+
+export function ConnectionStatus({ compact = false }: ConnectionStatusProps) {
     const { status, startPolling, stopPolling } = useBackendStore();
 
     useEffect(() => {
@@ -32,6 +36,19 @@ export function ConnectionStatus() {
         }
     };
 
+    // Compact mode - just a circle
+    if (compact) {
+        return (
+            <div className="relative group">
+                <div className={`w-3 h-3 rounded-full ${getStatusColor()} ${status.status === 'connecting' ? 'animate-pulse' : ''}`} />
+                <div className="absolute right-0 top-full mt-2 px-2 py-1 bg-gray-900 text-white text-xs rounded whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                    {status.status === 'connected' && status.latency ? `Connected (${status.latency}ms)` : status.status}
+                </div>
+            </div>
+        );
+    }
+
+    // Full mode - original design
     return (
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-gray-100 dark:bg-gray-800 text-sm">
             <div className={`w-2 h-2 rounded-full ${getStatusColor()}`} />

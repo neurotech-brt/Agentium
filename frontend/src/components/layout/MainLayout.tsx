@@ -1,6 +1,6 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
-import { ConnectionStatus } from '@/components/ConnectionStatus';
+import { HealthIndicator } from '@/components/HealthIndicator';
 import {
     LayoutDashboard,
     Users,
@@ -97,16 +97,16 @@ export function MainLayout() {
                         <LogOut className="w-4 h-4" />
                         Sign Out
                     </button>
-
-                    <div className="mt-4 flex items-center justify-between">
-                        <span className="text-xs text-gray-500 dark:text-gray-400">Backend:</span>
-                        <ConnectionStatus />
-                    </div>
                 </div>
             </aside>
 
             {/* Main Content */}
-            <main className="flex-1 overflow-auto">
+            <main className="flex-1 overflow-auto relative">
+                {/* Health Indicator - Top Right */}
+                <div className="absolute top-6 right-6 z-10">
+                    <HealthIndicator />
+                </div>
+
                 <div className="h-full p-8">
                     <Outlet />
                 </div>

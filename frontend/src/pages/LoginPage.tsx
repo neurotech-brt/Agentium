@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
 import { Shield, AlertCircle, Loader2 } from 'lucide-react';
+import { HealthIndicator } from '@/components/HealthIndicator';
 import toast from 'react-hot-toast';
 
 export function LoginPage() {
@@ -24,7 +25,12 @@ export function LoginPage() {
     };
 
     return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4">
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4 relative">
+            {/* Health Indicator - Top Right */}
+            <div className="absolute top-4 right-4 z-10">
+                <HealthIndicator />
+            </div>
+
             <div className="w-full max-w-md">
                 {/* Logo */}
                 <div className="text-center mb-8">
@@ -38,7 +44,6 @@ export function LoginPage() {
                         AI Agent Governance System
                     </p>
                 </div>
-
                 {/* Login Card */}
                 <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 p-8">
                     <div className="mb-6">
@@ -49,14 +54,6 @@ export function LoginPage() {
                             Sign in to manage your AI governance system
                         </p>
                     </div>
-
-                    {/* Default Credentials Notice */}
-                    <div className="mb-6 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                        <p className="text-xs text-blue-800 dark:text-blue-300">
-                            <strong>Default Login:</strong> admin / admin
-                        </p>
-                    </div>
-
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
                             <label htmlFor="username" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">

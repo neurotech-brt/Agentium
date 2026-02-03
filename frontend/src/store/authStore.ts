@@ -28,15 +28,7 @@ export const useAuthStore = create<AuthState>()(
             error: null,
 
             login: async (username: string, password: string) => {
-                set({
-                    user: {
-                        ...user,
-                        isAuthenticated: true,
-                        isSovereign: user.role === 'admin' || user.username === 'sovereign'
-                    },
-                    isLoading: false,
-                    error: null
-                });
+                set({ isLoading: true, error: null });
 
                 try {
                     const response = await api.post('/auth/login', {
@@ -52,7 +44,8 @@ export const useAuthStore = create<AuthState>()(
                     set({
                         user: {
                             ...user,
-                            isAuthenticated: true
+                            isAuthenticated: true,
+                            isSovereign: user.role === 'admin' || user.username === 'sovereign'
                         },
                         isLoading: false,
                         error: null
@@ -106,8 +99,13 @@ export const useAuthStore = create<AuthState>()(
                     const response = await api.post('/auth/verify', { token });
 
                     if (response.data.valid) {
+                        const userData = response.data.user;
                         set({
-                            user: { ...response.data.user, isAuthenticated: true },
+                            user: {
+                                ...userData,
+                                isAuthenticated: true,
+                                isSovereign: userData.role === 'admin' || userData.username === 'sovereign'
+                            },
                             error: null
                         });
                         return true;

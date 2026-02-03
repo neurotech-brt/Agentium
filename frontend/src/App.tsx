@@ -5,6 +5,7 @@ import { useAuthStore } from '@/store/authStore';
 import { useBackendStore } from '@/store/backendStore';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { LoginPage } from '@/pages/LoginPage';
+import { SignupPage } from '@/pages/SignupPage';
 import { Dashboard } from '@/pages/Dashboard';
 import { SettingsPage } from '@/pages/SettingsPage';
 import { ChatPage } from '@/pages/ChatPage';
@@ -46,10 +47,14 @@ export default function App() {
       />
 
       <Routes>
-        {/* Public Login Route */}
+        {/* Public Routes */}
         <Route
           path="/login"
           element={!user?.isAuthenticated ? <LoginPage /> : <Navigate to="/" replace />}
+        />
+        <Route
+          path="/signup"
+          element={!user?.isAuthenticated ? <SignupPage /> : <Navigate to="/" replace />}
         />
 
         {/* Protected Routes - All require authentication */}

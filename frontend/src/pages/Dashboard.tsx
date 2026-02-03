@@ -7,9 +7,12 @@ import {
     AlertTriangle,
     Activity,
     Shield,
-    Cpu
+    Cpu,
+    Coins,
+    DollarSign
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import BudgetControl from '@/components/BudgetControl'; // NEW: Import BudgetControl
 
 interface Stats {
     totalAgents: number;
@@ -74,7 +77,7 @@ export function Dashboard() {
     ];
 
     return (
-        <div>
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
             {/* Welcome Header */}
             <div className="mb-8">
                 <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
@@ -123,6 +126,11 @@ export function Dashboard() {
                 ))}
             </div>
 
+            {/* NEW: Budget Control Panel - Full Width */}
+            <div className="mb-8">
+                <BudgetControl />
+            </div>
+
             {/* Quick Actions */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* System Status */}
@@ -138,8 +146,8 @@ export function Dashboard() {
                         <div className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-700">
                             <span className="text-sm text-gray-600 dark:text-gray-400">Backend Status</span>
                             <span className={`text-sm font-medium px-2 py-1 rounded-full ${status.status === 'connected'
-                                    ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
-                                    : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+                                : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
                                 }`}>
                                 {status.status === 'connected' ? 'Healthy' : 'Disconnected'}
                             </span>

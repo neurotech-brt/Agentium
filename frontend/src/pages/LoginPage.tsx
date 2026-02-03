@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
 import { Shield, AlertCircle, Loader2 } from 'lucide-react';
 import { HealthIndicator } from '@/components/HealthIndicator';
@@ -110,8 +110,18 @@ export function LoginPage() {
                         </button>
                     </form>
 
-                    {/* Backend Status at bottom */}
+                    {/* Signup Link */}
                     <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+                        <p className="text-sm text-center text-gray-600 dark:text-gray-400">
+                            Don't have an account?{' '}
+                            <Link to="/signup" className="text-blue-600 dark:text-blue-400 hover:underline font-medium">
+                                Request Access
+                            </Link>
+                        </p>
+                    </div>
+
+                    {/* Backend Status */}
+                    <div className="mt-4">
                         <p className="text-xs text-center text-gray-500 dark:text-gray-400">
                             Backend connection required for full functionality
                         </p>

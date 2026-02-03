@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api } from '@/services/api';
+import { jwtDecode } from 'jwt-decode'; // Install this package: npm install jwt-decode
 
 interface User {
     id: string;
@@ -8,6 +9,7 @@ interface User {
     role: string;
     isAuthenticated: boolean;
     isSovereign?: boolean;
+    agentium_id?: string; // ✅ NEW: Stores the agent ID for tier-based access
 }
 
 interface AuthState {
@@ -20,6 +22,16 @@ interface AuthState {
     checkAuth: () => Promise<boolean>;
 }
 
+// Helper to decode JWT and extract agentium_id
+const extractAgentFromToken = (token: string): string | null => {
+    try {
+        const decoded = jwtDecode<any>(token);
+        return decoded.agentium_id || null;
+    } catch {
+        return null;
+    }
+};
+
 export const useAuthStore = create<AuthState>()(
     persist(
         (set, get) => ({
@@ -31,7 +43,8 @@ export const useAuthStore = create<AuthState>()(
                 set({ isLoading: true, error: null });
 
                 try {
-                    const response = await api.post('/auth/login', {
+                    // ✅ FIXED: Changed to /api/v1/auth/login (added /api/v1 prefix)
+                    const response = await api.post('/api/v1/auth/login', {
                         username,
                         password
                     });
@@ -41,11 +54,15 @@ export const useAuthStore = create<AuthState>()(
                     // Store JWT token
                     localStorage.setItem('access_token', access_token);
 
+                    // Extract agentium_id from token if not in user object
+                    const agentiumId = user.agentium_id || extractAgentFromToken(access_token);
+
                     set({
                         user: {
                             ...user,
                             isAuthenticated: true,
-                            isSovereign: user.role === 'admin' || user.username === 'sovereign'
+                            agentium_id: agentiumId, // ✅ Store agentium_id
+                            isSovereign: agentiumId ? agentiumId.startsWith('0') : false // ✅ Sovereign if agentium_id starts with 0
                         },
                         isLoading: false,
                         error: null
@@ -70,8 +87,8 @@ export const useAuthStore = create<AuthState>()(
                 set({ isLoading: true, error: null });
 
                 try {
-                    // Call backend to change password (endpoint would need to be created)
-                    await api.post('/auth/change-password', {
+                    // ✅ FIXED: Changed to /api/v1/auth/change-password
+                    await api.post('/api/v1/auth/change-password', {
                         old_password: oldPassword,
                         new_password: newPassword
                     });
@@ -95,16 +112,19 @@ export const useAuthStore = create<AuthState>()(
                 }
 
                 try {
-                    // Verify token with backend
-                    const response = await api.post('/auth/verify', { token });
+                    // ✅ FIXED: Changed to /api/v1/auth/verify
+                    const response = await api.post('/api/v1/auth/verify', { token });
 
                     if (response.data.valid) {
                         const userData = response.data.user;
+                        const agentiumId = userData.agentium_id || extractAgentFromToken(token);
+
                         set({
                             user: {
                                 ...userData,
                                 isAuthenticated: true,
-                                isSovereign: userData.role === 'admin' || userData.username === 'sovereign'
+                                agentium_id: agentiumId, // ✅ Store agentium_id
+                                isSovereign: agentiumId ? agentiumId.startsWith('0') : false
                             },
                             error: null
                         });
@@ -123,7 +143,9 @@ export const useAuthStore = create<AuthState>()(
         }),
         {
             name: 'auth-storage',
-            partialize: (state) => ({ user: state.user })
+            partialize: (state) => ({
+                user: state.user
+            })
         }
     )
 );

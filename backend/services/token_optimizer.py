@@ -1,36 +1,71 @@
 """
-Token Optimization Service for Agentium IDLE GOVERNANCE.
-Dynamically switches between API models (active) and Local models (idle).
+Enhanced Token Optimizer with intelligent model allocation and API pooling.
+Manages token usage, cost optimization, and model switching.
 """
 
 import asyncio
-import time
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
-from backend.models.entities.agents import Agent, HeadOfCouncil, CouncilMember, AgentStatus
-from backend.models.entities.user_config import UserModelConfig, ProviderType
+from backend.models.entities.agents import Agent, AgentStatus, AgentType
+from backend.models.entities.task import Task, TaskStatus, TaskPriority
+from backend.services.api_manager import api_manager, ModelCapability
+from backend.services.model_allocation import model_allocator
 
 
 class TokenOptimizer:
     """
-    Optimizes token usage by switching to local models during idle periods.
-    Maintains separate configurations for Active vs Idle modes.
+    Enhanced Token Optimizer that:
+    1. Tracks token usage per agent
+    2. Automatically selects optimal models per task
+    3. Manages idle/active transitions with cost awareness
+    4. Integrates with hierarchical agent system
     """
     
     def __init__(self):
         self.idle_mode_active = False
         self.last_activity_at = datetime.utcnow()
-        self.idle_threshold_seconds = 60  # Switch to idle after 60s of inactivity
-        self.persistent_agents: List[str] = []  # Agentium IDs
-        self.active_configs: Dict[str, str] = {}  # agent_id -> config_id
-        self.idle_configs: Dict[str, str] = {}    # agent_id -> local_config_id
-        self.total_tokens_saved = 0
+        self.idle_threshold_seconds = 60  # Configurable
+        
+        # Token tracking
+        self.tokens_used_by_agent: Dict[str, int] = {}  # agentium_id -> tokens
+        self.total_tokens_saved_today = 0
+        self.last_budget_reset = datetime.utcnow()
+        
+        # Model allocation tracking
+        self.active_model_configs: Dict[str, str] = {}  # agent_id -> config_id
+        self.idle_model_configs: Dict[str, str] = {}    # agent_id -> local_config_id
+        
+        # Persistent agents (Head + 2 Council)
+        self.persistent_agents: List[str] = ["00001", "10001", "10002"]  # Default
+        
+        # Singleton pattern
+        self.initialized = False
+    
+    def initialize(self, db: Session, agents: List[Agent] = None):
+        """Initialize with database session and agent list."""
+        if self.initialized:
+            return
+        
+        # Load persistent agents from DB if provided
+        if agents:
+            self.persistent_agents = [a.agentium_id for a in agents if a.is_persistent]
+        
+        # Initialize model allocator if not already done
+        if model_allocator is None:
+            init_model_allocator(db)
+        
+        # Get local model config for idle mode
+        self.idle_model_key = "local:kimi-2.5-7b"  # Default idle model
+        
+        self.initialized = True
     
     def record_activity(self):
-        """Call this whenever user activity occurs."""
+        """Record user activity and wake from idle if needed."""
         self.last_activity_at = datetime.utcnow()
+        
+        # Wake system immediately
         if self.idle_mode_active:
             asyncio.create_task(self.wake_from_idle())
     
@@ -44,223 +79,348 @@ class TokenOptimizer:
         
         if should_be_idle and not self.idle_mode_active:
             await self.enter_idle_mode(db)
-            return True
+            return "entered_idle"
         elif not should_be_idle and self.idle_mode_active:
             await self.wake_from_idle(db)
-            return True
+            return "exited_idle"
         
-        return False
+        return "no_change"
     
     async def enter_idle_mode(self, db: Session):
-        """Switch persistent agents to local model configurations."""
-        print("🌙 Entering IDLE MODE - Switching to local models")
+        """
+        Enter idle mode: Switch ALL agents to local models,
+        but only allow persistent agents to continue idle tasks.
+        """
+        print("🌙 ENTERING IDLE MODE - Switching to local models")
+        
         self.idle_mode_active = True
         
-        # Get or create local model config
-        local_config = self._get_or_create_local_config(db)
+        # Get local model (the "lowest" model)
+        local_model = api_manager._get_best_local_model()
         
-        # Switch persistent agents to local config
-        persistent_agents = db.query(Agent).filter_by(
-            is_persistent=True,
-            is_active='Y'
+        # Update all persistent agents to local model
+        agents = db.query(Agent).filter(
+            Agent.agentium_id.in_(self.persistent_agents),
+            Agent.status != AgentStatus.TERMINATED
         ).all()
         
-        for agent in persistent_agents:
-            # Store active config
+        for agent in agents:
+            # Cache active config
             if agent.preferred_config_id:
-                self.active_configs[agent.id] = agent.preferred_config_id
+                self.active_model_configs[agent.id] = agent.preferred_config_id
             
-            # Switch to idle config
-            agent.preferred_config_id = local_config.id
+            # Allocate local model
+            new_config_id = model_allocator._ensure_agent_has_config(agent, local_model).id
+            agent.preferred_config_id = new_config_id
             agent.idle_mode_enabled = True
             agent.status = AgentStatus.IDLE_WORKING
-            
-            # Update persistent agents list
-            if agent.agentium_id not in self.persistent_agents:
-                self.persistent_agents.append(agent.agentium_id)
+        
+        # Stop non-persistent agents to free resources
+        non_persistent = db.query(Agent).filter(
+            ~Agent.agentium_id.in_(self.persistent_agents),
+            Agent.status == AgentStatus.ACTIVE
+        ).all()
+        
+        for agent in non_persistent:
+            agent.status = AgentStatus.IDLE_PAUSED
         
         db.commit()
         
-        # Broadcast status via WebSocket (if available)
+        # Broadcast status
         await self._broadcast_idle_status("entered_idle", {
-            'agents_switched': len(persistent_agents),
-            'total_tokens_saved': self.total_tokens_saved
+            'agents_switched': len(agents),
+            'budget_status': idle_budget.get_status()
         })
         
-        print(f"✅ {len(persistent_agents)} agents switched to local models")
+        print(f"✅ {len(agents)} agents switched to {local_model.model_name}")
     
     async def wake_from_idle(self, db: Session):
-        """Wake system from idle mode - switch back to API models."""
-        print("☀️ Waking from IDLE MODE - Restoring API models")
+        """
+        Wake from idle: Restore original models for all agents.
+        Re-run model allocation to get optimal models for current tasks.
+        """
+        print("☀️ WAKING FROM IDLE MODE - Restoring optimized models")
+        
         self.idle_mode_active = False
         self.last_activity_at = datetime.utcnow()
         
-        # Restore original configs
-        for agent_id, config_id in self.active_configs.items():
-            agent = db.query(Agent).filter_by(id=agent_id).first()
-            if agent:
-                agent.preferred_config_id = config_id
-                agent.idle_mode_enabled = False
+        # Restore active models for all agents (re-optimize)
+        all_agents = db.query(Agent).filter(Agent.status != AgentStatus.TERMINATED).all()
+        
+        for agent in all_agents:
+            # Get or create optimized model allocation
+            current_task = db.query(Task).filter_by(
+                assigned_to_agent_id=agent.id,
+                status=TaskStatus.RUNNING
+            ).first()
+            
+            # Allocate optimal model for this agent's current/future task
+            if current_task:
+                new_config_id = model_allocator.allocate_model(agent, current_task).id
+            else:
+                # Default allocation based on tier
+                new_config_id = model_allocator.allocate_model(agent, None).id
+            
+            agent.preferred_config_id = new_config_id
+            agent.idle_mode_enabled = False
+            
+            # Wake non-persistent agents
+            if agent.agentium_id not in self.persistent_agents:
                 agent.status = AgentStatus.ACTIVE
         
         # Clear idle configs
-        self.idle_configs.clear()
+        self.idle_model_configs.clear()
         
-        # Pause any running idle tasks
-        self._pause_idle_tasks(db)
-        
+        # Resume any paused agents/tasks
         db.commit()
         
         await self._broadcast_idle_status("exited_idle", {
-            'agents_restored': len(self.active_configs),
-            'total_tokens_saved': self.total_tokens_saved
+            'agents_restored': len(all_agents),
+            'allocation_report': model_allocator.get_allocation_report()
         })
         
-        self.active_configs.clear()
-        print("✅ All agents restored to API models")
+        print(f"✅ {len(all_agents)} agents restored to optimal models")
     
-    def _get_or_create_local_config(self, db: Session) -> UserModelConfig:
-        """Get or create the shared local model configuration."""
-        # Check if shared local config exists
-        local_config = db.query(UserModelConfig).filter_by(
-            user_id="system",
-            config_name="idle_local_model"
-        ).first()
-        
-        if not local_config:
-            # Create local model config
-            local_config = UserModelConfig(
-                user_id="system",
-                config_name="idle_local_model",
-                provider=ProviderType.LOCAL,
-                api_key_encrypted=None,  # Local models don't need API keys
-                default_model="kimi-2.5-7b",  # Default local model
-                local_server_url="http://localhost:8000/v1",
-                is_default=False,
-                status='active'
-            )
-            db.add(local_config)
-            db.flush()
-        
-        return local_config
-    
-    def _pause_idle_tasks(self, db: Session):
-        """Pause any currently running idle tasks."""
-        from backend.models.entities.task import Task, TaskStatus
-        
-        running_idle_tasks = db.query(Task).filter_by(
-            status=TaskStatus.IDLE_RUNNING,
-            is_idle_task=True
-        ).all()
-        
-        for task in running_idle_tasks:
-            task.pause_for_user_task()
-        
-        print(f"⏸️ Paused {len(running_idle_tasks)} idle tasks")
-    
-    def calculate_token_savings(self, agent: Agent, estimation_method: str = "average") -> int:
+    async def allocate_for_task(self, agent: Agent, task: Task) -> str:
         """
-        Estimate tokens saved by using local model vs API.
-        Methods: 'conservative', 'average', 'optimistic'
+        Allocate optimal model for a specific task.
+        This is called when task is assigned to agent.
+        
+        Returns: UserModelConfig.id
         """
-        # Average token usage per request by model tier
-        token_rates = {
-            "gpt-4": 2000,        # Average tokens per call
-            "gpt-4-turbo": 1500,
-            "gpt-3.5-turbo": 800,
-            "claude-3-opus": 2500,
-            "claude-3-sonnet": 1500,
-            "kimi-2.5": 1200,
-            "default": 1000
+        # Initial allocation
+        config_id = model_allocator.allocate_model(agent, task)
+        
+        # Store allocation
+        self.active_model_configs[agent.id] = config_id
+        
+        # Log for token tracking
+        model_key = f"{agent.preferred_config.provider}:{agent.preferred_config.default_model}"
+        estimated_tokens = self.estimate_task_tokens(task)
+        
+        # Adjust budget
+        idle_budget.record_usage(estimated_tokens // 1000)  # Rough estimate
+        
+        # Log allocation
+        await self._log_allocation(agent, task, config_id)
+        
+        return config_id
+    
+    def estimate_task_tokens(self, task: Task) -> int:
+        """
+        Estimate token usage for a task based on type and complexity.
+        Used for budget planning.
+        """
+        # Base estimates by task type
+        base_estimates = {
+            TaskType.SIMPLE_QUERY: 500,
+            TaskType.CONFIRMATION: 200,
+            TaskType.CODE_GENERATION: 3000,
+            TaskType.CODE_REVIEW: 2000,
+            TaskType.DEBUGGING: 2500,
+            TaskType.SYSTEM_ANALYSIS: 4000,
+            TaskType.PLANNING: 3500,
+            TaskType.DECISION: 2000,
+            TaskType.RESEARCH: 5000,
+            TaskType.CREATIVE_WRITING: 1500,
+            TaskType.BRAINSTORMING: 1000,
+            TaskType.DOCUMENTATION: 2000,
+            TaskType.NOTIFICATION: 300,
         }
         
-        multiplier = {
-            "conservative": 0.5,
-            "average": 1.0,
-            "optimistic": 1.5
-        }.get(estimation_method, 1.0)
+        base = base_estimates.get(task.task_type, 1000)
         
-        # Get agent's typical usage
-        if agent.preferred_config:
-            model = agent.preferred_config.default_model
-            base_tokens = token_rates.get(model, token_rates["default"])
-        else:
-            base_tokens = token_rates["default"]
+        # Adjust for priority
+        priority_multiplier = {
+            TaskPriority.CRITICAL: 1.5,
+            TaskPriority.HIGH: 1.2,
+            TaskPriority.NORMAL: 1.0,
+            TaskPriority.LOW: 0.8,
+            TaskPriority.IDLE: 0.5
+        }
         
-        saved = int(base_tokens * multiplier)
-        self.total_tokens_saved += saved
-        return saved
+        return int(base * priority_multiplier.get(task.priority, 1.0))
+    
+    def record_token_usage(self, agentium_id: str, tokens_used: int, model_key: str):
+        """
+        Record actual token usage for tracking and optimization.
+        """
+        # Per-agent tracking
+        current = self.tokens_used_by_agent.get(agentium_id, 0)
+        self.tokens_used_by_agent[agentium_id] = current + tokens_used
+        
+        # Total savings (compared to using best model)
+        model = api_manager.models.get(model_key)
+        if model:
+            # Savings = (best_model_cost - current_model_cost) * tokens
+            best_model = api_manager._get_best_available_model_by_capability(ModelCapability.CODE)
+            savings = (best_model.cost_per_1k_tokens - model.cost_per_1k_tokens) * (tokens_used / 1000)
+            self.total_tokens_saved_today += int(savings)
+        
+        # Check budget reset
+        self._check_daily_reset()
+    
+    def _check_daily_reset(self):
+        """Reset daily counters if it's a new day."""
+        now = datetime.utcnow()
+        if now.date() > self.last_budget_reset.date():
+            self.tokens_used_by_agent.clear()
+            self.total_tokens_saved_today = 0
+            self.last_budget_reset = now
+    
+    def get_cost_report(self, db: Session) -> Dict[str, Any]:
+        """
+        Generate comprehensive cost/token usage report.
+        """
+        return {
+            "timestamp": datetime.utcnow().isoformat(),
+            "idle_mode": self.idle_mode_active,
+            "tokens_by_agent": self.tokens_used_by_agent.copy(),
+            "total_saved_today": self.total_tokens_saved_today,
+            "budget_status": idle_budget.get_status(),
+            "allocation_report": model_allocator.get_allocation_report(),
+            "hourly_cost_estimate": self._calculate_hourly_cost(db)
+        }
+    
+    def _calculate_hourly_cost(self, db: Session) -> float:
+        """
+        Estimate hourly cost based on current model allocations.
+        """
+        agents = db.query(Agent).filter_by(is_active='Y').all()
+        hourly_cost = 0.0
+        
+        for agent in agents:
+            if not agent.preferred_config:
+                continue
+            
+            model_key = f"{agent.preferred_config.provider}:{agent.preferred_config.default_model}"
+            model = api_manager.models.get(model_key)
+            
+            if model:
+                # Assume average 1000 tokens per hour per agent
+                hourly_cost += model.cost_per_1k_tokens
+        
+        return hourly_cost
+    
+    async def _log_allocation(self, agent: Agent, task: Task, config_id: str):
+        """Log model allocation decision."""
+        audit = AuditLog(
+            level=AuditLevel.INFO,
+            category=AuditCategory.SYSTEM,
+            actor_type='system',
+            actor_id='model_allocator',
+            action='model_assigned',
+            target_type='agent',
+            target_id=agent.agentium_id,
+            description=f"Assigned model {config_id} for task {task.agentium_id}",
+            before_state={
+                'agent_tier': agent.agentium_id[0],
+                'task_type': task.task_type.value,
+                'task_priority': task.priority.value
+            },
+            after_state={
+                'model_config_id': config_id,
+                'estimated_cost': self.estimate_task_tokens(task) // 1000 * 0.01  # Rough estimate
+            },
+            created_at=datetime.utcnow()
+        )
+        self.db.add(audit)
+        self.db.commit()
     
     async def _broadcast_idle_status(self, event: str, data: Dict):
-        """Broadcast idle status changes via WebSocket."""
-        # This will be integrated with the ConnectionManager in main.py
+        """Broadcast status to WebSocket clients."""
         try:
             from backend.main import manager
             await manager.broadcast({
-                "type": "idle_status",
+                "type": "optimizer_status",
                 "event": event,
                 "data": data,
                 "timestamp": datetime.utcnow().isoformat()
             })
-        except Exception as e:
-            print(f"⚠️ Could not broadcast idle status: {e}")
+        except ImportError:
+            print(f"⚠️ WebSocket manager not available")
     
     def get_status(self) -> Dict[str, Any]:
-        """Get current optimizer status."""
+        """Get comprehensive optimizer status."""
         idle_duration = (datetime.utcnow() - self.last_activity_at).total_seconds()
         
         return {
             "idle_mode_active": self.idle_mode_active,
             "time_since_last_activity_seconds": idle_duration,
             "idle_threshold_seconds": self.idle_threshold_seconds,
-            "persistent_agents_count": len(self.persistent_agents),
-            "total_tokens_saved": self.total_tokens_saved,
-            "agents_in_idle_mode": self.persistent_agents if self.idle_mode_active else []
+            "total_agents_monitored": len(self.tokens_used_by_agent),
+            "total_tokens_saved_today": self.total_tokens_saved_today,
+            "budget_status": idle_budget.get_status(),
+            "is_single_api_mode": api_manager.single_api_mode()
         }
 
-
-# Singleton instance
-token_optimizer = TokenOptimizer()
-
-
+# Enhanced Budget Manager with cost tracking
 class IdleBudgetManager:
     """
-    Manages token budget for idle operations.
-    Ensures we don't exceed reasonable limits even during idle.
+    Enhanced token budget that tracks both tokens and estimated cost.
+    Prevents runaway spending even during idle operations.
     """
     
-    def __init__(self, daily_token_limit: int = 100000):
+    def __init__(self, daily_token_limit: int = 100000, daily_cost_limit: float = 10.0):
         self.daily_token_limit = daily_token_limit
+        self.daily_cost_limit = daily_cost_limit  # USD
+        
         self.tokens_used_today = 0
+        self.cost_used_today = 0.0
         self.last_reset = datetime.utcnow()
+        
+        # Cost multiplier for idle vs active (idle is cheaper)
+        self.idle_cost_multiplier = 0.0  # Local models are free
     
-    def check_budget(self, estimated_cost: int) -> bool:
+    def check_budget(self, estimated_cost: float) -> bool:
         """Check if operation fits within daily budget."""
         self._check_reset()
-        return (self.tokens_used_today + estimated_cost) <= self.daily_token_limit
+        return (self.cost_used_today + estimated_cost) <= self.daily_cost_limit
     
-    def record_usage(self, tokens: int):
-        """Record token usage."""
+    def record_usage(self, tokens: int, model_cost_per_1k: float, is_idle: bool = False):
+        """Record token usage and calculate cost."""
         self._check_reset()
+        
         self.tokens_used_today += tokens
+        
+        # Calculate cost (local models cost 0)
+        cost_multiplier = self.idle_cost_multiplier if is_idle else 1.0
+        cost = (tokens / 1000) * model_cost_per_1k * cost_multiplier
+        
+        self.cost_used_today += cost
+    
+    def get_status(self) -> Dict[str, Any]:
+        """Get detailed budget status."""
+        self._check_reset()
+        
+        return {
+            "daily_token_limit": self.daily_token_limit,
+            "tokens_used_today": self.tokens_used_today,
+            "tokens_remaining": self.daily_token_limit - self.tokens_used_today,
+            "daily_cost_limit_usd": self.daily_cost_limit,
+            "cost_used_today_usd": round(self.cost_used_today, 4),
+            "cost_remaining_usd": round(self.daily_cost_limit - self.cost_used_today, 4),
+            "cost_percentage_used": round((self.cost_used_today / self.daily_cost_limit) * 100, 2),
+            "cost_percentage_tokens": round((self.tokens_used_today / self.daily_token_limit) * 100, 2)
+        }
     
     def _check_reset(self):
-        """Reset counter if it's a new day."""
+        """Reset daily counters at midnight."""
         now = datetime.utcnow()
         if now.date() > self.last_reset.date():
             self.tokens_used_today = 0
+            self.cost_used_today = 0.0
             self.last_reset = now
+
+# Singleton instances
+token_optimizer = TokenOptimizer()
+idle_budget = IdleBudgetManager(daily_token_limit=100000, daily_cost_limit=5.0)  # $5/day limit
+
+# Initialization function
+def init_token_optimizer(db: Session, agents: List[Agent] = None):
+    """Initialize token optimizer with database and agents."""
+    token_optimizer.initialize(db, agents)
     
-    def get_status(self) -> Dict[str, Any]:
-        """Get budget status."""
-        self._check_reset()
-        return {
-            "daily_limit": self.daily_token_limit,
-            "used_today": self.tokens_used_today,
-            "remaining": self.daily_token_limit - self.tokens_used_today,
-            "percentage_used": (self.tokens_used_today / self.daily_token_limit) * 100
-        }
-
-
-# Budget manager instance
-idle_budget = IdleBudgetManager(daily_token_limit=50000)  # Conservative 50k/day for idle
+    # Initialize API manager if needed
+    if api_manager is None:
+        init_api_manager(db)

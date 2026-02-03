@@ -48,6 +48,10 @@ class Constitution(BaseEntity):
     sovereign_preferences = Column(Text, nullable=False)  # JSON object - User's preferences
     changelog = Column(Text, nullable=True)  # JSON array documenting changes from previous version
     
+    effective_date = Column(DateTime, default=datetime.utcnow, nullable=False)
+    amendment_date = Column(DateTime, nullable=True)
+    archived_date = Column(DateTime, nullable=True)
+    is_active = Column(String(1), default='Y', nullable=False)
     # Authority
     created_by_agentium_id = Column(String(10), nullable=False)  # Usually 00001 (Head of Council)
     

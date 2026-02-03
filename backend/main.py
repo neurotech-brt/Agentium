@@ -12,6 +12,10 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPExcept
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
+from backend.services.api_manager import init_api_manager, api_manager
+from backend.services.model_allocation import init_model_allocator, model_allocator
+from backend.services.token_optimizer import init_token_optimizer, token_optimizer, idle_budget
+
 from backend.models.database import init_db, get_db, check_health
 from backend.models.entities import Agent, Task, Constitution, UserModelConfig, AgentHealthReport, ViolationReport
 from backend.services.model_provider import ModelService
@@ -33,6 +37,8 @@ from backend.api.routes import models as model_routes
 from backend.api.routes import websocket as websocket_routes
 from backend.core.auth import get_current_user
 from backend.api import sovereign
+from backend.api.routes import tool_creation as tool_creation_routes
+from backend.api.routes import admin as admin_routes
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -41,11 +47,18 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    Application lifespan with IDLE GOVERNANCE initialization.
+    Application lifespan with:
+    - Database initialization
+    - Persistent Council (IDLE GOVERNANCE)
+    - API Manager & Model Allocation
+    - Enhanced Token Optimizer
+    - Idle Governance Engine
     """
-    logger.info("🚀 Starting Agentium with IDLE GOVERNANCE...")
+    logger.info("🚀 Starting Agentium with Intelligent Model Allocation & IDLE GOVERNANCE...")
     
-    # Initialize database
+    # ─────────────────────────────────────────────────────────────
+    # 1. Initialize Database
+    # ─────────────────────────────────────────────────────────────
     try:
         init_db()
         logger.info("✅ Database initialized")
@@ -53,16 +66,71 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Database initialization failed: {e}")
         raise
     
-    # IDLE GOVERNANCE: Initialize Persistent Council (NEW)
+    # ─────────────────────────────────────────────────────────────
+    # 2. Initialize Persistent Council (IDLE GOVERNANCE)
+    # ─────────────────────────────────────────────────────────────
     try:
         with next(get_db()) as db:
             council_status = persistent_council.initialize_persistent_council(db)
+            
+            # Get the initialized persistent agents for token optimizer
+            persistent_agents = persistent_council.get_persistent_agents(db)
+            agent_list = list(persistent_agents.values())
+            
             logger.info(f"✅ Persistent Council initialized: {council_status}")
+            logger.info(f"   - Head: {len([a for a in agent_list if a.agentium_id.startswith('0')])}")
+            logger.info(f"   - Council: {len([a for a in agent_list if a.agentium_id.startswith('1')])}")
     except Exception as e:
         logger.error(f"❌ Persistent Council initialization failed: {e}")
         raise
     
-    # IDLE GOVERNANCE: Start the eternal idle loop (NEW)
+    # ─────────────────────────────────────────────────────────────
+    # 3. Initialize API Manager & Model Allocator
+    # ─────────────────────────────────────────────────────────────
+    try:
+        with next(get_db()) as db:
+            # Initialize API Manager (loads all available models)
+            init_api_manager(db)
+            logger.info(f"✅ API Manager initialized with {len(api_manager.models)} models")
+            
+            # Initialize Model Allocation Service
+            init_model_allocator(db)
+            logger.info("✅ Model Allocator initialized")
+            
+            # Print available models summary
+            for key, model in api_manager.models.items():
+                logger.info(f"   - {key}: {model.model_name} (${model.cost_per_1k_tokens}/1K)")
+            
+    except Exception as e:
+        logger.error(f"❌ API Manager initialization failed: {e}")
+        raise
+    
+    # ─────────────────────────────────────────────────────────────
+    # 4. Initialize Enhanced Token Optimizer
+    # ─────────────────────────────────────────────────────────────
+    try:
+        with next(get_db()) as db:
+            # Initialize with the persistent agents from council
+            init_token_optimizer(db, agents=agent_list)
+            
+            # Log initial status
+            status = token_optimizer.get_status()
+            logger.info("✅ Enhanced Token Optimizer initialized")
+            logger.info(f"   - Idle Threshold: {status['idle_threshold_seconds']}s")
+            logger.info(f"   - Single API Mode: {api_manager.single_api_mode()}")
+            logger.info(f"   - Daily Budget: ${idle_budget.daily_cost_limit}")
+            
+            # If single API mode, log warning
+            if api_manager.single_api_mode():
+                logger.warning("⚠️ Single API mode detected - using one provider for all tasks")
+            
+    except Exception as e:
+        logger.error(f"❌ Token Optimizer initialization failed: {e}")
+        raise
+    
+    # ─────────────────────────────────────────────────────────────
+    # 5. Start Idle Governance Engine
+    # ─────────────────────────────────────────────────────────────
     try:
         with next(get_db()) as db:
             await idle_governance.start(db)
@@ -71,15 +139,42 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Idle Governance startup failed: {e}")
         raise
     
+    # ─────────────────────────────────────────────────────────────
+    # 6. Print System Summary
+    # ─────────────────────────────────────────────────────────────
+    logger.info("=" * 60)
+    logger.info("AGENTIUM SYSTEM READY")
+    logger.info("=" * 60)
+    logger.info(f"🤖 Persistent Agents: {', '.join(token_optimizer.persistent_agents)}")
+    logger.info(f"🧠 Available Models: {len(api_manager.models)}")
+    logger.info(f"💰 Daily Budget: ${idle_budget.daily_cost_limit} | Tokens: {idle_budget.daily_token_limit:,}")
+    logger.info(f"⚙️ Idle Threshold: {token_optimizer.idle_threshold_seconds}s")
+    logger.info("=" * 60)
+    
     yield
     
-    # Shutdown: Stop idle governance gracefully
+    # ─────────────────────────────────────────────────────────────
+    # SHUTDOWN: Gracefully stop all services
+    # ─────────────────────────────────────────────────────────────
     logger.info("🛑 Shutting down Agentium...")
+    
+    # Stop Idle Governance
     try:
         await idle_governance.stop()
         logger.info("✅ Idle Governance Engine stopped")
     except Exception as e:
         logger.error(f"❌ Error stopping idle governance: {e}")
+    
+    # Log final statistics
+    try:
+        with next(get_db()) as db:
+            status = token_optimizer.get_cost_report(db)
+            logger.info("📊 Final Statistics:")
+            logger.info(f"   - Tokens Saved Today: {status['total_tokens_saved_today']:,}")
+            logger.info(f"   - Cost Used: ${status['budget_status']['cost_used_today_usd']}")
+            logger.info(f"   - Model Allocations: {status['allocation_report']['total_agents']} agents")
+    except Exception as e:
+        logger.error(f"❌ Could not generate final statistics: {e}")
 
 # Create FastAPI app
 app = FastAPI(
@@ -97,6 +192,8 @@ app.include_router(webhooks_router.router)
 app.include_router(websocket_routes.router)
 app.include_router(host_access.router)
 app.include_router(sovereign.router)
+app.include_router(tool_creation_routes.router)
+app.include_router(admin_routes.router)
 
 # CORS middleware
 app.add_middleware(

@@ -105,7 +105,7 @@ class APIManager:
                 config_id=config.id,
                 cost_per_1k_tokens=metadata["cost"],
                 max_context_length=metadata["context"],
-                rate_limit_per_minute=config.rate_limit or 60,
+                rate_limit_per_minute=getattr(config, "rate_limit", None) or 60,
                 capability=metadata["capability"],
                 is_available=True
             )
@@ -302,7 +302,7 @@ def init_api_manager(db: Session):
             is_default=True,
             is_active='Y',
             status='active'
-        )
+        , rate_limit=60)
         db.add(default_config)
         db.commit()
         db.refresh(default_config)

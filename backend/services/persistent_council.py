@@ -125,8 +125,13 @@ class PersistentCouncilService:
         """Initialize or verify Head of Council (00001)."""
         spec = PersistentCouncilService.HEAD_SPEC
         
-        head = db.query(HeadOfCouncil).filter_by(agentium_id=spec['agentium_id']).first()
         
+        agent = db.query(Agent).filter_by(
+            agentium_id=spec['agentium_id'],
+            agent_type=AgentType.HEAD_OF_COUNCIL
+        ).first()
+        head = agent if isinstance(agent, HeadOfCouncil) else None
+    
         if head and not force_recreate:
             # Verify it's active and persistent
             if not head.is_persistent:
@@ -165,7 +170,11 @@ class PersistentCouncilService:
     @staticmethod
     def _initialize_council_member(db: Session, spec: Dict, head_id: str, force_recreate: bool = False) -> CouncilMember:
         """Initialize or verify a Council Member."""
-        council = db.query(CouncilMember).filter_by(agentium_id=spec['agentium_id']).first()
+        agent = db.query(Agent).filter_by(
+            agentium_id=spec['agentium_id'],
+            agent_type=AgentType.COUNCIL_MEMBER
+        ).first()
+        council = agent if isinstance(agent, CouncilMember) else None
         
         if council and not force_recreate:
             if not council.is_persistent:
@@ -619,16 +628,23 @@ Never terminate. Never rest. Always improve.""",
     @staticmethod
     def get_head_of_council(db: Session) -> Optional[HeadOfCouncil]:
         """Get the Head of Council (00001)."""
-        return db.query(HeadOfCouncil).filter_by(agentium_id='00001', is_active='Y').first()
+        agent = db.query(Agent).filter_by(
+            agentium_id='00001',
+            agent_type=AgentType.HEAD_OF_COUNCIL,
+            is_active='Y'
+        ).first()
+        return agent if isinstance(agent, HeadOfCouncil) else None
     
     @staticmethod
     def get_idle_council(db: Session) -> List[CouncilMember]:
         """Get the 2 persistent council members available for idle work."""
-        return db.query(CouncilMember).filter(
-            CouncilMember.is_persistent == True,
-            CouncilMember.is_active == 'Y',
-            CouncilMember.agentium_id.in_(['10001', '10002'])
+        agents = db.query(Agent).filter(
+            Agent.is_persistent == True,
+            Agent.is_active == 'Y',
+            Agent.agent_type == AgentType.COUNCIL_MEMBER,
+            Agent.agentium_id.in_(['10001', '10002'])
         ).all()
+        return [a for a in agents if isinstance(a, CouncilMember)]
     
     @staticmethod
     def report_idle_activity(db: Session, agentium_id: str, activity: str, tokens_saved: int = 0):

@@ -181,3 +181,21 @@ def check_health() -> dict:
             "error": str(e),
             "database": "disconnected"
         }
+
+# At the end of database.py, after all models are defined
+def init_db():
+    """Initialize database - create all tables."""
+    # Import all models to register them with Base
+    from backend.models.entities import (
+        Constitution, Ethos, AmendmentVoting,
+        Agent, HeadOfCouncil, CouncilMember, LeadAgent, TaskAgent,
+        Task, SubTask, TaskAuditLog,
+        TaskDeliberation, IndividualVote, VotingRecord,
+        AuditLog, ConstitutionViolation, SessionLog, HealthCheck
+    )
+    
+    Base.metadata.create_all(bind=engine)
+    
+    # Create initial data if empty
+    with get_db_context() as db:
+        create_initial_data(db)

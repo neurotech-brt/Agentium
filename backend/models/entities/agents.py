@@ -26,6 +26,7 @@ class AgentStatus(str, enum.Enum):
     DELIBERATING = "deliberating"    # Council member voting
     WORKING = "working"              # Currently processing a task
     IDLE_WORKING = "idle_working"    # Processing idle task (low-token mode)
+    IDLE_PAUSED = "idle_paused"
     SUSPENDED = "suspended"          # Violation detected, under review
     TERMINATED = "terminated"        # Permanently deactivated
 

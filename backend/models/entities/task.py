@@ -311,20 +311,6 @@ class Task(BaseEntity):
         if note:
             self._log_status_change(f"progress_{percentage}%", "System", note)
     
-    def complete(self, result_summary: str, result_data: Dict = None):
-        """Mark task as completed."""
-        self.status = TaskStatus.COMPLETED
-        self.result_summary = result_summary
-        self.result_data = result_data or {}
-        self.completion_percentage = 100
-        self.completed_at = datetime.utcnow()
-        
-        if self.started_at:
-            self.time_actual = int((self.completed_at - self.started_at).total_seconds())
-        
-        self._log_status_change("completed", self.assigned_task_agent_ids[0] if self.assigned_task_agent_ids else "System")
-        self._update_agent_stats(success=True)
-    
     def fail(self, error_message: str, can_retry: bool = True):
         """Mark task as failed."""
         self.error_count += 1

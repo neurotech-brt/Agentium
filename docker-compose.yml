@@ -83,7 +83,7 @@ services:
       - chroma_data:/app/chroma_data
       - /var/run/docker.sock:/var/run/docker.sock:rw
       - /:/host:rw
-      - ${USERPROFILE}:/host_home:rw
+      - ${USERPROFILE:-~}:/host_home:rw
       - /sys:/sys:rw
       - /proc:/proc:rw
       - /dev:/dev:rw

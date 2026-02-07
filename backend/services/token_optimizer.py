@@ -66,9 +66,14 @@ class TokenOptimizer:
         """Record user activity and wake from idle if needed."""
         self.last_activity_at = datetime.utcnow()
         
-        # Wake system immediately
+        # Wake system immediately - but we need db, so just flag it
         if self.idle_mode_active:
-            asyncio.create_task(self.wake_from_idle())
+            # Schedule wake with proper db context
+            from backend.models.database import get_db_context
+            async def _wake():
+                with get_db_context() as db:
+                    await self.wake_from_idle(db)
+            asyncio.create_task(_wake())
     
     async def check_idle_transition(self, db: Session) -> bool:
         """
@@ -305,28 +310,31 @@ class TokenOptimizer:
     
     async def _log_allocation(self, agent: Agent, task: Task, config_id: str):
         """Log model allocation decision."""
-        audit = AuditLog(
-            level=AuditLevel.INFO,
-            category=AuditCategory.SYSTEM,
-            actor_type='system',
-            actor_id='model_allocator',
-            action='model_assigned',
-            target_type='agent',
-            target_id=agent.agentium_id,
-            description=f"Assigned model {config_id} for task {task.agentium_id}",
-            before_state={
-                'agent_tier': agent.agentium_id[0],
-                'task_type': task.task_type.value,
-                'task_priority': task.priority.value
-            },
-            after_state={
-                'model_config_id': config_id,
-                'estimated_cost': self.estimate_task_tokens(task) // 1000 * 0.01  # Rough estimate
-            },
-            created_at=datetime.utcnow()
-        )
-        self.db.add(audit)
-        self.db.commit()
+        from backend.models.database import get_db_context
+        
+        with get_db_context() as db:
+            audit = AuditLog(
+                level=AuditLevel.INFO,
+                category=AuditCategory.SYSTEM,
+                actor_type='system',
+                actor_id='model_allocator',
+                action='model_assigned',
+                target_type='agent',
+                target_id=agent.agentium_id,
+                description=f"Assigned model {config_id} for task {task.agentium_id}",
+                before_state={
+                    'agent_tier': agent.agentium_id[0],
+                    'task_type': task.task_type.value,
+                    'task_priority': task.priority.value
+                },
+                after_state={
+                    'model_config_id': config_id,
+                    'estimated_cost': self.estimate_task_tokens(task) // 1000 * 0.01
+                },
+                created_at=datetime.utcnow()
+            )
+            db.add(audit)
+            db.commit()
     
     async def _broadcast_idle_status(self, event: str, data: Dict):
         """Broadcast status to WebSocket clients."""

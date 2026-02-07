@@ -206,6 +206,9 @@ class IdleGovernanceEngine:
             task.start_idle_execution(agent.agentium_id)
             self.current_idle_tasks[agent.agentium_id] = task.id
             print(f"📋 Assigned {task_type.value} to {agent.agentium_id}")
+            db.commit()  # Ensure task is persisted
+        else:
+            print(f"⚠️ Could not assign idle task to {agent.agentium_id}")
     
     async def _execute_idle_work(self, db: Session, agents: List[Agent]):
         """Execute the assigned idle work for agents."""

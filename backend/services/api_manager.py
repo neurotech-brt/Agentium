@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Any, TYPE_CHECKING
 from sqlalchemy.orm import Session
 from backend.models.entities.user_config import UserModelConfig
 from backend.models.entities.agents import Agent
+from backend.models.entities.user_config import ProviderType, ConnectionStatus
 
 if TYPE_CHECKING:
     from backend.models.entities.task import Task
@@ -63,71 +64,138 @@ class APIManager:
     
     def _initialize_models(self):
         """Load model configurations from database."""
-        configs = self.db.query(UserModelConfig).filter_by(is_active='Y').all()
-        
-        # Define capabilities and costs for known models
-        model_metadata = {
-            # OpenAI
-            "gpt-4": {"capability": ModelCapability.CODE, "cost": 0.03, "context": 8192},
-            "gpt-4-turbo": {"capability": ModelCapability.ANALYSIS, "cost": 0.01, "context": 128000},
-            "gpt-3.5-turbo": {"capability": ModelCapability.SIMPLE, "cost": 0.0015, "context": 16385},
+        try:
+            configs = self.db.query(UserModelConfig).filter_by(is_active='Y').all()
             
-            # Anthropic
-            "claude-3-opus": {"capability": ModelCapability.CODE, "cost": 0.015, "context": 200000},
-            "claude-3-sonnet": {"capability": ModelCapability.ANALYSIS, "cost": 0.003, "context": 200000},
-            "claude-3-haiku": {"capability": ModelCapability.SIMPLE, "cost": 0.00075, "context": 200000},
+            # CRITICAL FIX: If no configs exist, create a default local config
+            if not configs:
+                print("⚠️ No model configurations found. Creating default local config...")
+                try:
+                    default_config = UserModelConfig(
+                        user_id="system",
+                        config_name="Default Local Model",
+                        provider=ProviderType.LOCAL,  # Use enum, not string
+                        api_key_encrypted=None,
+                        default_model="kimi-2.5-7b",
+                        base_url="http://localhost:11434",
+                        temperature=0.7,
+                        max_tokens=4000,
+                        is_default=True,
+                        status=ConnectionStatus.ACTIVE  # Use enum
+                    )
+                    self.db.add(default_config)
+                    self.db.commit()  # COMMIT the transaction!
+                    self.db.refresh(default_config)  # Refresh to get the ID
+                    configs = [default_config]
+                    print(f"✅ Created default local model configuration (ID: {default_config.id})")
+                except Exception as e:
+                    print(f"❌ Failed to create default config: {e}")
+                    import traceback
+                    print(traceback.format_exc())
+                    configs = []
             
-            # Local - Zero cost, lower performance
-            "kimi-2.5": {"capability": ModelCapability.IDLE, "cost": 0.0, "context": 32000},
-            "kimi-2.5-7b": {"capability": ModelCapability.IDLE, "cost": 0.0, "context": 32000},
-            "llama-2-7b": {"capability": ModelCapability.IDLE, "cost": 0.0, "context": 4096},
-            "mistral-7b": {"capability": ModelCapability.IDLE, "cost": 0.0, "context": 8192},
+            # Define capabilities and costs for known models
+            model_metadata = {
+                # OpenAI
+                "gpt-4": {"capability": ModelCapability.CODE, "cost": 0.03, "context": 8192},
+                "gpt-4-turbo": {"capability": ModelCapability.ANALYSIS, "cost": 0.01, "context": 128000},
+                "gpt-3.5-turbo": {"capability": ModelCapability.SIMPLE, "cost": 0.0015, "context": 16385},
+                
+                # Anthropic
+                "claude-3-opus": {"capability": ModelCapability.CODE, "cost": 0.015, "context": 200000},
+                "claude-3-sonnet": {"capability": ModelCapability.ANALYSIS, "cost": 0.003, "context": 200000},
+                "claude-3-haiku": {"capability": ModelCapability.SIMPLE, "cost": 0.00075, "context": 200000},
+                
+                # Local - Zero cost, lower performance
+                "kimi-2.5": {"capability": ModelCapability.IDLE, "cost": 0.0, "context": 32000},
+                "kimi-2.5-7b": {"capability": ModelCapability.IDLE, "cost": 0.0, "context": 32000},
+                "llama-2-7b": {"capability": ModelCapability.IDLE, "cost": 0.0, "context": 4096},
+                "mistral-7b": {"capability": ModelCapability.IDLE, "cost": 0.0, "context": 8192},
+                
+                # Default fallback
+                "default": {"capability": ModelCapability.SIMPLE, "cost": 0.001, "context": 8000},
+                "fallback": {"capability": ModelCapability.SIMPLE, "cost": 0.0, "context": 4096}
+            }
             
-            # Default fallback
-            "default": {"capability": ModelCapability.SIMPLE, "cost": 0.001, "context": 8000}
-        }
-        
-        for config in configs:
-            # Determine capability based on model name or provider
-            metadata = model_metadata.get(
-                config.default_model, 
-                model_metadata["default"]
-            )
+            # CRITICAL: Ensure we have at least one config
+            if not configs:
+                print("❌ CRITICAL: No model configurations available, creating emergency fallback")
+                # Create a virtual config without database
+                model_key = "local:fallback"
+                self.models[model_key] = ModelConfig(
+                    provider="local",
+                    model_name="fallback",
+                    config_id="emergency",
+                    cost_per_1k_tokens=0.0,
+                    max_context_length=4096,
+                    rate_limit_per_minute=60,
+                    capability=ModelCapability.SIMPLE,
+                    is_available=True
+                )
+                return
             
-            # Override for local provider
-            if config.provider == "local":
-                metadata["capability"] = ModelCapability.IDLE
+            for config in configs:
+                try:
+                    # Determine capability based on model name or provider
+                    metadata = model_metadata.get(
+                        config.default_model, 
+                        model_metadata["default"]
+                    )
+                    
+                    # Override for local provider
+                    if config.provider == ProviderType.LOCAL or config.provider == "local":
+                        metadata["capability"] = ModelCapability.IDLE
+                    
+                    model_key = f"{config.provider}:{config.default_model}"
+                    self.models[model_key] = ModelConfig(
+                        provider=str(config.provider.value if hasattr(config.provider, 'value') else config.provider),
+                        model_name=config.default_model,
+                        config_id=config.id,
+                        cost_per_1k_tokens=metadata["cost"],
+                        max_context_length=metadata["context"],
+                        rate_limit_per_minute=60,  # Hardcoded since column doesn't exist
+                        capability=metadata["capability"],
+                        is_available=True
+                    )
+                    print(f"✅ Loaded model: {model_key}")
+                except Exception as e:
+                    print(f"❌ Failed to load model config {config.id}: {e}")
+                    continue
             
-            model_key = f"{config.provider}:{config.default_model}"
-            self.models[model_key] = ModelConfig(
-                provider=config.provider,
-                model_name=config.default_model,
-                config_id=config.id,
-                cost_per_1k_tokens=metadata["cost"],
-                max_context_length=metadata["context"],
-                rate_limit_per_minute=getattr(config, "rate_limit", None) or 60,
-                capability=metadata["capability"],
+            print(f"✅ Total models loaded: {len(self.models)}")
+            
+        except Exception as e:
+            print(f"❌ Critical error in _initialize_models: {e}")
+            import traceback
+            print(traceback.format_exc())
+            # Create emergency fallback
+            self.models["local:emergency"] = ModelConfig(
+                provider="local",
+                model_name="emergency",
+                config_id="emergency",
+                cost_per_1k_tokens=0.0,
+                max_context_length=4096,
+                rate_limit_per_minute=60,
+                capability=ModelCapability.SIMPLE,
                 is_available=True
             )
     
-    def get_best_model(
-        self, 
-        task_type: str, 
-        agent_tier: int,
-        budget_constraint: Optional[float] = None
-    ) -> ModelConfig:
+    def get_best_model(self, task_type: str, agent_tier: int = 2, budget_constraint: Optional[float] = None) -> ModelConfig:
         """
         Get best model for task based on:
-        - Task type (code, analysis, simple, idle)
         - Agent tier (0=Head, 1=Council, 2=Lead, 3=Task)
-        - Budget constraint
+        - Task type
+        - Budget constraints
         """
-        # Map task description to capability
+        # If single API mode, return that API's best model
+        if self.single_api_mode():
+            return self._get_best_available_model_by_capability(ModelCapability.CODE)
+        
+        # Classify task into capability
         capability = self._classify_task(task_type)
         
-        # Override with best model for code tasks
-        if capability == ModelCapability.CODE:
-            # Always use best code model regardless of tier
+        # Head always gets best model
+        if agent_tier == 0:
             return self._get_best_available_model_by_capability(ModelCapability.CODE)
         
         # Idle mode: Always return local model
@@ -284,28 +352,50 @@ class APIManager:
 # Global instance
 api_manager = None  # Will be initialized with db session
 
-def init_api_manager(db: Session):
-    """Initialize the global APIManager."""
+def init_api_manager(db: Session) -> APIManager:
+    """Initialize the global APIManager and return the instance."""
     global api_manager
     
-    # Check if any configurations exist
-    config_count = db.query(UserModelConfig).filter_by(is_active='Y').count()
-    
-    if config_count == 0:
-        # Create a default local configuration
-        default_config = UserModelConfig(
-            user_id="sovereign",
-            config_name="Default Local Model",
-            provider="local",
-            provider_name="Local",
-            default_model="kimi-2.5",
-            is_default=True,
-            is_active='Y',
-            status='active'
-        , rate_limit=60)
-        db.add(default_config)
-        db.commit()
-        db.refresh(default_config)
-        logger.info("Created default model configuration")
-    
-    api_manager = APIManager(db)
+    try:
+        # Check if any configurations exist
+        config_count = db.query(UserModelConfig).filter_by(is_active='Y').count()
+        
+        if config_count == 0:
+            # Create a default local configuration
+            logger.info("Creating default model configuration")
+            default_config = UserModelConfig(
+                user_id="sovereign",
+                config_name="Default Local Model",
+                provider="local",
+                provider_name="Local",
+                default_model="kimi-2.5",
+                is_default=True,
+                is_active='Y',
+                status='active',
+                rate_limit=60
+            )
+            db.add(default_config)
+            db.commit()
+            db.refresh(default_config)
+            logger.info("Created default model configuration")
+        
+        # Create the APIManager instance
+        api_manager = APIManager(db)
+        
+        # Verify it was created successfully
+        if api_manager is None:
+            raise Exception("APIManager instance is None after initialization")
+        
+        if not hasattr(api_manager, 'models'):
+            raise Exception("APIManager instance doesn't have 'models' attribute")
+        
+        if len(api_manager.models) == 0:
+            logger.warning("APIManager initialized but has 0 models")
+        
+        return api_manager
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize APIManager: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise

@@ -13,7 +13,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from backend.celery_app import celery_app as celery
 
-from backend.services.api_manager import init_api_manager, api_manager
+from backend.services.api_manager import init_api_manager
+import backend.services.api_manager as api_manager_module
 from backend.services.model_allocation import init_model_allocator, model_allocator
 from backend.services.token_optimizer import init_token_optimizer, token_optimizer, idle_budget
 
@@ -92,21 +93,28 @@ async def lifespan(app: FastAPI):
     try:
         with next(get_db()) as db:
             # Initialize API Manager (loads all available models)
-            init_api_manager(db)
-            if api_manager is None:
-                raise RuntimeError("API Manager failed to initialize")
-            logger.info(f"✅ API Manager initialized with {len(api_manager.models)} models")
-
+            manager = init_api_manager(db)
+            
+            if manager is None:
+                raise Exception("API Manager failed to initialize - returned None")
+            
+            if not hasattr(manager, 'models'):
+                raise Exception("API Manager instance missing 'models' attribute")
+            
+            logger.info(f"✅ API Manager initialized with {len(manager.models)} models")
+            
             # Initialize Model Allocation Service
             init_model_allocator(db)
             logger.info("✅ Model Allocator initialized")
             
             # Print available models summary
-            for key, model in api_manager.models.items():
+            for key, model in manager.models.items():
                 logger.info(f"   - {key}: {model.model_name} (${model.cost_per_1k_tokens}/1K)")
-            
+                
     except Exception as e:
         logger.error(f"❌ API Manager initialization failed: {e}")
+        import traceback
+        logger.error(f"Detailed traceback: {traceback.format_exc()}")
         raise
     
     # ─────────────────────────────────────────────────────────────
@@ -121,11 +129,11 @@ async def lifespan(app: FastAPI):
             status = token_optimizer.get_status()
             logger.info("✅ Enhanced Token Optimizer initialized")
             logger.info(f"   - Idle Threshold: {status['idle_threshold_seconds']}s")
-            logger.info(f"   - Single API Mode: {api_manager.single_api_mode()}")
+            logger.info(f"   - Single API Mode: {api_manager_module.api_manager.single_api_mode()}")
             logger.info(f"   - Daily Budget: ${idle_budget.daily_cost_limit}")
             
             # If single API mode, log warning
-            if api_manager.single_api_mode():
+            if api_manager_module.api_manager.single_api_mode():
                 logger.warning("⚠️ Single API mode detected - using one provider for all tasks")
             
     except Exception as e:
@@ -150,7 +158,7 @@ async def lifespan(app: FastAPI):
     logger.info("AGENTIUM SYSTEM READY")
     logger.info("=" * 60)
     logger.info(f"🤖 Persistent Agents: {', '.join(token_optimizer.persistent_agents)}")
-    logger.info(f"🧠 Available Models: {len(api_manager.models)}")
+    logger.info(f"🧠 Available Models: {len(api_manager_module.api_manager.models)}")
     logger.info(f"💰 Daily Budget: ${idle_budget.daily_cost_limit} | Tokens: {idle_budget.daily_token_limit:,}")
     logger.info(f"⚙️ Idle Threshold: {token_optimizer.idle_threshold_seconds}s")
     logger.info("=" * 60)
@@ -203,324 +211,235 @@ app.include_router(admin_routes.router)
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://localhost:5173"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# IDLE GOVERNANCE: Middleware to wake from idle on user requests (NEW)
-@app.middleware("http")
-async def wake_on_request(request, call_next):
-    """Wake system from idle mode when user makes a request."""
-    with next(get_db()) as db:
-        # Record activity to prevent idle transition
-        token_optimizer.record_activity()
-        
-        # Check if we need to transition out of idle
-        if token_optimizer.idle_mode_active:
-            await token_optimizer.wake_from_idle(db)
-    
-    response = await call_next(request)
-    return response
-
-# ==================== IDLE GOVERNANCE ENDPOINTS (NEW) ====================
-
-@app.get("/idle/status")
-async def get_idle_status():
-    """Get current idle governance status."""
-    return {
-        "idle_governance": idle_governance.get_statistics(),
-        "token_optimizer": token_optimizer.get_status(),
-        "budget": idle_budget.get_status()
-    }
-
-@app.post("/idle/wake")
-async def manual_wake():
-    """Manually wake system from idle mode."""
-    with next(get_db()) as db:
-        await token_optimizer.wake_from_idle(db)
-    return {"message": "System woken from idle mode", "timestamp": datetime.utcnow().isoformat()}
-
-@app.post("/idle/enter")
-async def manual_enter_idle():
-    """Manually enter idle mode (for testing)."""
-    with next(get_db()) as db:
-        await token_optimizer.enter_idle_mode(db)
-    return {"message": "System entered idle mode", "timestamp": datetime.utcnow().isoformat()}
-
-@app.get("/idle/persistent-agents")
-async def get_persistent_agents(db: Session = Depends(get_db)):
-    """Get status of the 3 eternal agents."""
-    agents = persistent_council.get_persistent_agents(db)
-    return {
-        "count": len(agents),
-        "agents": {aid: agent.to_dict() for aid, agent in agents.items()}
-    }
-
-@app.get("/idle/statistics")
-async def get_idle_statistics(db: Session = Depends(get_db)):
-    """Get comprehensive idle governance statistics."""
-    head = persistent_council.get_head_of_council(db)
-    council = persistent_council.get_idle_council(db)
-    
-    # Get idle task stats
-    completed_tasks = db.query(Task).filter_by(
-        is_idle_task=True, 
-        status=TaskStatus.IDLE_COMPLETED
-    ).count()
-    
-    failed_tasks = db.query(Task).filter_by(
-        is_idle_task=True,
-        status=TaskStatus.FAILED
-    ).count()
-    
-    # Calculate total tokens saved
-    total_tokens_saved = sum(agent.idle_tokens_saved for agent in db.query(Agent).filter_by(is_persistent=True))
-    
-    return {
-        "system_status": {
-            "is_idle": token_optimizer.idle_mode_active,
-            "time_since_activity": (datetime.utcnow() - token_optimizer.last_activity_at).total_seconds(),
-            "idle_threshold": token_optimizer.idle_threshold_seconds
-        },
-        "persistent_council": {
-            "head_of_council": head.to_dict() if head else None,
-            "council_members": [m.to_dict() for m in council]
-        },
-        "performance": {
-            "completed_idle_tasks": completed_tasks,
-            "failed_idle_tasks": failed_tasks,
-            "total_tokens_saved": total_tokens_saved,
-            "uptime_hours": idle_governance.get_statistics().get('session_duration_hours', 0)
-        },
-        "budget": idle_budget.get_status()
-    }
-
-# ==================== Health & System ====================
+# ==================== Health Check ====================
 
 @app.get("/health")
 async def health_check(db: Session = Depends(get_db)):
-    """System health check with idle governance status."""
-    db_health = check_health()
-    persistent_agents = persistent_council.get_persistent_agents(db)
+    """Health check endpoint."""
+    db_status = check_health(db)
     
     return {
-        "status": "healthy" if db_health["status"] == "healthy" else "degraded",
-        "components": {
-            "database": db_health,
-            "api": "healthy",
-            "idle_governance": "running" if idle_governance.is_running else "stopped",
-            "persistent_council": "active" if len(persistent_agents) == 3 else "degraded"
-        },
-        "idle_mode": token_optimizer.get_status()
-    }
-
-@app.get("/")
-async def root():
-    """Root endpoint."""
-    return {
-        "message": "Welcome to Agentium with Eternal Idle Council",
-        "version": "2.0.0-idle",
-        "status": "operational",
-        "persistent_agents": "00001, 10001, 10002",
-        "docs": "/docs"
+        "status": "healthy" if db_status else "unhealthy",
+        "database": db_status,
+        "timestamp": datetime.utcnow().isoformat()
     }
 
 # ==================== Agent Management ====================
 
-@app.get("/agents")
-async def list_agents(
-    agent_type: str = None,
-    status: str = None,
-    is_persistent: bool = None,  # NEW: Filter persistent agents
+@app.post("/agents/create")
+async def create_agent(
+    role: str,
+    responsibilities: list,
+    tier: int = 3,
     db: Session = Depends(get_db)
 ):
-    """List all agents with optional filtering."""
+    """Create a new agent with governance compliance."""
+    # Validate tier
+    if tier not in [0, 1, 2, 3]:
+        raise HTTPException(status_code=400, detail="Tier must be 0 (Head), 1 (Council), 2 (Lead), or 3 (Task)")
+    
+    # Get current constitution
+    constitution = db.query(Constitution).filter_by(is_active='Y').order_by(Constitution.effective_date.desc()).first()
+    if not constitution:
+        raise HTTPException(status_code=500, detail="No active constitution found")
+    
+    # Create agent
+    agent = Agent(
+        role=role,
+        status=AgentStatus.ACTIVE,
+        current_task=None,
+        performance_score=100,
+        created_by="system",
+        tier=tier,
+        agentium_id=f"{tier}{len(db.query(Agent).filter_by(tier=tier).all()) + 1:04d}",
+        constitution_version=constitution.version,
+        supervised_by=None,  # Set by orchestrator
+        total_tasks_completed=0,
+        successful_tasks=0,
+        failed_tasks=0,
+        average_task_duration_seconds=0,
+        last_active=datetime.utcnow(),
+        responsibilities=json.dumps(responsibilities),
+        is_persistent=False
+    )
+    
+    db.add(agent)
+    db.commit()
+    db.refresh(agent)
+    
+    return agent.to_dict()
+
+@app.get("/agents")
+async def list_agents(
+    tier: int = None,
+    status: str = None,
+    db: Session = Depends(get_db)
+):
+    """List all agents with optional filters."""
     query = db.query(Agent)
     
-    if agent_type:
-        query = query.filter(Agent.agent_type == agent_type)
+    if tier is not None:
+        query = query.filter_by(tier=tier)
+    
     if status:
-        query = query.filter(Agent.status == status)
-    if is_persistent is not None:
-        query = query.filter(Agent.is_persistent == is_persistent)  # NEW
+        try:
+            status_enum = AgentStatus(status)
+            query = query.filter_by(status=status_enum)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
     
     agents = query.all()
-    return {
-        "count": len(agents),
-        "persistent_count": sum(1 for a in agents if a.is_persistent),  # NEW
-        "agents": [agent.to_dict() for agent in agents]
-    }
+    return [agent.to_dict() for agent in agents]
 
 @app.get("/agents/{agentium_id}")
 async def get_agent(agentium_id: str, db: Session = Depends(get_db)):
-    """Get specific agent details."""
+    """Get agent details."""
     agent = db.query(Agent).filter_by(agentium_id=agentium_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
+    
     return agent.to_dict()
 
-@app.post("/agents/{agentium_id}/spawn")
-async def spawn_agent(
+@app.put("/agents/{agentium_id}/status")
+async def update_agent_status(
     agentium_id: str,
-    child_type: str,
-    name: str,
+    status: str,
     db: Session = Depends(get_db)
 ):
-    """Spawn a new child agent under parent authority."""
-    # Wake from idle first
-    token_optimizer.record_activity()
-    
-    parent = db.query(Agent).filter_by(agentium_id=agentium_id).first()
-    if not parent:
-        raise HTTPException(status_code=404, detail="Parent agent not found")
-    
-    from backend.models.entities.agents import AgentType
-    
-    try:
-        child_enum = AgentType(child_type)
-    except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid agent type: {child_type}")
-    
-    try:
-        new_agent = parent.spawn_child(child_enum, db, name=name)
-        db.commit()
-        db.refresh(new_agent)
-        
-        return {
-            "message": "Agent spawned successfully",
-            "agent": new_agent.to_dict()
-        }
-    except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.post("/agents/{agentium_id}/terminate")
-async def terminate_agent(
-    agentium_id: str,
-    reason: str,
-    violation: bool = False,
-    db: Session = Depends(get_db)
-):
-    """Terminate an agent (cannot terminate persistent agents without violation flag)."""
+    """Update agent status."""
     agent = db.query(Agent).filter_by(agentium_id=agentium_id).first()
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
     
-    # Cannot terminate persistent agents without violation
-    if agent.is_persistent and not violation:
-        raise HTTPException(
-            status_code=403, 
-            detail="Cannot terminate persistent agent without violation flag. Set violation=true to force terminate."
-        )
-    
     try:
-        agent.terminate(reason, violation)
+        new_status = AgentStatus(status)
+        agent.status = new_status
+        agent.last_active = datetime.utcnow()
         db.commit()
-        return {
-            "message": f"Agent {agentium_id} terminated",
-            "reason": reason,
-            "violation": violation
-        }
-    except PermissionError as e:
-        raise HTTPException(status_code=403, detail=str(e))
+        
+        return {"message": f"Agent {agentium_id} status updated to {status}"}
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
 
 # ==================== Task Management ====================
 
-@app.post("/tasks")
+@app.post("/tasks/create")
 async def create_task(
-    title: str,
     description: str,
-    task_type: str = "execution",
-    priority: str = "normal",
+    task_type: str = "general",
+    priority: str = "medium",
+    assigned_to: str = None,
     db: Session = Depends(get_db)
 ):
-    """Create a new task (wakes system from idle)."""
-    # Wake from idle mode
-    token_optimizer.record_activity()
-    
-    from backend.models.entities.task import Task, TaskType, TaskPriority
-    
+    """Create a new task."""
     try:
-        task = Task(
-            title=title,
-            description=description,
-            task_type=TaskType(task_type),
-            priority=TaskPriority(priority),
-            created_by="sovereign"
-        )
-        db.add(task)
-        db.commit()
-        db.refresh(task)
-        
-        # Auto-start deliberation if not critical or idle
-        if task.priority not in [TaskPriority.CRITICAL, TaskPriority.IDLE]:
-            council = db.query(Agent).filter_by(agent_type="council_member").all()
-            if council:
-                task.start_deliberation([c.agentium_id for c in council])
-                db.commit()
-        
-        return {
-            "message": "Task created",
-            "task": task.to_dict()
-        }
-    except Exception as e:
-        db.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        task_type_enum = TaskType(task_type)
+        priority_enum = TaskPriority(priority)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    # If assigned_to specified, verify agent exists
+    assigned_agent = None
+    if assigned_to:
+        assigned_agent = db.query(Agent).filter_by(agentium_id=assigned_to).first()
+        if not assigned_agent:
+            raise HTTPException(status_code=404, detail=f"Agent {assigned_to} not found")
+    
+    task = Task(
+        description=description,
+        task_type=task_type_enum,
+        priority=priority_enum,
+        status=TaskStatus.PENDING,
+        created_by="user",
+        assigned_to=assigned_agent.id if assigned_agent else None,
+        created_at=datetime.utcnow(),
+        token_budget=None,
+        estimated_tokens=None
+    )
+    
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    
+    return task.to_dict()
 
 @app.get("/tasks")
 async def list_tasks(
     status: str = None,
     agent_id: str = None,
-    include_idle: bool = False,  # NEW: Default to false to hide idle tasks
     db: Session = Depends(get_db)
 ):
-    """List tasks with filtering."""
+    """List tasks with optional filters."""
     query = db.query(Task)
     
-    # By default, exclude idle tasks unless specifically requested
-    if not include_idle:
-        query = query.filter(Task.is_idle_task == False)
-    
     if status:
-        query = query.filter(Task.status == status)
+        try:
+            status_enum = TaskStatus(status)
+            query = query.filter_by(status=status_enum)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status}")
+    
     if agent_id:
-        query = query.filter(
-            (Task.lead_agent_id == agent_id) | 
-            (Task.assigned_task_agent_ids.contains(agent_id))
-        )
+        agent = db.query(Agent).filter_by(agentium_id=agent_id).first()
+        if agent:
+            query = query.filter_by(assigned_to=agent.id)
     
     tasks = query.order_by(Task.created_at.desc()).all()
-    return {
-        "count": len(tasks),
-        "tasks": [task.to_dict() for task in tasks]
-    }
+    return [task.to_dict() for task in tasks]
 
-@app.post("/tasks/{task_id}/execute")
-async def execute_task(
-    task_id: str,
-    agent_id: str,
-    db: Session = Depends(get_db)
-):
-    """Execute a task using specified agent."""
-    # Wake from idle
-    token_optimizer.record_activity()
-    
-    task = db.query(Task).filter_by(agentium_id=task_id).first()
+@app.get("/tasks/{task_id}")
+async def get_task(task_id: int, db: Session = Depends(get_db)):
+    """Get task details."""
+    task = db.query(Task).filter_by(id=task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    agent = db.query(Agent).filter_by(agentium_id=agent_id).first()
+    return task.to_dict()
+
+# ==================== Task Execution (MODIFIED WITH WAKE) ====================
+
+@app.post("/tasks/{task_id}/execute")
+async def execute_task(
+    task_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Execute a task with wake functionality.
+    Wakes from idle mode when user requests task execution.
+    """
+    # CRITICAL: Wake from idle on user task request
+    token_optimizer.record_activity()
+    if token_optimizer.idle_mode_active:
+        await token_optimizer.wake_from_idle(db)
+    
+    task = db.query(Task).filter_by(id=task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if not task.assigned_to:
+        raise HTTPException(status_code=400, detail="Task has no assigned agent")
+    
+    agent = db.query(Agent).filter_by(id=task.assigned_to).first()
     if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
+        raise HTTPException(status_code=404, detail="Assigned agent not found")
     
-    if agent.current_task_id:
-        raise HTTPException(status_code=400, detail="Agent is busy with another task")
+    # Mark task and agent as in progress
+    task.start()
+    agent.start_task()
+    db.commit()
     
-    config = agent.get_model_config(db)
+    # Get active model configuration
+    config = db.query(UserModelConfig).filter_by(
+        is_active='Y',
+        is_default=True
+    ).first()
+    
     if not config:
         raise HTTPException(
             status_code=400, 

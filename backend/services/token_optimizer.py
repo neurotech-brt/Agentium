@@ -10,8 +10,9 @@ from sqlalchemy.orm import Session
 
 from backend.models.entities.agents import Agent, AgentStatus, AgentType
 from backend.models.entities.task import Task, TaskStatus, TaskPriority
-from backend.services.api_manager import api_manager, ModelCapability
-from backend.services.model_allocation import model_allocator
+from backend.services.api_manager import init_api_manager, ModelCapability
+import backend.services.api_manager as api_manager_module
+from backend.services.model_allocation import init_model_allocator, model_allocator
 
 
 class TokenOptimizer:
@@ -96,7 +97,7 @@ class TokenOptimizer:
         self.idle_mode_active = True
         
         # Get local model (the "lowest" model)
-        local_model = api_manager._get_best_local_model()
+        local_model = api_manager_module.api_manager._get_best_local_model()
         
         # Update all persistent agents to local model
         agents = db.query(Agent).filter(
@@ -250,10 +251,10 @@ class TokenOptimizer:
         self.tokens_used_by_agent[agentium_id] = current + tokens_used
         
         # Total savings (compared to using best model)
-        model = api_manager.models.get(model_key)
+        model = api_manager_module.api_manager.models.get(model_key)
         if model:
             # Savings = (best_model_cost - current_model_cost) * tokens
-            best_model = api_manager._get_best_available_model_by_capability(ModelCapability.CODE)
+            best_model = api_manager_module.api_manager._get_best_available_model_by_capability(ModelCapability.CODE)
             savings = (best_model.cost_per_1k_tokens - model.cost_per_1k_tokens) * (tokens_used / 1000)
             self.total_tokens_saved_today += int(savings)
         
@@ -294,7 +295,7 @@ class TokenOptimizer:
                 continue
             
             model_key = f"{agent.preferred_config.provider}:{agent.preferred_config.default_model}"
-            model = api_manager.models.get(model_key)
+            model = api_manager_module.api_manager.models.get(model_key)
             
             if model:
                 # Assume average 1000 tokens per hour per agent
@@ -351,7 +352,7 @@ class TokenOptimizer:
             "total_agents_monitored": len(self.tokens_used_by_agent),
             "total_tokens_saved_today": self.total_tokens_saved_today,
             "budget_status": idle_budget.get_status(),
-            "is_single_api_mode": api_manager.single_api_mode()
+            "is_single_api_mode": api_manager_module.api_manager.single_api_mode()
         }
 
 # Enhanced Budget Manager with cost tracking
@@ -422,5 +423,5 @@ def init_token_optimizer(db: Session, agents: List[Agent] = None):
     token_optimizer.initialize(db, agents)
     
     # Initialize API manager if needed
-    if api_manager is None:
+    if api_manager_module.api_manager is None:
         init_api_manager(db)

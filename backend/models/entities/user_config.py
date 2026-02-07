@@ -108,7 +108,7 @@ class UserModelConfig(BaseEntity):
     is_default = Column(Boolean, default=False)
     total_requests = Column(Integer, default=0)
     total_tokens = Column(Integer, default=0)
-    rate_limit = Column(Integer, default=60)
+    rate_limit = Column(Integer, default=60, nullable=True)
     
     # Cost tracking (in USD)
     estimated_cost_usd = Column(Float, default=0.0)

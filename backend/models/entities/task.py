@@ -145,10 +145,25 @@ class Task(BaseEntity):
             self.requires_deliberation = False  # Idle tasks skip deliberation
     
     def _generate_task_id(self) -> str:
-        """Generate task ID: T + timestamp + random."""
-        timestamp = datetime.utcnow().strftime('%Y%m%d%H%M')
-        random_suffix = str(hash(self.description))[-4:]
-        return f"T{timestamp}{random_suffix}"
+        """Generate task ID: T + 5-digit sequence number."""
+        from backend.models.database import get_db_context
+        from sqlalchemy import text  # Add this line
+        
+        with get_db_context() as db:
+            result = db.execute(text("""
+                SELECT agentium_id FROM tasks 
+                WHERE agentium_id ~ '^T[0-9]+$'
+                ORDER BY CAST(SUBSTRING(agentium_id FROM 2) AS INTEGER) DESC 
+                LIMIT 1
+            """)).scalar()
+            
+            if result:
+                last_num = int(result[1:])  # Remove 'T' prefix
+                next_num = last_num + 1
+            else:
+                next_num = 1
+                
+            return f"T{next_num:05d}"
     
     @validates('priority')
     def validate_priority(self, key, priority):
@@ -243,7 +258,7 @@ class Task(BaseEntity):
             parent_task_id=self.id,
             title=f"Execute: {self.title}",
             description=self.description,
-            agentium_id=f"S{self.agentium_id[1:]}01",
+            agentium_id=f"S{self.agentium_id[1:]}",
             sequence=1
         )
         return [subtask]

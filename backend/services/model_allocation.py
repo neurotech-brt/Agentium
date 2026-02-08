@@ -116,8 +116,8 @@ class ModelAllocationService:
         
         # Record token savings
         from backend.services.token_optimizer import token_optimizer, idle_budget
-        savings = token_optimizer.calculate_token_savings(agent, "conservative")
-        idle_budget.record_usage(savings)  # Track against idle budget
+        savings = token_optimizer.calculate_token_savings("system", 60)
+        idle_budget.record_usage(savings, 0.0, is_idle=True) # Track against idle budget
         
         return config.id
     

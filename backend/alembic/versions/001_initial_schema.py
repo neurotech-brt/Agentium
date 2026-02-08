@@ -16,6 +16,13 @@ branch_labels = None
 depends_on = None
 
 
+taskstatus_enum = sa.Enum(
+    'pending', 'deliberating', 'approved', 'rejected', 'delegating',
+    'assigned', 'in_progress', 'review', 'completed', 'failed', 'cancelled',
+    'idle_pending', 'idle_running', 'idle_paused', 'idle_completed',
+    name='taskstatus'
+)
+
 def upgrade() -> None:
     # Users table
     op.create_table(
@@ -229,7 +236,7 @@ def upgrade() -> None:
         sa.Column('agentium_id', sa.String(20), unique=True, nullable=False),
         sa.Column('title', sa.String(200), nullable=False),
         sa.Column('description', sa.Text(), nullable=False),
-        sa.Column('status', sa.String(50), default='pending'),
+        sa.Column('status', taskstatus_enum, default='pending'),
         sa.Column('priority', sa.Integer(), default=1),
         sa.Column('assigned_to_agent_id', sa.String(36), sa.ForeignKey('agents.id'), nullable=True),
         sa.Column('created_by', sa.String(36), nullable=False),

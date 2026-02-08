@@ -197,16 +197,16 @@ app = FastAPI(
 )
 
 # Include routers
-app.include_router(auth_routes.router)
-app.include_router(model_routes.router)
-app.include_router(chat_routes.router)
-app.include_router(channels_routes.router)
-app.include_router(webhooks_router.router)
-app.include_router(websocket_routes.router)
-app.include_router(host_access.router)
-app.include_router(sovereign.router)
-app.include_router(tool_creation_routes.router)
-app.include_router(admin_routes.router)
+app.include_router(auth_routes.router, prefix="/api/v1")
+app.include_router(model_routes.router, prefix="/api/v1")
+app.include_router(chat_routes.router, prefix="/api/v1")
+app.include_router(channels_routes.router, prefix="/api/v1")
+app.include_router(webhooks_router.router, prefix="/api/v1")
+app.include_router(websocket_routes.router, prefix="/api/v1")
+app.include_router(host_access.router, prefix="/api/v1")
+app.include_router(sovereign.router, prefix="/api/v1")
+app.include_router(tool_creation_routes.router, prefix="/api/v1")
+app.include_router(admin_routes.router, prefix="/api/v1")
 
 # CORS middleware
 app.add_middleware(
@@ -219,20 +219,20 @@ app.add_middleware(
 
 # ==================== Health Check ====================
 
-@app.get("/health")
-async def health_check(db: Session = Depends(get_db)):
-    """Health check endpoint."""
-    db_status = check_health(db)
+@app.get("/api/health")
+async def health_check_api():
+    """Health check endpoint - API prefix."""
+    db_status = check_health()
     
     return {
-        "status": "healthy" if db_status else "unhealthy",
+        "status": "healthy" if db_status["status"] == "healthy" else "unhealthy",
         "database": db_status,
         "timestamp": datetime.utcnow().isoformat()
     }
 
 # ==================== Agent Management ====================
 
-@app.post("/agents/create")
+@app.post("/api/v1/agents/create")
 async def create_agent(
     role: str,
     responsibilities: list,
@@ -275,7 +275,7 @@ async def create_agent(
     
     return agent.to_dict()
 
-@app.get("/agents")
+@app.get("/api/v1/agents")
 async def list_agents(
     tier: int = None,
     status: str = None,
@@ -297,7 +297,7 @@ async def list_agents(
     agents = query.all()
     return [agent.to_dict() for agent in agents]
 
-@app.get("/agents/{agentium_id}")
+@app.get("/api/v1/agents/{agentium_id}")
 async def get_agent(agentium_id: str, db: Session = Depends(get_db)):
     """Get agent details."""
     agent = db.query(Agent).filter_by(agentium_id=agentium_id).first()
@@ -306,7 +306,7 @@ async def get_agent(agentium_id: str, db: Session = Depends(get_db)):
     
     return agent.to_dict()
 
-@app.put("/agents/{agentium_id}/status")
+@app.put("/api/v1/agents/{agentium_id}/status")
 async def update_agent_status(
     agentium_id: str,
     status: str,
@@ -329,7 +329,7 @@ async def update_agent_status(
 
 # ==================== Task Management ====================
 
-@app.post("/tasks/create")
+@app.post("/api/v1/tasks/create")
 async def create_task(
     description: str,
     task_type: str = "general",
@@ -369,7 +369,7 @@ async def create_task(
     
     return task.to_dict()
 
-@app.get("/tasks")
+@app.get("/api/v1/tasks")
 async def list_tasks(
     status: str = None,
     agent_id: str = None,
@@ -393,7 +393,7 @@ async def list_tasks(
     tasks = query.order_by(Task.created_at.desc()).all()
     return [task.to_dict() for task in tasks]
 
-@app.get("/tasks/{task_id}")
+@app.get("/api/v1/tasks/{task_id}")
 async def get_task(task_id: int, db: Session = Depends(get_db)):
     """Get task details."""
     task = db.query(Task).filter_by(id=task_id).first()
@@ -404,7 +404,7 @@ async def get_task(task_id: int, db: Session = Depends(get_db)):
 
 # ==================== Task Execution (MODIFIED WITH WAKE) ====================
 
-@app.post("/tasks/{task_id}/execute")
+@app.post("/api/v1/tasks/{task_id}/execute")
 async def execute_task(
     task_id: int,
     db: Session = Depends(get_db)
@@ -478,7 +478,7 @@ async def execute_task(
 
 # ==================== Chat with Wake (MODIFIED) ====================
 
-@app.post("/chat")
+@app.post("/api/v1/chat")
 async def chat_with_head(
     message: str,
     db: Session = Depends(get_db)
@@ -526,7 +526,7 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-@app.websocket("/ws")
+@app.websocket("/api/v1/ws")
 async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
     """
     WebSocket for real-time updates with IDLE WAKE functionality.
@@ -549,7 +549,7 @@ async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)
 
 # ==================== Constitution ====================
 
-@app.get("/constitution/current")
+@app.get("/api/v1/constitution/current")
 async def get_current_constitution(db: Session = Depends(get_db)):
     """Get current active constitution."""
     constitution = db.query(Constitution).filter_by(
@@ -561,7 +561,7 @@ async def get_current_constitution(db: Session = Depends(get_db)):
     
     return constitution.to_dict()
 
-@app.post("/constitution/update")
+@app.post("/api/v1/constitution/update")
 async def update_constitution(
     preamble: str = None,
     articles: str = None,
@@ -610,7 +610,7 @@ async def update_constitution(
 
 # ==================== Monitoring & Oversight ====================
 
-@app.get("/monitoring/agents/{agentium_id}/health")
+@app.get("/api/v1/monitoring/agents/{agentium_id}/health")
 async def get_agent_health(agentium_id: str, db: Session = Depends(get_db)):
     """Get health reports for a specific agent."""
     agent = db.query(Agent).filter_by(agentium_id=agentium_id).first()

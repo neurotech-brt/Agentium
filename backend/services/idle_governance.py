@@ -6,6 +6,7 @@ Never sleeps. Minimizes tokens through local models and efficient operations.
 
 import asyncio
 import random
+import time
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
@@ -241,8 +242,10 @@ class IdleGovernanceEngine:
                     result = await executor(db, agent)
                     
                     # Calculate tokens saved
-                    tokens_saved = token_optimizer.calculate_token_savings(agent, "average")
-                    idle_budget.record_usage(task.tokens_used)
+                    duration_seconds = int(time.time()) - int(task.started_at.timestamp()) if task.started_at else 60
+                    tokens_saved = token_optimizer.calculate_token_savings(task.task_type.value, duration_seconds)
+                    model_cost = 0.0  # Idle tasks use local models which are free
+                    idle_budget.record_usage(task.tokens_used, model_cost, is_idle=True)
                     
                     # Complete task
                     task.complete_idle(result.get('summary', 'Completed'), task.tokens_used)

@@ -75,6 +75,40 @@ class TokenOptimizer:
                     await self.wake_from_idle(db)
             asyncio.create_task(_wake())
     
+    def calculate_token_savings(self, task_type: str, duration_seconds: int) -> int:
+        """
+        Calculate tokens saved by running a task in idle mode vs active mode.
+        Idle mode uses cheaper/local models, resulting in savings.
+        """
+        # Base tokens per minute for different task types
+        tokens_per_minute = {
+            'audit_archival': 50,
+            'storage_dedupe': 100,
+            'vector_maintenance': 150,
+            'cache_optimization': 80,
+            'predictive_planning': 200,
+            'constitution_refine': 120,
+            'ethos_optimization': 90,
+            'agent_health_scan': 60,
+            'default': 100
+        }
+        
+        # Get base rate for this task type
+        base_rate = tokens_per_minute.get(task_type, tokens_per_minute['default'])
+        
+        # Calculate duration in minutes
+        duration_minutes = duration_seconds / 60
+        
+        # Idle mode uses ~20% of active mode tokens (80% savings)
+        idle_efficiency = 0.2
+        
+        # Calculate savings: (active_cost - idle_cost) * duration
+        active_tokens = base_rate * duration_minutes
+        idle_tokens = active_tokens * idle_efficiency
+        savings = int(active_tokens - idle_tokens)
+        
+        return max(0, savings)  # Ensure non-negative
+    
     async def check_idle_transition(self, db: Session) -> bool:
         """
         Check if system should transition to/from idle mode.

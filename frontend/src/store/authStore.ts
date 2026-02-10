@@ -76,6 +76,7 @@ export const useAuthStore = create<AuthState>()(
                             created_at: user.created_at,
                             isAuthenticated: true,
                             role: user.is_admin ? "admin" : "user",
+                            isSovereign: user.is_admin,
                         },
                         isLoading: false,
                         error: null
@@ -143,6 +144,7 @@ export const useAuthStore = create<AuthState>()(
                                 is_admin: userData.is_admin || false,
                                 isAuthenticated: true,
                                 role: userData.role || (userData.is_admin ? "admin" : "user"),
+                                isSovereign: userData.is_admin || false,
                             },
                             error: null
                         });
@@ -166,6 +168,7 @@ export const useAuthStore = create<AuthState>()(
                                     username: decoded.username,
                                     is_admin: decoded.is_admin || false,
                                     isAuthenticated: true,
+                                    isSovereign: decoded.is_admin || false,
                                 } as User,
                                 error: null
                             });

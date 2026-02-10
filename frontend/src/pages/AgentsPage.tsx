@@ -3,8 +3,25 @@ import { Agent } from '../types';
 import { agentsService } from '../services/agents';
 import { AgentTree } from '../components/agents/AgentTree';
 import { SpawnAgentModal } from '../components/agents/SpawnAgentModal';
-import { LayoutGrid, List } from 'lucide-react';
-import { toast } from 'react-hot-toast'; // Assuming it's available or we'll use window.alert
+import { LayoutGrid, List, Users, AlertCircle, Loader2 } from 'lucide-react';
+import { toast } from 'react-hot-toast';
+
+// Valid agent types for type checking
+const VALID_AGENT_TYPES = ['head_of_council', 'council_member', 'lead_agent', 'task_agent'] as const;
+
+const AGENT_TYPE_LABELS: Record<string, string> = {
+    head_of_council: 'Head of Council',
+    council_member: 'Council Member',
+    lead_agent: 'Lead Agent',
+    task_agent: 'Task Agent',
+};
+
+const AGENT_TYPE_COLORS: Record<string, { bg: string; text: string; dot: string }> = {
+    head_of_council: { bg: 'bg-violet-50', text: 'text-violet-700', dot: 'bg-violet-500' },
+    council_member: { bg: 'bg-blue-50', text: 'text-blue-700', dot: 'bg-blue-500' },
+    lead_agent: { bg: 'bg-emerald-50', text: 'text-emerald-700', dot: 'bg-emerald-500' },
+    task_agent: { bg: 'bg-slate-100', text: 'text-slate-600', dot: 'bg-slate-400' },
+};
 
 export const AgentsPage: React.FC = () => {
     const [agents, setAgents] = useState<Agent[]>([]);
@@ -20,10 +37,29 @@ export const AgentsPage: React.FC = () => {
         try {
             setIsLoading(true);
             const data = await agentsService.getAgents();
-            setAgents(data);
+
+            // SAFETY: Normalize agent data to ensure all required fields exist
+            const normalizedAgents = (data || []).map(agent => {
+                const rawType = agent.agent_type;
+                const validType = VALID_AGENT_TYPES.includes(rawType as any)
+                    ? rawType
+                    : 'task_agent';
+
+                return {
+                    ...agent,
+                    subordinates: Array.isArray(agent.subordinates) ? agent.subordinates : [],
+                    stats: agent.stats || { tasks_completed: 0, tasks_failed: 0, success_rate: 0 },
+                    status: agent.status || 'unknown',
+                    name: agent.name || 'Unnamed Agent',
+                    agent_type: validType as Agent['agent_type'],
+                    agentium_id: agent.agentium_id || agent.id || 'unknown'
+                };
+            }) as Agent[];
+
+            setAgents(normalizedAgents);
         } catch (err) {
-            console.error(err);
-            // toast.error('Failed to load agents');
+            console.error('Failed to load agents:', err);
+            toast.error('Failed to load agents');
         } finally {
             setIsLoading(false);
         }
@@ -40,7 +76,7 @@ export const AgentsPage: React.FC = () => {
             toast.success('Agent spawned successfully');
         } catch (err) {
             console.error(err);
-            throw err; // Re-throw for modal to handle
+            throw err;
         }
     };
 
@@ -53,55 +89,95 @@ export const AgentsPage: React.FC = () => {
             toast.success('Agent terminated');
         } catch (err) {
             console.error(err);
-            // toast.error handled globally
+            toast.error('Failed to terminate agent');
         }
     };
 
-    // Build the tree
+    // Build the tree with safety checks
     const agentsMap = new Map<string, Agent>();
-    agents.forEach(a => agentsMap.set(a.agentium_id, a)); // Using agentium_id for cleaner linking? Backend uses IDs or AgentiumIDs? 
-    // Backend routes use agentium_id (e.g. 0xx). But relationships might use UUIDs.
-    // Let's check backend... relationships use UUIDs (id column), but agentium_id is the public ID.
-    // Wait, the frontend `Agent` type has `subordinates: string[]`. 
-    // Is that list of UUIDs or AgentiumIDs?
-    // In `agents.py` `to_dict`: `'subordinates': [sub.agentium_id for sub in self.subordinates]`.
-    // It uses AgentiumIDs. 
-    // So mapping by AgentiumID is correct.
+    agents.forEach(a => {
+        if (a && a.agentium_id) {
+            agentsMap.set(a.agentium_id, a);
+        }
+    });
 
     const headOfCouncil = agents.find(a => a.agent_type === 'head_of_council');
 
     return (
-        <div className="p-6 h-full flex flex-col">
-            <div className="flex justify-between items-center mb-6">
+        <div
+            className="p-6 h-full flex flex-col"
+            style={{ background: '#ffffff', minHeight: '100%' }}
+        >
+            {/* ── Header ─────────────────────────────────────────────── */}
+            <div className="flex justify-between items-start mb-6">
                 <div>
-                    <h1 className="text-3xl font-bold text-white mb-2">Agent Hierarchy</h1>
-                    <p className="text-gray-400">Manage your AI workforce</p>
+                    <div className="flex items-center gap-2 mb-1">
+                        <Users className="w-5 h-5 text-slate-400" />
+                        <span className="text-xs font-semibold tracking-widest uppercase text-slate-400">
+                            Workforce
+                        </span>
+                    </div>
+                    <h1 className="text-2xl font-bold text-slate-900 leading-tight">
+                        Agent Hierarchy
+                    </h1>
+                    <p className="text-sm text-slate-500 mt-0.5">
+                        Manage your AI workforce
+                    </p>
                 </div>
 
-                <div className="flex bg-gray-800 rounded-lg p-1 border border-gray-700">
+                {/* View toggle */}
+                <div
+                    className="flex rounded-lg overflow-hidden border border-slate-200"
+                    style={{ background: '#f8fafc' }}
+                >
                     <button
                         onClick={() => setViewMode('tree')}
-                        className={`p-2 rounded ${viewMode === 'tree' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}
+                        title="Tree view"
+                        className={[
+                            'flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors',
+                            viewMode === 'tree'
+                                ? 'bg-white text-slate-900 shadow-sm border-r border-slate-200'
+                                : 'text-slate-500 hover:text-slate-700 border-r border-slate-200',
+                        ].join(' ')}
                     >
-                        <LayoutGrid className="w-5 h-5" />
+                        <LayoutGrid className="w-4 h-4" />
+                        <span>Tree</span>
                     </button>
                     <button
                         onClick={() => setViewMode('list')}
-                        className={`p-2 rounded ${viewMode === 'list' ? 'bg-gray-700 text-white' : 'text-gray-400 hover:text-white'}`}
+                        title="List view"
+                        className={[
+                            'flex items-center gap-1.5 px-3 py-2 text-sm font-medium transition-colors',
+                            viewMode === 'list'
+                                ? 'bg-white text-slate-900 shadow-sm'
+                                : 'text-slate-500 hover:text-slate-700',
+                        ].join(' ')}
                     >
-                        <List className="w-5 h-5" />
+                        <List className="w-4 h-4" />
+                        <span>List</span>
                     </button>
                 </div>
             </div>
 
-            <div className="flex-1 overflow-auto bg-gray-900/50 rounded-xl border border-gray-800 p-6">
+            {/* ── Content area ───────────────────────────────────────── */}
+            <div
+                className="flex-1 overflow-auto rounded-xl border border-slate-200 p-6"
+                style={{ background: '#ffffff' }}
+            >
                 {isLoading ? (
-                    <div className="text-center text-gray-500 mt-10">Loading agents...</div>
+                    <div className="flex flex-col items-center justify-center h-40 gap-3 text-slate-400">
+                        <Loader2 className="w-6 h-6 animate-spin" />
+                        <span className="text-sm">Loading agents…</span>
+                    </div>
+
                 ) : agents.length === 0 ? (
-                    <div className="text-center text-gray-500 mt-10">No agents found. System not initialized?</div>
+                    <div className="flex flex-col items-center justify-center h-40 gap-2 text-slate-400">
+                        <Users className="w-8 h-8 opacity-40" />
+                        <span className="text-sm">No agents found. System not initialized?</span>
+                    </div>
+
                 ) : viewMode === 'tree' ? (
                     headOfCouncil ? (
-                        // We need to pass the FULL map to the tree so it can lookup any child by ID
                         <AgentTree
                             agent={headOfCouncil}
                             agentsMap={agentsMap}
@@ -109,19 +185,48 @@ export const AgentsPage: React.FC = () => {
                             onTerminate={handleTerminate}
                         />
                     ) : (
-                        <div className="text-red-400">Error: Head of Council not found in agent list.</div>
+                        <div className="flex items-center gap-2 text-red-600 text-sm">
+                            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                            <span>Head of Council not found in agent list.</span>
+                        </div>
                     )
+
                 ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {agents.map(agent => (
-                            <div key={agent.id}> {/* Wrapper just for grid layout if needed */}
-                                <div className="bg-gray-800 p-4 rounded border border-gray-700">
-                                    <h3 className="text-white font-bold">{agent.name}</h3>
-                                    <p className="text-sm text-gray-400">{agent.agent_type}</p>
-                                    <div className="mt-2 text-xs text-gray-500">ID: {agent.agentium_id}</div>
+                    /* ── List / Grid view ─────────────────────────────── */
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                        {agents.map(agent => {
+                            const colors = AGENT_TYPE_COLORS[agent.agent_type] ?? AGENT_TYPE_COLORS.task_agent;
+                            const label = AGENT_TYPE_LABELS[agent.agent_type] ?? agent.agent_type;
+
+                            return (
+                                <div
+                                    key={agent.id || agent.agentium_id}
+                                    className="rounded-xl border border-slate-200 p-4 bg-white hover:border-slate-300 hover:shadow-sm transition-all"
+                                >
+                                    {/* Agent name + type badge */}
+                                    <div className="flex items-start justify-between gap-2 mb-3">
+                                        <h3 className="text-sm font-semibold text-slate-900 leading-snug">
+                                            {agent.name}
+                                        </h3>
+                                        <span
+                                            className={[
+                                                'inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0',
+                                                colors.bg,
+                                                colors.text,
+                                            ].join(' ')}
+                                        >
+                                            <span className={`w-1.5 h-1.5 rounded-full ${colors.dot}`} />
+                                            {label}
+                                        </span>
+                                    </div>
+
+                                    {/* ID */}
+                                    <p className="text-xs text-slate-400 font-mono truncate">
+                                        {agent.agentium_id}
+                                    </p>
                                 </div>
-                            </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </div>

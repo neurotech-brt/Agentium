@@ -5,21 +5,35 @@ import { ChevronRight, ChevronDown } from 'lucide-react';
 
 interface AgentTreeProps {
     agent: Agent;
-    agentsMap: Map<string, Agent>; // Map of ID -> Agent for O(1) lookups
+    agentsMap: Map<string, Agent>;
     onSpawn: (agent: Agent) => void;
     onTerminate: (agent: Agent) => void;
     level?: number;
 }
 
-export const AgentTree: React.FC<AgentTreeProps> = ({ agent, agentsMap, onSpawn, onTerminate, level = 0 }) => {
+export const AgentTree: React.FC<AgentTreeProps> = ({
+    agent,
+    agentsMap,
+    onSpawn,
+    onTerminate,
+    level = 0
+}) => {
     const [isExpanded, setIsExpanded] = useState(true);
 
+    // SAFETY: Ensure subordinates exists and is an array
+    const subordinateIds = Array.isArray(agent?.subordinates) ? agent.subordinates : [];
+
     // Find children in the map based on IDs
-    const children = agent.subordinates
+    const children = subordinateIds
         .map(id => agentsMap.get(id))
         .filter((a): a is Agent => a !== undefined);
 
     const hasChildren = children.length > 0;
+
+    // SAFETY: Don't render if agent is undefined
+    if (!agent) {
+        return null;
+    }
 
     return (
         <div className="relative">
@@ -55,14 +69,10 @@ export const AgentTree: React.FC<AgentTreeProps> = ({ agent, agentsMap, onSpawn,
             {/* Recursively render children */}
             {isExpanded && hasChildren && (
                 <div className="ml-12 border-l-2 border-gray-700 pl-6 space-y-4">
-                    {/* We remove the margin/border here as it's handled by logical pseudo-elements in CSS usually, 
-                     but for simplicity in React we can just indent. 
-                     The connector lines above are a quick fix. Clean tree UI is hard.
-                     Let's just do simple indentation for now. */}
                     <div className="border-l border-gray-700/50 -ml-6 pl-6 pt-2">
                         {children.map(child => (
                             <AgentTree
-                                key={child.id}
+                                key={child.id || child.agentium_id}
                                 agent={child}
                                 agentsMap={agentsMap}
                                 onSpawn={onSpawn}

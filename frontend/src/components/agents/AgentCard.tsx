@@ -9,8 +9,19 @@ interface AgentCardProps {
 }
 
 export const AgentCard: React.FC<AgentCardProps> = ({ agent, onSpawn, onTerminate }) => {
+    // SAFETY: Handle undefined agent
+    if (!agent) {
+        return null;
+    }
+
     const isTerminated = agent.status === 'terminated';
     const isHead = agent.agent_type === 'head_of_council';
+
+    // SAFETY: Ensure subordinates is an array
+    const subordinateCount = Array.isArray(agent.subordinates) ? agent.subordinates.length : 0;
+
+    // SAFETY: Ensure stats exists
+    const tasksCompleted = agent.stats?.tasks_completed ?? 0;
 
     const getTypeIcon = () => {
         switch (agent.agent_type) {
@@ -23,7 +34,7 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onSpawn, onTerminat
     };
 
     const getTypeLabel = () => {
-        return agent.agent_type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+        return agent.agent_type?.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()) || 'Unknown';
     };
 
     const getStatusColor = () => {
@@ -48,14 +59,14 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onSpawn, onTerminat
                     </div>
                     <div>
                         <h3 className="text-white font-medium flex items-center gap-2">
-                            {agent.name}
-                            <span className="text-xs text-gray-500 font-mono">#{agent.agentium_id}</span>
+                            {agent.name || 'Unnamed Agent'}
+                            <span className="text-xs text-gray-500 font-mono">#{agent.agentium_id || '???'}</span>
                         </h3>
                         <p className="text-xs text-gray-400">{getTypeLabel()}</p>
                     </div>
                 </div>
                 <div className={`px-2 py-0.5 rounded text-xs font-medium border ${getStatusColor()} capitalize`}>
-                    {agent.status}
+                    {agent.status || 'unknown'}
                 </div>
             </div>
 
@@ -63,11 +74,11 @@ export const AgentCard: React.FC<AgentCardProps> = ({ agent, onSpawn, onTerminat
             <div className="grid grid-cols-2 gap-2 mb-4 text-xs">
                 <div className="bg-gray-700/50 p-2 rounded">
                     <span className="text-gray-400 block">Task Success</span>
-                    <span className="text-white font-medium">{agent.stats.tasks_completed}</span>
+                    <span className="text-white font-medium">{tasksCompleted}</span>
                 </div>
                 <div className="bg-gray-700/50 p-2 rounded">
                     <span className="text-gray-400 block">Subordinates</span>
-                    <span className="text-white font-medium">{agent.subordinates.length}</span>
+                    <span className="text-white font-medium">{subordinateCount}</span>
                 </div>
             </div>
 

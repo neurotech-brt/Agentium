@@ -75,13 +75,18 @@ export function MainLayout() {
 
                     {/* Sovereign Control — admin only */}
                     {user?.isSovereign && (
-                        <a
-                            href="/sovereign-dashboard"
-                            className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 border border-red-500/20 transition-colors"
+                        <NavLink
+                            to="/sovereign"
+                            className={({ isActive }) =>
+                                `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${isActive
+                                    ? 'bg-red-500/20 text-red-600 dark:text-red-400 border-red-500/30'
+                                    : 'bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-500/20 border-red-500/20'
+                                }`
+                            }
                         >
                             <Shield className="w-5 h-5" />
                             Sovereign Control
-                        </a>
+                        </NavLink>
                     )}
                 </nav>
 

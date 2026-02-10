@@ -16,6 +16,7 @@ import { TasksPage } from '@/pages/TasksPage';
 import { MonitoringPage } from '@/pages/MonitoringPage';
 import { ConstitutionPage } from '@/pages/ConstitutionPage';
 import { SovereignDashboard } from '@/pages/SovereignDashboard';
+import { SovereignRoute } from '@/components/SovereignRoute';
 
 export default function App() {
   const { user, checkAuth } = useAuthStore();
@@ -82,8 +83,15 @@ export default function App() {
           <Route path="models" element={<ModelsPage />} />
           <Route path="channels" element={<ChannelsPage />} />
 
-          {/* Sovereign-Only Dashboard - Access control handled inside component */}
-          <Route path="sovereign" element={<SovereignDashboard />} />
+          {/* Sovereign-Only Dashboard - Route-level guard, not just UI hiding */}
+          <Route
+            path="sovereign"
+            element={
+              <SovereignRoute>
+                <SovereignDashboard />
+              </SovereignRoute>
+            }
+          />
 
           {/* Settings */}
           <Route path="settings" element={<SettingsPage />} />

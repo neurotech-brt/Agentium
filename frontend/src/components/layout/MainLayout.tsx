@@ -41,11 +41,11 @@ export function MainLayout() {
     ];
 
     return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex">
-            {/* Sidebar */}
-            <aside className="w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col">
+        <div className="h-screen bg-gray-50 dark:bg-gray-900 flex overflow-hidden">
+            {/* Sidebar - Fixed */}
+            <aside className="w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col flex-shrink-0 h-full">
                 {/* Header */}
-                <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+                <div className="p-6 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
                     <div className="flex items-center gap-2">
                         <Shield className="w-8 h-8 text-blue-600" />
                         <div>
@@ -55,8 +55,8 @@ export function MainLayout() {
                     </div>
                 </div>
 
-                {/* Navigation */}
-                <nav className="flex-1 p-4 space-y-1">
+                {/* Navigation - Scrollable if needed */}
+                <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
                     {navItems.map((item) => (
                         <NavLink
                             key={item.path}
@@ -90,8 +90,8 @@ export function MainLayout() {
                     )}
                 </nav>
 
-                {/* User Section */}
-                <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+                {/* User Section - Fixed at bottom */}
+                <div className="p-4 border-t border-gray-200 dark:border-gray-700 flex-shrink-0 bg-white dark:bg-gray-800">
                     <div className="flex items-center gap-3 mb-4">
                         <div className="w-8 h-8 rounded-full bg-blue-600 flex items-center justify-center text-white text-sm font-bold">
                             {user?.username?.charAt(0).toUpperCase()}
@@ -116,14 +116,14 @@ export function MainLayout() {
                 </div>
             </aside>
 
-            {/* Main Content */}
-            <main className="flex-1 overflow-auto relative">
+            {/* Main Content - Scrollable */}
+            <main className="flex-1 relative overflow-hidden">
                 {/* Health Indicator - Top Right */}
                 <div className="absolute top-6 right-6 z-10">
                     <HealthIndicator />
                 </div>
 
-                <div className="h-full p-8">
+                <div className="h-full overflow-y-auto p-8">
                     <Outlet />
                 </div>
             </main>

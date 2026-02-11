@@ -323,27 +323,27 @@ export const ModelsPage: React.FC = () => {
         <div className="min-h-screen bg-gradient-to-br from-gray-50 via-blue-50/30 to-purple-50/20 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 p-8">
             <div className="max-w-7xl mx-auto">
 
-                {/* ── Page Header ─────────────────────────────────── */}
-                <div className="mb-10">
-                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                        <div>
-                            <h1 className="text-4xl font-bold bg-gradient-to-r from-gray-900 via-blue-900 to-purple-900 dark:from-white dark:via-blue-200 dark:to-purple-200 bg-clip-text text-transparent mb-3">
-                                AI Model Configurations
-                            </h1>
-                            <p className="text-gray-600 dark:text-gray-400 text-lg">
-                                Connect to powerful AI providers and manage your model fleet
-                            </p>
+                    {/* ── Page Header ─────────────────────────────────── */}
+                    <div className="mb-10">
+                        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                            <div>
+                                <h1 className="text-4xl font-bold bg-gradient-to-r from-gray-900 via-blue-900 to-purple-900 dark:from-white dark:via-blue-200 dark:to-purple-200 bg-clip-text text-transparent mb-3 leading-tight pb-1">
+                                    AI Model Configurations
+                                </h1>
+                                <p className="text-gray-600 dark:text-gray-400 text-lg">
+                                    Connect to powerful AI providers and manage your model fleet
+                                </p>
+                            </div>
+                            <button
+                                onClick={() => setShowForm(true)}
+                                className="group relative px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 flex items-center gap-2 shrink-0"
+                            >
+                                <Plus className="w-5 h-5" />
+                                <span>Add Provider</span>
+                                <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-blue-400 to-purple-400 opacity-0 group-hover:opacity-20 transition-opacity blur-xl"></div>
+                            </button>
                         </div>
-                        <button
-                            onClick={() => setShowForm(true)}
-                            className="group relative px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white rounded-xl font-medium shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 flex items-center gap-2 shrink-0"
-                        >
-                            <Plus className="w-5 h-5" />
-                            <span>Add Provider</span>
-                            <div className="absolute inset-0 rounded-xl bg-gradient-to-r from-blue-400 to-purple-400 opacity-0 group-hover:opacity-20 transition-opacity blur-xl"></div>
-                        </button>
-                    </div>
-
+                
                     {/* ── Summary Stats ────────────────────────────────── */}
                     <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                         <SummaryCard

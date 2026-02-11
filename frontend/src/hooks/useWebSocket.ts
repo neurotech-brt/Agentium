@@ -192,7 +192,8 @@ export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): Us
         isManualDisconnect.current = false;
 
         // Build WebSocket URL - CONNECT DIRECTLY TO BACKEND (bypass Vite proxy)
-        const wsUrl = `ws://localhost:8000/api/v1/ws/chat?token=${encodeURIComponent(token)}`;
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/chat?token=${encodeURIComponent(token)}`;
 
         console.log(`[WebSocket] Connecting to ${wsUrl}... (attempt ${reconnectAttemptsRef.current + 1})`);
 

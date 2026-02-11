@@ -224,7 +224,7 @@ app.include_router(model_routes.router, prefix="/api/v1")
 app.include_router(chat_routes.router, prefix="/api/v1")
 app.include_router(channels_routes.router, prefix="/api/v1")
 app.include_router(webhooks_router.router, prefix="/api/v1")
-app.include_router(websocket_routes.router, prefix="/api/v1")
+app.include_router(websocket_routes.router, prefix="/ws")
 app.include_router(host_access.router, prefix="/api/v1")
 app.include_router(sovereign.router, prefix="/api/v1")
 app.include_router(tool_creation_routes.router, prefix="/api/v1")
@@ -438,57 +438,6 @@ async def chat_with_head(
     
     return result
 
-# ==================== WebSocket with Wake (MODIFIED) ====================
-
-class ConnectionManager:
-    """Manage WebSocket connections for real-time updates."""
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-    
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-    
-    def disconnect(self, websocket: WebSocket):
-        if websocket in self.active_connections:
-            self.active_connections.remove(websocket)
-    
-    async def broadcast(self, message: dict):
-        """Broadcast message to all connected clients."""
-        disconnected = []
-        for connection in self.active_connections:
-            try:
-                await connection.send_json(message)
-            except:
-                disconnected.append(connection)
-        
-        # Clean up disconnected clients
-        for conn in disconnected:
-            if conn in self.active_connections:
-                self.active_connections.remove(conn)
-
-manager = ConnectionManager()
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, db: Session = Depends(get_db)):
-    """
-    WebSocket for real-time updates with IDLE WAKE functionality.
-    """
-    await manager.connect(websocket)
-    try:
-        while True:
-            data = await websocket.receive_json()
-            
-            # CRITICAL: Wake from idle on user WebSocket activity
-            token_optimizer.record_activity()
-            if token_optimizer.idle_mode_active:
-                await token_optimizer.wake_from_idle(db)
-            
-            # Broadcast to all clients
-            await manager.broadcast(data)
-            
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
 
 # ==================== Constitution ====================
 

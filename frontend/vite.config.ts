@@ -13,13 +13,11 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      // LESS specific first
       '/api': {
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
-      // MORE specific second (overrides /api for WebSocket)
-      '/api/v1/ws': {
+      '/ws': {
         target: 'ws://localhost:8000',
         ws: true,
         changeOrigin: true,

@@ -15,7 +15,7 @@ from backend.models.database import get_db
 from backend.models.entities import Agent, HeadOfCouncil
 from backend.services.chat_service import ChatService
 from backend.core.config import settings
-from backend.core.auth import get_current_active_user  # ✅ Import at top
+from backend.core.auth import get_current_active_user  
 
 router = APIRouter()
 
@@ -125,7 +125,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 
-@router.websocket("/ws/chat")
+@router.websocket("/chat")
 async def websocket_chat_endpoint(
     websocket: WebSocket,
     token: Optional[str] = Query(None, description="JWT access token"),

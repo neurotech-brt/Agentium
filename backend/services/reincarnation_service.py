@@ -5,7 +5,7 @@ Manages agent death and rebirth with memory transfer.
 
 import json
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from backend.models.entities.agents import Agent, HeadOfCouncil, CouncilMember, LeadAgent, TaskAgent, AgentStatus

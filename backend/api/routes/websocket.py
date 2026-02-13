@@ -231,42 +231,60 @@ async def websocket_chat_endpoint(
                 })
                 
                 try:
-                    # Get fresh Head of Council instance
-                    head = db.query(HeadOfCouncil).filter_by(
-                        id=user_info["head_agent_id"]
-                    ).first()
+                    # Create FRESH session for this message
+                    # This prevents DetachedInstanceError from long-lived endpoint session
+                    from backend.models.database import SessionLocal
+                    msg_db = SessionLocal()
                     
-                    if not head:
+                    try:
+                        # Get fresh Head of Council instance
+                        head = msg_db.query(HeadOfCouncil).filter_by(
+                            id=user_info["head_agent_id"]
+                        ).first()
+                        
+                        if not head:
+                            await websocket.send_json({
+                                "type": "error",
+                                "content": "Head of Council not available",
+                                "timestamp": datetime.utcnow().isoformat()
+                            })
+                            continue
+                        
+                        # Process message through ChatService
+                        response = await ChatService.process_message(head, content, msg_db)
+                        
+                        # Send response
                         await websocket.send_json({
-                            "type": "error",
-                            "content": "Head of Council not available",
+                            "type": "message",
+                            "role": "head_of_council",
+                            "content": response.get("content", "No response"),
+                            "metadata": {
+                                "agent_id": user_info['head_agentium_id'],
+                                "model": response.get("model"),
+                                "task_created": response.get("task_created"),
+                                "task_id": response.get("task_id"),
+                                "tokens_used": response.get("tokens_used")
+                            },
                             "timestamp": datetime.utcnow().isoformat()
                         })
-                        continue
-                    
-                    # Process message through ChatService
-                    response = await ChatService.process_message(head, content, db)
-                    
-                    # Send response
-                    await websocket.send_json({
-                        "type": "message",
-                        "role": "head_of_council",
-                        "content": response.get("content", "No response"),
-                        "metadata": {
-                            "agent_id": user_info['head_agentium_id'],
-                            "model": response.get("model"),
-                            "task_created": response.get("task_created"),
-                            "task_id": response.get("task_id"),
-                            "tokens_used": response.get("tokens_used")
-                        },
-                        "timestamp": datetime.utcnow().isoformat()
-                    })
+                    finally:
+                        msg_db.close()
+
                     
                 except Exception as e:
                     print(f"[WebSocket] ChatService error: {e}")
+                    
+                    # Friendly error for detach/config issues
+                    error_msg = f"Error processing message: {str(e)}"
+                    if "bound to a Session" in str(e) or "UserModelConfig" in str(e):
+                        error_msg = (
+                            "System Connection Refresh Required: \n"
+                            "The database connection was interrupted. Please reload the page to reconnect."
+                        )
+                    
                     await websocket.send_json({
                         "type": "error",
-                        "content": f"Error processing message: {str(e)}",
+                        "content": error_msg,
                         "timestamp": datetime.utcnow().isoformat()
                     })
             

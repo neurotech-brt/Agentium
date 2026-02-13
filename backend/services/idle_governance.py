@@ -226,7 +226,11 @@ class IdleGovernanceEngine:
         # Check budget
         estimated_tokens = self._estimate_task_tokens(task_type)
         if not idle_budget.check_budget(estimated_tokens):
-            print(f"⚠️ Token budget exhausted, skipping {task_type.value}")
+            # Only warn if we actually have a model configured
+            # If no model, we are just offline, no need to spam logs
+            config = agent.get_model_config(db)
+            if config:
+                print(f"⚠️ Token budget exhausted, skipping {task_type.value}")
             return
         
         # Create the task

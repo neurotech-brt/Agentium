@@ -53,7 +53,7 @@ async def send_message(
     # Check if we should stream
     if chat_msg.stream:
         return StreamingResponse(
-            _stream_response(head, chat_msg.message, db),
+            _stream_response(head.agentium_id, chat_msg.message),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -72,27 +72,53 @@ async def send_message(
         )
 
 async def _stream_response(
-    head: HeadOfCouncil, 
-    message: str, 
-    db: Session
+    agent_id: str, 
+    message: str
 ) -> AsyncGenerator[str, None]:
     """
     Stream response from Head of Council.
     Format: SSE (Server-Sent Events)
     """
+    from backend.models.database import SessionLocal
+    from sqlalchemy.exc import DetachedInstanceError
+    
+    # Create a fresh session for the streaming context
+    db = SessionLocal()
     try:
+        # Re-fetch head with new session
+        head = db.query(HeadOfCouncil).filter_by(agentium_id=agent_id).first()
+        if not head:
+            yield f"data: {json.dumps({'type': 'error', 'content': 'System Error: Head of Council agent not found.'})}\n\n"
+            return
+
         # Send initial "thinking" event
         yield f"data: {json.dumps({'type': 'status', 'content': 'Head of Council is deliberating...'})}\n\n"
         
-        # Get model config
-        config = head.get_model_config(db)
-        if not config:
-            yield f"data: {json.dumps({'type': 'error', 'content': 'No model configuration found'})}\n\n"
-            return
-        
-        provider = await ModelService.get_provider("sovereign", config.id)
-        if not provider:
-            yield f"data: {json.dumps({'type': 'error', 'content': 'Failed to initialize AI provider'})}\n\n"
+        # Safe config retrieval with error handling
+        try:
+            config = head.get_model_config(db)
+            if not config:
+                raise ValueError("No active model configuration found")
+            
+            # Pre-fetch config details to avoid detachment later
+            config_id = config.id
+            model_name = config.default_model
+            
+            # Verify provider availability
+            provider = await ModelService.get_provider("sovereign", config_id)
+            if not provider:
+                raise ValueError("Could not initialize AI provider")
+                
+        except (ValueError, DetachedInstanceError, AttributeError) as e:
+            # FRIENDLY ERROR MESSAGE
+            error_msg = (
+                "System Operational Warning: \n\n"
+                "The Head of Council cannot be reached because no AI Model is currently connected. \n\n"
+                "Please go to the 'Models' page and connect a provider (e.g., OpenAI, Anthropic, or Local) "
+                "to initialize the system."
+            )
+            yield f"data: {json.dumps({'type': 'content', 'content': error_msg})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
             return
         
         # Build system prompt from ethos
@@ -110,6 +136,7 @@ You are speaking directly to the Sovereign. Address them respectfully and provid
         # Stream the response
         full_response = []
         
+        # Using the provider (which might use async http clients)
         async for chunk in provider.stream_generate(full_prompt, message):
             full_response.append(chunk)
             yield f"data: {json.dumps({'type': 'content', 'content': chunk})}\n\n"
@@ -124,7 +151,7 @@ You are speaking directly to the Sovereign. Address them respectfully and provid
             'content': '',
             'metadata': {
                 'agent_id': head.agentium_id,
-                'model': config.default_model,
+                'model': model_name,
                 'task_created': task_info['created'],
                 'task_id': task_info.get('task_id')
             }
@@ -135,13 +162,15 @@ You are speaking directly to the Sovereign. Address them respectfully and provid
             head.agentium_id,
             message,
             full_text,
-            config.id,
+            config_id,
             db
         )
         
     except Exception as e:
-        yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+        print(f"Streaming error: {e}")
+        yield f"data: {json.dumps({'type': 'error', 'content': 'An unexpected error occurred during processing.'})}\n\n"
     finally:
+        db.close()
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
 @router.get("/history")

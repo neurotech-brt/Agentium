@@ -44,6 +44,8 @@ class ChatService:
         system_prompt = head.get_system_prompt()
         context = await ChatService.get_system_context(db)
         
+        consultation_result = None
+        
         # If confused about task, consult parent (for reincarnated agents)
         consultation_note = (
             f"\nRecent consultation with parent: {consultation_result['guidance']}"

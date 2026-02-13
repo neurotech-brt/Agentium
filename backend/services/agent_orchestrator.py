@@ -1,10 +1,14 @@
 """
 Agent Orchestrator - Central routing and governance coordinator.
 Enforces hierarchy (0xxxx→1xxxx→2xxxx→3xxxx) and integrates Vector DB context.
-NEW: Tool execution, idle governance coordination, WebSocket broadcasting.
+NEW: Tool execution, idle governance coordination, WebSocket broadcasting,
+     metrics collection, and circuit breaker for failing agents.
 """
 
 import asyncio
+import logging
+import time
+from collections import defaultdict
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
@@ -23,10 +27,26 @@ from backend.api.routes.websocket import manager  # NEW
 from backend.services.host_access import HostAccessService
 from backend.services.clarification_service import ClarificationService
 
+logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Circuit Breaker States
+# ---------------------------------------------------------------------------
+
+CB_CLOSED = "closed"          # Normal operation
+CB_OPEN = "open"              # Blocking requests – agent is failing
+CB_HALF_OPEN = "half_open"    # Allowing one probe to test recovery
+
+CB_FAILURE_THRESHOLD = 5      # Consecutive failures before opening
+CB_RECOVERY_SECONDS = 60      # Seconds before half-open probe
+
+
 class AgentOrchestrator:
     """
     Central orchestrator for Agentium multi-agent governance.
     Handles intent processing, routing decisions, context enrichment, and TOOL EXECUTION.
+    Includes per-agent circuit breaker and routing metrics collection.
     """
     
     def __init__(self, db: Session, message_bus: Optional[MessageBus] = None):
@@ -34,7 +54,23 @@ class AgentOrchestrator:
         self.message_bus = message_bus
         self.vector_store: Optional[VectorStore] = None
         self._routing_cache: Dict[str, datetime] = {}
-        self.host_access = HostAccessService("00001")  # NEW: For system-level operations
+        self.host_access = HostAccessService("00001")  # For system-level operations
+
+        # --- Metrics ---
+        self._metrics: Dict[str, Any] = {
+            "total_routed": 0,
+            "total_errors": 0,
+            "latency_samples": [],          # Last N latency values (ms)
+            "per_agent_volume": defaultdict(int),
+            "per_tier_volume": defaultdict(int),
+            "error_counts": defaultdict(int),
+            "started_at": datetime.utcnow().isoformat(),
+        }
+        self._max_latency_samples = 500  # Rolling window size
+
+        # --- Circuit Breakers (per agent) ---
+        # { agent_id: {"state": CB_*, "failures": int, "opened_at": float|None} }
+        self._circuit_breakers: Dict[str, Dict[str, Any]] = {}
 
     async def execute_task(self, task: Task, agent: Agent, db: Session):
         # Allocate optimal model for this task
@@ -72,9 +108,10 @@ class AgentOrchestrator:
     async def process_intent(self, raw_input: str, source_id: str, target_id: Optional[str] = None) -> RouteResult:
         """
         Process intent and route to appropriate agent.
-        NEW: Detects tool usage patterns and executes tools directly when appropriate.
+        Includes tool detection, metrics recording, and circuit breaker checks.
         """
         start = datetime.utcnow()
+        start_mono = time.monotonic()
         
         # CRITICAL: Wake from idle on any user activity
         token_optimizer.record_activity()
@@ -82,19 +119,26 @@ class AgentOrchestrator:
         # Validate source
         source = self._get_agent(source_id)
         if not source:
+            self._record_metric(source_id, success=False)
             return RouteResult(success=False, message_id="", error=f"Agent {source_id} not found")
         
-        # NEW: Check if message is a tool execution command
+        # --- Circuit breaker check ---
+        recipient = target_id or self._get_parent_id(source_id)
+        cb_result = self._check_circuit_breaker(recipient)
+        if cb_result is not None:
+            self._record_metric(source_id, success=False)
+            return cb_result
+        
+        # Check if message is a tool execution command
         tool_detection = self._detect_tool_intent(raw_input, source_id)
         if tool_detection["is_tool_command"]:
             return await self._execute_tool_directly(tool_detection, source_id, start)
         
-        # NEW: Check if message is a tool creation request (meta-tool)
+        # Check if message is a tool creation request (meta-tool)
         if self._detect_tool_creation_intent(raw_input, source_id):
             return await self._handle_tool_creation_request(raw_input, source_id, start)
         
         # Determine target
-        recipient = target_id or self._get_parent_id(source_id)
         direction = self._get_direction(source_id, recipient)
         
         # Create message
@@ -109,12 +153,13 @@ class AgentOrchestrator:
         # Validate hierarchy
         if not HierarchyValidator.can_route(source_id, recipient, direction):
             await self._log(source_id, "routing_violation", f"Attempted {direction} to {recipient}", AuditLevel.WARNING)
+            self._record_metric(source_id, success=False)
             return RouteResult(success=False, message_id=msg.message_id, error="Hierarchy violation")
         
         # Enrich and route
         msg = await self.enrich_with_context(msg)
         
-        # NEW: Execute based on direction with tool enrichment
+        # Execute based on direction with tool enrichment
         if direction == "up":
             result = await self._route_up_with_tools(msg)
         elif direction == "down":
@@ -122,9 +167,14 @@ class AgentOrchestrator:
         else:
             result = await self.message_bus.publish(msg)
         
-        result.latency_ms = (datetime.utcnow() - start).total_seconds() * 1000
+        latency_ms = (time.monotonic() - start_mono) * 1000
+        result.latency_ms = latency_ms
         
-        # NEW: Broadcast via WebSocket to frontend
+        # --- Record metrics & circuit breaker feedback ---
+        self._record_metric(source_id, success=result.success, latency_ms=latency_ms)
+        self._update_circuit_breaker(recipient, success=result.success)
+        
+        # Broadcast via WebSocket to frontend
         await self._broadcast_orchestration_event(msg, result)
         
         return result
@@ -414,7 +464,129 @@ class AgentOrchestrator:
                 params[param_name] = param_meta["default"]
         
         return params
-    
+
+    # ------------------------------------------------------------------
+    # Metrics Collection
+    # ------------------------------------------------------------------
+
+    def _record_metric(
+        self,
+        agent_id: str,
+        success: bool,
+        latency_ms: float = 0.0,
+    ):
+        """Record a routing operation metric."""
+        self._metrics["total_routed"] += 1
+        self._metrics["per_agent_volume"][agent_id] += 1
+
+        tier = agent_id[0] if agent_id else "?"
+        self._metrics["per_tier_volume"][tier] += 1
+
+        if not success:
+            self._metrics["total_errors"] += 1
+            self._metrics["error_counts"][agent_id] += 1
+
+        if latency_ms > 0:
+            samples = self._metrics["latency_samples"]
+            samples.append(latency_ms)
+            if len(samples) > self._max_latency_samples:
+                self._metrics["latency_samples"] = samples[-self._max_latency_samples:]
+
+    def get_metrics(self) -> Dict[str, Any]:
+        """Return a snapshot of routing metrics."""
+        samples = self._metrics["latency_samples"]
+        avg_latency = sum(samples) / len(samples) if samples else 0.0
+        p95_latency = sorted(samples)[int(len(samples) * 0.95)] if len(samples) >= 20 else avg_latency
+
+        return {
+            "total_routed": self._metrics["total_routed"],
+            "total_errors": self._metrics["total_errors"],
+            "error_rate": (
+                self._metrics["total_errors"] / self._metrics["total_routed"]
+                if self._metrics["total_routed"] > 0 else 0.0
+            ),
+            "avg_latency_ms": round(avg_latency, 2),
+            "p95_latency_ms": round(p95_latency, 2),
+            "per_tier_volume": dict(self._metrics["per_tier_volume"]),
+            "per_agent_volume": dict(self._metrics["per_agent_volume"]),
+            "error_counts": dict(self._metrics["error_counts"]),
+            "circuit_breakers": {
+                aid: cb["state"] for aid, cb in self._circuit_breakers.items()
+                if cb["state"] != CB_CLOSED
+            },
+            "started_at": self._metrics["started_at"],
+        }
+
+    # ------------------------------------------------------------------
+    # Circuit Breaker
+    # ------------------------------------------------------------------
+
+    def _get_or_create_cb(self, agent_id: str) -> Dict[str, Any]:
+        """Get or initialise circuit breaker state for an agent."""
+        if agent_id not in self._circuit_breakers:
+            self._circuit_breakers[agent_id] = {
+                "state": CB_CLOSED,
+                "failures": 0,
+                "opened_at": None,
+            }
+        return self._circuit_breakers[agent_id]
+
+    def _check_circuit_breaker(self, agent_id: str) -> Optional[RouteResult]:
+        """
+        Check circuit breaker before routing to an agent.
+
+        Returns None if routing is allowed, or a RouteResult if blocked.
+        """
+        cb = self._get_or_create_cb(agent_id)
+
+        if cb["state"] == CB_CLOSED:
+            return None  # OK
+
+        if cb["state"] == CB_OPEN:
+            # Check if recovery window has elapsed
+            if cb["opened_at"] and (time.monotonic() - cb["opened_at"]) >= CB_RECOVERY_SECONDS:
+                cb["state"] = CB_HALF_OPEN
+                logger.info("Circuit breaker for %s transitioning to HALF_OPEN", agent_id)
+                return None  # Allow one probe
+            # Still open – block
+            return RouteResult(
+                success=False,
+                message_id="",
+                error=(
+                    f"Circuit breaker OPEN for agent {agent_id}. "
+                    f"Agent has failed {cb['failures']} consecutive operations. "
+                    f"Retry after {CB_RECOVERY_SECONDS}s recovery window."
+                ),
+            )
+
+        # HALF_OPEN – allow the probe through
+        return None
+
+    def _update_circuit_breaker(self, agent_id: str, success: bool):
+        """Update circuit breaker state after a routing result."""
+        cb = self._get_or_create_cb(agent_id)
+
+        if success:
+            if cb["state"] in (CB_HALF_OPEN, CB_OPEN):
+                logger.info("Circuit breaker for %s RESET to CLOSED", agent_id)
+            cb["state"] = CB_CLOSED
+            cb["failures"] = 0
+            cb["opened_at"] = None
+        else:
+            cb["failures"] += 1
+            if cb["state"] == CB_HALF_OPEN:
+                # Probe failed → reopen
+                cb["state"] = CB_OPEN
+                cb["opened_at"] = time.monotonic()
+                logger.warning("Circuit breaker for %s re-OPENED after failed probe", agent_id)
+            elif cb["failures"] >= CB_FAILURE_THRESHOLD:
+                cb["state"] = CB_OPEN
+                cb["opened_at"] = time.monotonic()
+                logger.warning(
+                    "Circuit breaker OPENED for %s after %d failures",
+                    agent_id, cb["failures"],
+                )
+
     # REST OF YOUR EXISTING CODE...
     def check_permission(self, from_id: str, to_id: str) -> bool:
         """Validate routing permission."""

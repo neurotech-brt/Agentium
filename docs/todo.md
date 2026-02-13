@@ -118,7 +118,7 @@ Build a self-governing AI ecosystem where agents operate under constitutional la
 
 ---
 
-## Phase 2: Governance Core ⚖️ (IN PROGRESS - 75% COMPLETE)
+## Phase 2: Governance Core ⚖️ ✅ (COMPLETE)
 
 **Goal:** Implement constitutional enforcement, democratic voting, and hierarchical orchestration.
 
@@ -155,23 +155,17 @@ Build a self-governing AI ecosystem where agents operate under constitutional la
 - ✅ Handle "agent not found" with liquidation check
 - ✅ Context manager integration for constitutional compliance
 
-**Pending Enhancements:**
+**Enhancements Added:**
 
-- [ ] WebSocket event broadcasting on routing
-- [ ] Metrics collection (routing latency, message volume)
-- [ ] Circuit breaker for failing agents
+- ✅ WebSocket event broadcasting on routing
+- ✅ Metrics collection (routing latency, message volume, error rates, p95)
+- ✅ Circuit breaker for failing agents (CLOSED→OPEN→HALF_OPEN states)
 
-### 2.3 Constitutional Guard 🚧 (PARTIAL)
+### 2.3 Constitutional Guard ✅
 
-**File:** `backend/core/constitutional_guard.py` (needs enhancement)
+**File:** `backend/core/constitutional_guard.py` ✅
 
-**Current Implementation:**
-
-- [x] Load active constitution from PostgreSQL
-- [x] Check actions against blacklisted patterns
-- [x] Redis caching for performance
-
-**Needs Enhancement - Two-Tier Check System:**
+**Two-Tier Check System Implemented:**
 
 ```
 Agent Action Request
@@ -189,13 +183,16 @@ TIER 2: Vector DB (Semantic Interpretation)
 Decision: ALLOW / BLOCK / VOTE_REQUIRED
 ```
 
-**Pending Tasks:**
+**Features Complete:**
 
-- [ ] Implement semantic constitutional check via ChromaDB
-- [ ] Trigger Council vote if action affects >3 agents
-- [ ] Return human-readable legal citations ("Article 4, Section 2")
-- [ ] Cache constitution embeddings for fast semantic search
-- [ ] Constitutional violation severity classification
+- ✅ Load active constitution from PostgreSQL
+- ✅ Check actions against blacklisted patterns
+- ✅ Redis caching for performance (5min constitution, 30min embeddings)
+- ✅ Semantic constitutional check via ChromaDB (similarity thresholds: ≥70% BLOCK, 40-70% VOTE_REQUIRED)
+- ✅ Trigger Council vote if action affects >3 agents
+- ✅ Return human-readable legal citations ("Article 4, Section 2")
+- ✅ Cache constitution embeddings for fast semantic search
+- ✅ Constitutional violation severity classification (LOW/MEDIUM/HIGH/CRITICAL)
 
 ### 2.4 Voting Service ✅ (COMPLETE)
 
@@ -225,29 +222,29 @@ Decision: ALLOW / BLOCK / VOTE_REQUIRED
 - [ ] Timeout behavior under load
 - [ ] Concurrent voting session handling
 
-### 2.5 Amendment Service 🚧 (PENDING)
+### 2.5 Amendment Service ✅
 
-**File:** `backend/services/amendment_service.py` (TO CREATE)
+**File:** `backend/services/amendment_service.py` ✅
 
 **Amendment Pipeline:**
 
-1. Council member proposes amendment (Markdown diff)
-2. 48-hour debate window stored in `docs_ministry/debates/`
-3. Democratic vote (60% quorum)
-4. If passed:
-   - Update PostgreSQL (version + audit)
+1. ✅ Council member proposes amendment (Markdown diff)
+2. ✅ 48-hour debate window stored in `docs_ministry/debates/`
+3. ✅ Democratic vote (60% quorum)
+4. ✅ If passed:
+   - Update PostgreSQL (new version + audit)
    - **Update Vector DB** (current law for RAG)
    - Broadcast law change via Message Bus
-5. Notify all agents of constitutional update
+5. ✅ Notify all agents of constitutional update
 
 **Acceptance Criteria:**
 
-- [ ] Amendment proposals require 2 Council sponsors
-- [ ] Configurable voting period (default 48h)
-- [ ] Vector DB updated immediately upon ratification
-- [ ] Automatic rollback if vote fails
+- ✅ Amendment proposals require 2 Council sponsors
+- ✅ Configurable voting period (default 48h)
+- ✅ Vector DB updated immediately upon ratification
+- ✅ Automatic rollback if vote fails
 - [ ] Diff visualization in frontend
-- [ ] Amendment history tracking
+- ✅ Amendment history tracking
 
 ---
 

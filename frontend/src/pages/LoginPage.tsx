@@ -2,8 +2,9 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
 import { Shield, AlertCircle, Loader2 } from 'lucide-react';
-import { HealthIndicator } from '@/components/HealthIndicator';
 import toast from 'react-hot-toast';
+import { FlatMapAuthBackground } from '@/components/FlatMapAuthBackground';
+import { PageTransition } from '@/components/PageTransition';
 
 export function LoginPage() {
     const [username, setUsername] = useState('');
@@ -25,27 +26,25 @@ export function LoginPage() {
     };
 
     return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center p-4 relative">
-            {/* Health Indicator - Top Right */}
-            <div className="absolute top-4 right-4 z-10">
-                <HealthIndicator />
-            </div>
+        <div className="min-h-screen relative flex items-center justify-center p-4">
+            <FlatMapAuthBackground variant="login" />
 
-            <div className="w-full max-w-md">
+            <PageTransition className="w-full max-w-md relative z-10">
                 {/* Logo */}
                 <div className="text-center mb-8">
-                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-600 text-white mb-4">
+                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-600 text-white mb-4 transition-transform duration-500 hover:scale-110">
                         <Shield className="w-8 h-8" />
                     </div>
-                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+                    <h1 className="text-3xl font-bold text-white dark:text-white mb-2">
                         Agentium
                     </h1>
-                    <p className="text-gray-600 dark:text-gray-400">
+                    <p className="text-white dark:text-white">
                         AI Agent Governance System
                     </p>
                 </div>
+
                 {/* Login Card */}
-                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 p-8">
+                <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl border border-gray-200 dark:border-gray-700 p-8 backdrop-blur-sm">
                     <div className="mb-6">
                         <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-1">
                             Welcome Back
@@ -54,6 +53,7 @@ export function LoginPage() {
                             Sign in to manage your AI governance system
                         </p>
                     </div>
+
                     <form onSubmit={handleSubmit} className="space-y-4">
                         <div>
                             <label htmlFor="username" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -64,7 +64,7 @@ export function LoginPage() {
                                 type="text"
                                 value={username}
                                 onChange={(e) => setUsername(e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-all"
                                 placeholder="Enter username"
                                 required
                                 autoComplete="username"
@@ -80,7 +80,7 @@ export function LoginPage() {
                                 type="password"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white transition-all"
                                 placeholder="Enter password"
                                 required
                                 autoComplete="current-password"
@@ -88,7 +88,7 @@ export function LoginPage() {
                         </div>
 
                         {error && (
-                            <div className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400">
+                            <div className="flex items-center gap-2 text-sm text-red-600 dark:text-red-400 animate-in fade-in duration-300">
                                 <AlertCircle className="w-4 h-4" />
                                 {error}
                             </div>
@@ -97,7 +97,7 @@ export function LoginPage() {
                         <button
                             type="submit"
                             disabled={isLoading}
-                            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-colors"
+                            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-medium rounded-lg transition-all duration-200 hover:shadow-lg hover:scale-[1.02] active:scale-[0.98]"
                         >
                             {isLoading ? (
                                 <>
@@ -114,7 +114,10 @@ export function LoginPage() {
                     <div className="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
                         <p className="text-sm text-center text-gray-600 dark:text-gray-400">
                             Don't have an account?{' '}
-                            <Link to="/signup" className="text-blue-600 dark:text-blue-400 hover:underline font-medium">
+                            <Link 
+                                to="/signup" 
+                                className="text-blue-600 dark:text-blue-400 hover:underline font-medium transition-colors"
+                            >
                                 Request Access
                             </Link>
                         </p>
@@ -129,10 +132,10 @@ export function LoginPage() {
                 </div>
 
                 {/* Footer */}
-                <p className="text-center text-sm text-gray-500 dark:text-gray-400 mt-8">
+                <p className="text-center text-sm text-white dark:text-white mt-8">
                     Secure AI Governance Platform v1.0.0
                 </p>
-            </div>
+            </PageTransition>
         </div>
     );
 }

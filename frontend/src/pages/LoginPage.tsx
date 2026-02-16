@@ -102,7 +102,7 @@ export function LoginPage() {
 
                 <div className="mt-4">
                     <p className="text-xs text-center text-gray-500 dark:text-gray-400">
-                        Entrance to the New World
+                        Intelligence requires governance
                     </p>
                 </div>
             </div>

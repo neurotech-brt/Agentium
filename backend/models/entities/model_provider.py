@@ -40,7 +40,7 @@ class BaseModelProvider(ABC):
     async def stream_generate(self, system_prompt: str, user_message: str, **kwargs) -> AsyncGenerator[str, None]:
         pass
     
-    async def _log_usage(self, tokens: int, latency: int, success: bool, error: str = None):
+    async def _log_usage(self, tokens: int, latency: int, success: bool, error: str = None, agentium_id: str = "system"):
         """Log usage."""
         with get_db_context() as db:
             self.config.increment_usage(tokens)
@@ -50,6 +50,7 @@ class BaseModelProvider(ABC):
             
             db.add(ModelUsageLog(
                 config_id=self.config.id,
+                agentium_id=agentium_id,  
                 provider=self.config.provider,
                 model_used=self.config.default_model,
                 total_tokens=tokens,
@@ -109,7 +110,7 @@ class OpenAICompatibleProvider(BaseModelProvider):
             content = response.choices[0].message.content
             tokens = response.usage.total_tokens if response.usage else 0
             
-            await self._log_usage(tokens, latency, success=True)
+            await self._log_usage(tokens, latency, success=True, agentium_id=kwargs.get('agentium_id', 'system'))
             
             return {
                 "content": content,
@@ -120,7 +121,7 @@ class OpenAICompatibleProvider(BaseModelProvider):
             }
             
         except Exception as e:
-            await self._log_usage(0, 0, success=False, error=str(e))
+            await self._log_usage(0, 0, success=False, error=str(e), agentium_id=kwargs.get('agentium_id', 'system'))
             raise
     
     async def stream_generate(self, system_prompt: str, user_message: str, **kwargs):

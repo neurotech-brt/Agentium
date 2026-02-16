@@ -540,7 +540,7 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                                     value={formData.api_base_url}
                                     onChange={handleChange}
                                     className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono transition-all"
-                                    placeholder="https://api.provider.com/v1 "
+                                    placeholder="https://api.provider.com/v1"
                                     required
                                 />
                             </div>
@@ -566,22 +566,38 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                             </div>
                         )}
 
-                        {/* Model Selection - UPDATED */}
+                        {/* Model Selection - FIXED with proper select dropdown */}
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                                 Model <span className="text-red-500">*</span>
                             </label>
                             <div className="flex gap-2">
-                                <input
-                                    type="text"
-                                    name="default_model"
-                                    value={formData.default_model}
-                                    onChange={handleChange}
-                                    className="flex-1 px-4 py-3 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono transition-all"
-                                    placeholder={isUniversal ? "model-name" : "Select or type model name"}
-                                    list="available-models"
-                                    required
-                                />
+                                {formData.available_models.length > 0 ? (
+                                    <select
+                                        name="default_model"
+                                        value={formData.default_model}
+                                        onChange={handleChange}
+                                        className="flex-1 px-4 py-3 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono transition-all"
+                                        required
+                                    >
+                                        <option value="">Select a model...</option>
+                                        {formData.available_models.map((m) => (
+                                            <option key={m} value={m}>
+                                                {m}
+                                            </option>
+                                        ))}
+                                    </select>
+                                ) : (
+                                    <input
+                                        type="text"
+                                        name="default_model"
+                                        value={formData.default_model}
+                                        onChange={handleChange}
+                                        className="flex-1 px-4 py-3 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono transition-all"
+                                        placeholder={isUniversal ? "model-name" : "Select or type model name"}
+                                        required
+                                    />
+                                )}
                                 {!isUniversal && formData.provider !== 'local' && (
                                     <button
                                         type="button"
@@ -626,15 +642,9 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                                 )}
                             </div>
                             
-                            <datalist id="available-models">
-                                {formData.available_models.map(m => (
-                                    <option key={m} value={m} />
-                                ))}
-                            </datalist>
-                            
                             {/* Show success feedback */}
                             {formData.available_models.length > 0 && (
-                                <p className="text-xs text-green-600 dark:text-green-400 mt-1 flex items-center gap-1">
+                                <p className="text-xs text-green-600 dark:text-green-400 mt-2 flex items-center gap-1">
                                     <Check className="w-3 h-3" />
                                     {formData.available_models.length} models available from {formData.provider}
                                 </p>

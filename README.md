@@ -268,7 +268,7 @@ Results aggregated back to Head → You
 | **Frontend**         | React 18, TypeScript, Tailwind, Zustand           | Dashboard, voting UI, agent tree      |
 | **API Gateway**      | FastAPI, WebSocket, Pydantic                      | REST + real-time communication        |
 | **Message Bus**      | Redis, Celery                                     | Inter-agent routing, background tasks |
-| **Structured Data**  | PostgreSQL 15, SQLAlchemy, Alembic                | Entity state, voting records, audit   |
+| **Structured Data**  | PostgreSQL, SQLAlchemy, Alembic                   | Entity state, voting records, audit   |
 | **Vector Knowledge** | ChromaDB, Sentence-Transformers                   | RAG, constitution, learnings          |
 | **AI Models**        | Local (Kimi, GPT4, All) + API (OpenAI, Anthropic) | Agent intelligence                    |
 | **Container**        | Docker, Compose, Healthchecks                     | Cross-platform deployment             |

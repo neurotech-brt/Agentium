@@ -1,13 +1,34 @@
 import React, { useEffect, useState } from 'react';
-import { monitoringService } from '../services/monitoring';
-import { MonitoringDashboard } from '../types';
-import { HealthScore } from '../components/monitoring/HealthScore';
-import { ViolationCard } from '../components/monitoring/ViolationCard';
-import { Activity, ShieldCheck, AlertTriangle } from 'lucide-react';
+import { Activity, ShieldCheck, AlertTriangle, Loader2, TrendingUp } from 'lucide-react';
+
+interface HealthReport {
+    id: string;
+    subject: string;
+    health_score: number;
+    status: string;
+    metrics: {
+        success_rate: number;
+    };
+}
+
+interface Violation {
+    id: string;
+    severity: string;
+    description: string;
+    timestamp: string;
+}
+
+interface MonitoringDashboard {
+    system_health: number;
+    active_alerts: number;
+    latest_health_reports: HealthReport[];
+    recent_violations: Violation[];
+}
 
 export const MonitoringPage: React.FC = () => {
     const [dashboard, setDashboard] = useState<MonitoringDashboard | null>(null);
     const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
 
     useEffect(() => {
         loadDashboard();
@@ -15,113 +36,266 @@ export const MonitoringPage: React.FC = () => {
 
     const loadDashboard = async () => {
         try {
-            // "00001" is Head of Council, usually the top monitor
-            const data = await monitoringService.getDashboard('00001');
+            setIsLoading(true);
+            setError(null);
+            
+            // Try to fetch monitoring data
+            const response = await fetch('/monitoring/dashboard/00001');
+            
+            if (!response.ok) {
+                throw new Error('Monitoring endpoint not available');
+            }
+            
+            const data = await response.json();
             setDashboard(data);
         } catch (err) {
-            console.error(err);
+            console.error('Monitoring error:', err);
+            setError('Monitoring system not configured');
+            
+            // Set mock data for development
+            setDashboard({
+                system_health: 100,
+                active_alerts: 0,
+                latest_health_reports: [],
+                recent_violations: []
+            });
         } finally {
             setIsLoading(false);
         }
     };
 
-    if (isLoading) return <div className="p-6 text-center text-gray-500">Loading metrics...</div>;
-
-    // Fallback if no data (e.g. fresh system)
-    const systemHealth = dashboard?.system_health || 100;
-    const activeAlerts = dashboard?.active_alerts || 0;
-
-    return (
-        <div className="p-6 h-full overflow-auto">
-            <h1 className="text-3xl font-bold text-white mb-2">System Monitoring</h1>
-            <p className="text-gray-400 mb-8">Real-time oversight of agent operations</p>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                {/* System Health Card */}
-                <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 flex items-center justify-between">
-                    <div>
-                        <h3 className="text-gray-400 text-sm font-medium mb-1">Overall System Health</h3>
-                        <p className={`text-2xl font-bold ${systemHealth > 90 ? 'text-green-400' : 'text-yellow-400'}`}>
-                            {systemHealth > 90 ? 'Operational' : 'Degraded'}
-                        </p>
-                    </div>
-                    <HealthScore score={systemHealth} size="sm" />
-                </div>
-
-                {/* Active Alerts Card */}
-                <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 flex items-center justify-between">
-                    <div>
-                        <h3 className="text-gray-400 text-sm font-medium mb-1">Active Alerts</h3>
-                        <p className="text-3xl font-bold text-white">{activeAlerts}</p>
-                    </div>
-                    <div className="p-3 bg-red-500/10 rounded-lg">
-                        <Activity className="w-8 h-8 text-red-500" />
-                    </div>
-                </div>
-
-                {/* Agent Count Card */}
-                <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 flex items-center justify-between">
-                    <div>
-                        <h3 className="text-gray-400 text-sm font-medium mb-1">Monitored Agents</h3>
-                        <p className="text-3xl font-bold text-white">
-                            {dashboard?.latest_health_reports.length || 0}
-                        </p>
-                    </div>
-                    <div className="p-3 bg-blue-500/10 rounded-lg">
-                        <ShieldCheck className="w-8 h-8 text-blue-500" />
-                    </div>
+    if (isLoading) {
+        return (
+            <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+                <div className="flex flex-col items-center gap-3">
+                    <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                    <span className="text-sm text-gray-500 dark:text-gray-400">Loading metrics...</span>
                 </div>
             </div>
+        );
+    }
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Recent Violations */}
-                <div className="bg-gray-900/50 rounded-xl border border-gray-800 p-6">
-                    <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                        <AlertTriangle className="w-5 h-5 text-yellow-500" />
-                        Recent Violations
-                    </h2>
-                    <div className="space-y-4">
-                        {dashboard?.recent_violations && dashboard.recent_violations.length > 0 ? (
-                            dashboard.recent_violations.map(v => (
-                                <ViolationCard key={v.id} violation={v} />
-                            ))
-                        ) : (
-                            <div className="text-center py-10 text-gray-500 bg-gray-800/30 rounded border border-gray-800 border-dashed">
-                                No recent violations detected.
-                            </div>
-                        )}
+    // Fallback if no data
+    const systemHealth = dashboard?.system_health || 100;
+    const activeAlerts = dashboard?.active_alerts || 0;
+    const healthReports = dashboard?.latest_health_reports || [];
+    const violations = dashboard?.recent_violations || [];
+
+    return (
+        <div className="min-h-screen bg-gray-50 dark:bg-gray-900 p-6">
+            <div className="max-w-7xl mx-auto">
+                {/* Header */}
+                <div className="mb-8">
+                    <div className="flex items-center gap-3 mb-3">
+                        <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-blue-600 to-purple-600 flex items-center justify-center shadow-lg">
+                            <Activity className="w-7 h-7 text-white" />
+                        </div>
+                        <div>
+                            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+                                System Monitoring
+                            </h1>
+                            <p className="text-gray-600 dark:text-gray-400 text-sm">
+                                Real-time oversight of agent operations
+                            </p>
+                        </div>
                     </div>
                 </div>
 
-                {/* Agent Health List */}
-                <div className="bg-gray-900/50 rounded-xl border border-gray-800 p-6">
-                    <h2 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-                        <Activity className="w-5 h-5 text-blue-500" />
-                        Agent Health Reports
-                    </h2>
-                    <div className="space-y-3">
-                        {dashboard?.latest_health_reports && dashboard.latest_health_reports.length > 0 ? (
-                            dashboard.latest_health_reports.map(report => (
-                                <div key={report.id} className="flex items-center justify-between bg-gray-800 p-3 rounded border border-gray-700">
-                                    <div className="flex items-center gap-3">
-                                        <HealthScore score={report.health_score} size="sm" />
-                                        {/* Should make size even smaller or custom css for list items maybe? 'sm' is 16x16 which is okay for icon but svg is bigger in component. Let's adjust component if needed or use flex scale. Actually size 'sm' in HealthScore is w-16 h-16 (4rem). That's big for a list item. */}
-                                        <div>
-                                            <p className="text-white font-medium">Agent #{report.subject}</p>
-                                            <p className="text-xs text-gray-400 capitalize">{report.status}</p>
-                                        </div>
-                                    </div>
-                                    <div className="text-right">
-                                        <div className="text-xs text-gray-500">Success Rate</div>
-                                        <div className="text-green-400 font-medium">{report.metrics.success_rate}%</div>
-                                    </div>
-                                </div>
-                            ))
-                        ) : (
-                            <div className="text-center py-10 text-gray-500 bg-gray-800/30 rounded border border-gray-800 border-dashed">
-                                No health reports available.
+                {/* Error Notice */}
+                {error && (
+                    <div className="mb-6 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+                        <div className="flex gap-3">
+                            <AlertTriangle className="w-5 h-5 text-yellow-600 dark:text-yellow-500 flex-shrink-0 mt-0.5" />
+                            <div>
+                                <h3 className="text-sm font-semibold text-yellow-900 dark:text-yellow-300 mb-1">
+                                    Monitoring System Notice
+                                </h3>
+                                <p className="text-sm text-yellow-800 dark:text-yellow-400">
+                                    {error}. Displaying default values.
+                                </p>
                             </div>
-                        )}
+                        </div>
+                    </div>
+                )}
+
+                {/* Stats Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                    {/* System Health Card */}
+                    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 shadow-sm">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">System Health</p>
+                                <p className={`text-3xl font-bold ${
+                                    systemHealth > 90 
+                                        ? 'text-green-600 dark:text-green-400' 
+                                        : 'text-yellow-600 dark:text-yellow-400'
+                                }`}>
+                                    {systemHealth}%
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    {systemHealth > 90 ? 'Operational' : 'Degraded'}
+                                </p>
+                            </div>
+                            <div className="w-12 h-12 rounded-lg bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+                                <TrendingUp className="w-6 h-6 text-green-600 dark:text-green-400" />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Active Alerts Card */}
+                    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 shadow-sm">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Active Alerts</p>
+                                <p className="text-3xl font-bold text-gray-900 dark:text-white">
+                                    {activeAlerts}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    No issues detected
+                                </p>
+                            </div>
+                            <div className="w-12 h-12 rounded-lg bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                                <Activity className="w-6 h-6 text-red-600 dark:text-red-400" />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Monitored Agents Card */}
+                    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-6 shadow-sm">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Monitored Agents</p>
+                                <p className="text-3xl font-bold text-gray-900 dark:text-white">
+                                    {healthReports.length}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                    All systems normal
+                                </p>
+                            </div>
+                            <div className="w-12 h-12 rounded-lg bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center">
+                                <ShieldCheck className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* Recent Violations */}
+                    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+                        <div className="bg-gradient-to-r from-yellow-50 to-orange-50 dark:from-gray-800 dark:to-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
+                            <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                                <AlertTriangle className="w-5 h-5 text-yellow-600 dark:text-yellow-400" />
+                                Recent Violations
+                            </h2>
+                        </div>
+                        <div className="p-6">
+                            {violations.length > 0 ? (
+                                <div className="space-y-4">
+                                    {violations.map(v => (
+                                        <div 
+                                            key={v.id} 
+                                            className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-4 border border-gray-200 dark:border-gray-600"
+                                        >
+                                            <div className="flex items-start justify-between gap-4">
+                                                <div className="flex-1">
+                                                    <div className="flex items-center gap-2 mb-1">
+                                                        <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                                            v.severity === 'high' 
+                                                                ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
+                                                                : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400'
+                                                        }`}>
+                                                            {v.severity}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-sm text-gray-900 dark:text-white">
+                                                        {v.description}
+                                                    </p>
+                                                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                                        {new Date(v.timestamp).toLocaleString()}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-12">
+                                    <div className="w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center mx-auto mb-4">
+                                        <ShieldCheck className="w-8 h-8 text-gray-400 dark:text-gray-500" />
+                                    </div>
+                                    <p className="text-gray-900 dark:text-white font-medium mb-1">
+                                        No Violations Detected
+                                    </p>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                                        All agents operating within guidelines
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Agent Health Reports */}
+                    <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+                        <div className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-gray-800 dark:to-gray-800 border-b border-gray-200 dark:border-gray-700 px-6 py-4">
+                            <h2 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                                <Activity className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                                Agent Health Reports
+                            </h2>
+                        </div>
+                        <div className="p-6">
+                            {healthReports.length > 0 ? (
+                                <div className="space-y-3">
+                                    {healthReports.map(report => (
+                                        <div 
+                                            key={report.id} 
+                                            className="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 p-4 rounded-lg border border-gray-200 dark:border-gray-600"
+                                        >
+                                            <div className="flex items-center gap-3">
+                                                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                                                    report.health_score > 90 
+                                                        ? 'bg-green-100 dark:bg-green-900/30'
+                                                        : 'bg-yellow-100 dark:bg-yellow-900/30'
+                                                }`}>
+                                                    <span className={`text-sm font-bold ${
+                                                        report.health_score > 90
+                                                            ? 'text-green-700 dark:text-green-400'
+                                                            : 'text-yellow-700 dark:text-yellow-400'
+                                                    }`}>
+                                                        {report.health_score}
+                                                    </span>
+                                                </div>
+                                                <div>
+                                                    <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                                                        Agent #{report.subject}
+                                                    </p>
+                                                    <p className="text-xs text-gray-500 dark:text-gray-400 capitalize">
+                                                        {report.status}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="text-right">
+                                                <div className="text-xs text-gray-500 dark:text-gray-400">Success Rate</div>
+                                                <div className="text-sm font-bold text-green-600 dark:text-green-400">
+                                                    {report.metrics.success_rate}%
+                                                </div>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-12">
+                                    <div className="w-16 h-16 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center mx-auto mb-4">
+                                        <Activity className="w-8 h-8 text-gray-400 dark:text-gray-500" />
+                                    </div>
+                                    <p className="text-gray-900 dark:text-white font-medium mb-1">
+                                        No Health Reports
+                                    </p>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                                        Agent monitoring will appear here
+                                    </p>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             </div>

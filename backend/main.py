@@ -48,6 +48,7 @@ from backend.api.routes import admin as admin_routes
 from backend.api.routes import tasks as tasks_routes
 from backend.api.routes import files as files_routes
 from backend.api.routes import voice as voice_routes
+from backend.api.routes import monitoring_routes as monitoring_router
 
 from backend.api.routes import capability_routes
 from backend.api.routes import lifecycle_routes
@@ -226,7 +227,8 @@ app.include_router(tasks_routes.router, prefix="/api/v1")
 app.include_router(files_routes.router)
 app.include_router(voice_routes.router)
 app.include_router(capability_routes.router)      
-app.include_router(lifecycle_routes.router)       
+app.include_router(lifecycle_routes.router) 
+app.include_router(monitoring_router.router)      
 
 # ==================== Health Check ====================
 

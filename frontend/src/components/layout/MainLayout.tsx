@@ -10,7 +10,8 @@ import {
     Shield,
     Cpu,
     Crown,
-    MessageCircle
+    MessageCircle,
+    Activity
 } from 'lucide-react';
 import { useEffect } from 'react';
 
@@ -34,6 +35,7 @@ export function MainLayout() {
         { path: '/chat', label: 'Command Interface', icon: Crown },
         { path: '/agents', label: 'Agents', icon: Users },
         { path: '/tasks', label: 'Tasks', icon: FileText },
+        { path: '/monitoring', label: 'Monitoring', icon: Activity },
         { path: '/channels', label: 'Channels', icon: MessageCircle },
         { path: '/constitution', label: 'Constitution', icon: Shield },
         { path: '/models', label: 'AI Models', icon: Cpu },
@@ -73,7 +75,7 @@ export function MainLayout() {
                         </NavLink>
                     ))}
 
-                    {/* Sovereign Control — admin only */}
+                    {/* Sovereign Control – admin only */}
                     {user?.isSovereign && (
                         <NavLink
                             to="/sovereign"

@@ -310,7 +310,7 @@ Results aggregated back to Head → You
 
 ### Phase 4: Intelligence
 
-- [ ] Multi-model provider support
+- [x] Multi-model provider support
 - [ ] Browser automation integration
 - [ ] Advanced RAG with source citations
 - [ ] Voice interface

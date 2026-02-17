@@ -12,7 +12,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from backend.celery_app import celery_app as celery
+from backend.celery_app import celery_app
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 from backend.models.entities.user import User
@@ -58,8 +58,10 @@ from backend.api.routes import lifecycle_routes
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+celery = celery_app
 
 class ConstitutionUpdateRequest(BaseModel):
+
     """Constitution update request from frontend."""
     preamble: Optional[str] = None
     articles: Optional[Dict[str, Any]] = None

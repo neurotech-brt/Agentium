@@ -69,7 +69,7 @@ services:
     build:
       context: ./backend
       dockerfile: Dockerfile.privileged
-    image: agentium-backend:latest
+    # image: agentium-backend:latest 
     container_name: agentium-backend
     privileged: true
     env_file:
@@ -104,8 +104,8 @@ services:
       - HOST_FS_MOUNT=/host
       - HOST_HOME_MOUNT=/host_home
     restart: unless-stopped
-    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000  # Removed --reload
-    depends_on:  # ⬅️ ADD THIS
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
+    depends_on:
       postgres:
         condition: service_healthy
       redis:
@@ -125,7 +125,10 @@ services:
   # Celery Worker - PRIVILEGED
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   celery-worker:
-    image: agentium-backend:latest
+    build:  
+      context: ./backend
+      dockerfile: Dockerfile.privileged
+    # image: agentium-backend:latest 
     container_name: agentium-celery
     privileged: true
     cap_add:
@@ -172,7 +175,10 @@ services:
   # Celery Beat - PRIVILEGED
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   celery-beat:
-    image: agentium-backend:latest
+    build:  
+      context: ./backend
+      dockerfile: Dockerfile.privileged
+    # image: agentium-backend:latest  
     container_name: agentium-celery-beat
     privileged: true
     cap_add:
@@ -241,4 +247,3 @@ volumes:
 networks:
   agentium-network:
     driver: bridge
-    

@@ -104,7 +104,14 @@ services:
       - HOST_FS_MOUNT=/host
       - HOST_HOME_MOUNT=/host_home
     restart: unless-stopped
-    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
+    command: uvicorn backend.main:app --host 0.0.0.0 --port 8000  # Removed --reload
+    depends_on:  # ⬅️ ADD THIS
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      chromadb:
+        condition: service_healthy
     networks:
       - agentium-network
     healthcheck:

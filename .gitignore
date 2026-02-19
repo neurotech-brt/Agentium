@@ -21,4 +21,4 @@ venv/
 .venv/
 
 # Legacy
-docs_old/
+docs/helper_skills

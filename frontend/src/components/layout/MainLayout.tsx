@@ -12,19 +12,40 @@ import {
     Settings, 
     LogOut,
     Cpu,
-    Radio
+    Radio,
+    Shield,
 } from 'lucide-react';
+import {useState } from 'react';
 
 export function MainLayout() {
     const { user, logout } = useAuthStore();
     const navigate = useNavigate();
     const unreadCount = useWebSocketStore(state => state.unreadCount);
+    const [isDark, setIsDark] = useState(() => {
+        if (typeof window !== 'undefined') {
+            return document.documentElement.classList.contains('dark');
+        }
+        return false;
+    });
     
     const handleLogout = () => {
         // Dispatch logout event for WebSocket cleanup
         window.dispatchEvent(new Event('logout'));
         logout();
         navigate('/login');
+    };
+
+    const toggleTheme = () => {
+        const newDark = !isDark;
+        setIsDark(newDark);
+        
+        if (newDark) {
+            document.documentElement.classList.add('dark');
+            localStorage.setItem('theme', 'dark');
+        } else {
+            document.documentElement.classList.remove('dark');
+            localStorage.setItem('theme', 'light');
+        }
     };
 
     const navItems = [
@@ -48,14 +69,30 @@ export function MainLayout() {
         <div className="h-screen bg-gray-50 dark:bg-[#0f1117] flex overflow-hidden">
             <aside className="w-64 bg-white dark:bg-[#161b27] border-r border-gray-200 dark:border-[#1e2535] flex flex-col">
                 {/* Header */}
-                <div className="p-4 border-b border-gray-200 dark:border-[#1e2535]">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
-                            <Crown className="w-5 h-5 text-white" />
-                        </div>
+                <div className="p-6 border-b border-gray-200 dark:border-[#1e2535] flex-shrink-0">
+                    <div className="flex items-center gap-2">
+                        {/* Logo as Theme Toggle */}
+                        <button
+                            onClick={toggleTheme}
+                            className="group relative p-2 rounded-xl transition-all duration-300 hover:bg-gray-100 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                            aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+                            title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+                        >
+                            {/* Light Mode Logo - Blue */}
+                            <Shield 
+                                className="w-8 h-8 text-blue-600 transition-all duration-300 rotate-0 scale-100 dark:rotate-90 dark:scale-0 dark:opacity-0" 
+                            />
+                            
+                            {/* Dark Mode Logo - White/Light with glow */}
+                            <Shield 
+                                className="w-8 h-8 absolute inset-0 m-auto text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.5)] transition-all duration-300 rotate-90 scale-0 opacity-0 dark:rotate-0 dark:scale-100 dark:opacity-100" 
+                            />
+                            
+                        </button>
+
                         <div>
-                            <h1 className="font-bold text-gray-900 dark:text-white">Agentium</h1>
-                            <p className="text-xs text-gray-500 dark:text-gray-400">AI Governance</p>
+                            <h1 className="text-xl font-bold text-gray-900 dark:text-white">Agentium</h1>
+                            <p className="text-xs text-gray-500 dark:text-blue-400/70">AI Governance</p>
                         </div>
                     </div>
                 </div>

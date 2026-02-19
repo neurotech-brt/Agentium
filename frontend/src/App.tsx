@@ -1,5 +1,5 @@
 // src/App.tsx
-import { BrowserRouter as Router, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useOutlet } from 'react-router-dom';
 import { useEffect } from 'react';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore } from '@/store/authStore';
@@ -40,6 +40,7 @@ function AppLoader() {
 // Auth layout — keeps background and header persistent across login/signup
 function AuthLayout() {
   const location = useLocation();
+  const outlet = useOutlet(); // snapshot of current route content — doesn't update mid-animation
   const isSignup = location.pathname === '/signup';
 
   return (
@@ -57,13 +58,12 @@ function AuthLayout() {
       <AnimatePresence mode="wait" initial={false}>
         <motion.div
           key={location.pathname}
-          initial={{ opacity: 0, y: 15 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -15 }}
-          transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1, transition: { duration: 0.2, delay: 0.45, ease: "easeIn" } }}
+          exit={{ opacity: 0, transition: { duration: 0.15, ease: "easeOut" } }}
           className="w-full max-w-md relative z-10"
         >
-          <Outlet />
+          {outlet}
         </motion.div>
       </AnimatePresence>
 
@@ -75,7 +75,7 @@ function AuthLayout() {
 }
 
 export default function App() {
-  const { user, isInitialized, isLoading } = useAuthStore();
+  const { user, isInitialized } = useAuthStore();
   const { startPolling, stopPolling } = useBackendStore();
 
   useEffect(() => {
@@ -116,17 +116,12 @@ export default function App() {
             />
           </Route>
 
-          {/* Protected Routes */}
+          {/* Protected Routes — MainLayout is never swapped out for a loader,
+              so the sidebar stays mounted and pages never double-render */}
           <Route
             path="/"
             element={
-              isLoading ? (
-                <AppLoader />
-              ) : isAuthenticated ? (
-                <MainLayout />
-              ) : (
-                <Navigate to="/login" replace />
-              )
+              isAuthenticated ? <MainLayout /> : <Navigate to="/login" replace />
             }
           >
             <Route index element={<Dashboard />} />

@@ -116,27 +116,40 @@ export function FlatMapAuthBackground({ variant = 'login' }: FlatMapAuthBackgrou
         return dist < 80;
       });
 
+      const now = performance.now() / 1000;
+      const DRAW_DURATION = 0.55;  // seconds each line takes to extend outward
+      const STAGGER = 0.12;        // seconds between each beam starting
+
       nearbyCities.forEach((city, index) => {
         const cityPos = latLngToXY(city.lat, city.lng, mapWidth, mapHeight);
-        
-        // Create the base line (very subtle) - from Kathmandu to city
-        const baseGeometry = new THREE.BufferGeometry();
+        const drawInDelay = index * STAGGER;
+
+        // Base line — drawn progressively via drawRange, starts invisible
         const basePoints = [
           new THREE.Vector3(kathmanduPos.x, kathmanduPos.y, 0.05),
           new THREE.Vector3(cityPos.x, cityPos.y, 0.05),
         ];
+        const baseGeometry = new THREE.BufferGeometry();
         baseGeometry.setFromPoints(basePoints);
+        baseGeometry.setDrawRange(0, 0); // start fully hidden
         
         const baseMaterial = new THREE.LineBasicMaterial({
           color: '#DC2626',
           transparent: true,
-          opacity: 0.15,
+          opacity: 0,
         });
         
         const baseLine = new THREE.Line(baseGeometry, baseMaterial);
+        baseLine.userData = {
+          isBaseLine: true,
+          drawInStartTime: now,
+          drawInDelay,
+          drawDuration: DRAW_DURATION,
+          drawnIn: false,
+        };
         beamsGroup.add(baseLine);
         
-        // Create animated flowing segment - from Kathmandu to city
+        // Pulse segment — stays hidden until draw-in completes for this beam
         const segmentGeometry = new THREE.BufferGeometry();
         segmentGeometry.setFromPoints(basePoints);
         
@@ -148,11 +161,13 @@ export function FlatMapAuthBackground({ variant = 'login' }: FlatMapAuthBackgrou
         
         const segment = new THREE.Line(segmentGeometry, segmentMaterial);
         segment.userData = {
+          isBaseLine: false,
           delay: index * 0.25,
-          speed: 0.25, 
+          speed: 0.25,
           material: segmentMaterial,
-          cityPos: cityPos,
-          kathmanduPos: kathmanduPos,
+          cityPos,
+          kathmanduPos,
+          pulseStartTime: now + drawInDelay + DRAW_DURATION + 0.1,
         };
         beamsGroup.add(segment);
       });
@@ -340,29 +355,47 @@ export function FlatMapAuthBackground({ variant = 'login' }: FlatMapAuthBackgrou
 
       // Animate beams if in signup mode
       if (globalSceneInstance?.isSignup) {
+        const nowSec = performance.now() / 1000;
+
         beamsGroup.children.forEach((beam) => {
-          if (beam instanceof THREE.Line && beam.userData.cityPos) {
-            // This is an animated segment
-            const userData = beam.userData;
-            const material = userData.material;
-            const delay = userData.delay;
-            const speed = userData.speed;
-            
-            const cycle = (time * speed + delay) % 3; 
-            
+          if (!(beam instanceof THREE.Line)) return;
+          const ud = beam.userData;
+
+          if (ud.isBaseLine) {
+            // ── Phase 1: draw the line outward from Kathmandu ──
+            const elapsed = nowSec - ud.drawInStartTime - ud.drawInDelay;
+            if (elapsed < 0) {
+              // Not started yet
+              beam.geometry.setDrawRange(0, 0);
+              (beam.material as THREE.LineBasicMaterial).opacity = 0;
+            } else if (!ud.drawnIn) {
+              const t = Math.min(elapsed / ud.drawDuration, 1); // 0 → 1
+              // ease out cubic so it decelerates as it reaches the city
+              const eased = 1 - Math.pow(1 - t, 3);
+              beam.geometry.setDrawRange(0, Math.ceil(eased * 2)); // 2 points total
+              (beam.material as THREE.LineBasicMaterial).opacity = eased * 0.15;
+              if (t >= 1) ud.drawnIn = true;
+            } else {
+              // ── Phase 2: gentle pulse on the base line ──
+              beam.geometry.setDrawRange(0, 2);
+              (beam.material as THREE.LineBasicMaterial).opacity = 0.12 + Math.sin(time * 0.8) * 0.03;
+            }
+          } else {
+            // ── Pulse segment: only active after draw-in ──
+            if (nowSec < ud.pulseStartTime) {
+              ud.material.opacity = 0;
+              return;
+            }
+            const pulseTime = nowSec - ud.pulseStartTime;
+            const cycle = (pulseTime * ud.speed + ud.delay) % 3;
             if (cycle < 1) {
               const progress = cycle;
               const fadeIn = Math.min(progress * 3, 1);
               const fadeOut = Math.max(1 - (progress - 0.7) * 3, 0);
-              material.opacity = 0.7 * fadeIn * fadeOut;
+              ud.material.opacity = 0.7 * fadeIn * fadeOut;
             } else {
-              // Waiting for next pulse
-              material.opacity = 0;
+              ud.material.opacity = 0;
             }
-          } else if (beam instanceof THREE.Line) {
-            // This is a base line - gentle pulse
-            const material = beam.material as THREE.LineBasicMaterial;
-            material.opacity = 0.12 + Math.sin(time * 0.8) * 0.03;
           }
         });
       }
@@ -416,17 +449,6 @@ export function FlatMapAuthBackground({ variant = 'login' }: FlatMapAuthBackgrou
       camera.bottom = -newViewHeight / 2;
       camera.updateProjectionMatrix();
       renderer.setSize(window.innerWidth, window.innerHeight);
-
-      // Rescale the map plane to fill the new view
-      const newMapWidth = newViewWidth;
-      const newMapHeight = newMapWidth / 2;
-
-      // Scale map plane so it always fills the camera frustum
-      mapPlane.scale.set(newMapWidth / mapWidth, newMapHeight / mapHeight, 1);
-
-      // Update stored dimensions so beam/city positions scale correctly
-      globalSceneInstance.mapWidth = newMapWidth;
-      globalSceneInstance.mapHeight = newMapHeight;
     };
 
     window.addEventListener('resize', handleResize);

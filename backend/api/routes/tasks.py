@@ -1,5 +1,6 @@
 """
 Tasks API routes for Agentium.
+Updated for Task Execution Architecture: Governance Alignment
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, noload
@@ -7,8 +8,10 @@ from typing import List, Optional
 
 from backend.models.database import get_db
 from backend.models.entities.task import Task, TaskStatus, TaskType, TaskPriority
+from backend.models.entities.task_events import TaskEvent, TaskEventType
 from backend.api.schemas.task import TaskCreate, TaskResponse, TaskUpdate
 from backend.core.auth import get_current_active_user
+from backend.services.task_state_machine import TaskStateMachine, IllegalStateTransition
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -16,31 +19,45 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 def _serialize(task: Task) -> dict:
     """
     Safely convert Task ORM → dict the frontend expects.
-    Does NOT call task.to_dict() to avoid triggering lazy-loaded
-    relationships (head_of_council, deliberation, subtasks, audit_logs)
-    that can crash with DetachedInstanceError or bad JOINs.
     """
-    # assigned_task_agent_ids is a JSON column - may be None on old rows
     task_agents = task.assigned_task_agent_ids
     if not isinstance(task_agents, list):
         task_agents = []
 
     return {
-        "id":          str(task.id),
-        "title":       task.title or "",
+        "id": str(task.id),
+        "agentium_id": task.agentium_id,
+        "title": task.title or "",
         "description": task.description or "",
-        "status":      task.status.value  if task.status   else "pending",
-        "priority":    task.priority.value if task.priority else "normal",
-        "task_type":   task.task_type.value if task.task_type else "execution",
-        "progress":    task.completion_percentage or 0,
+        "status": task.status.value if task.status else "pending",
+        "priority": task.priority.value if task.priority else "normal",
+        "task_type": task.task_type.value if task.task_type else "execution",
+        "progress": task.completion_percentage or 0,
         "assigned_agents": {
-            "head":        task.head_of_council_id,
-            "lead":        task.lead_agent_id,
+            "head": task.head_of_council_id,
+            "lead": task.lead_agent_id,
             "task_agents": task_agents,
         },
-        # Return ISO strings directly — avoids Pydantic datetime parsing surprises
+        # NEW: Governance fields
+        "governance": {
+            "constitutional_basis": task.constitutional_basis,
+            "parent_task_id": task.parent_task_id,
+            "execution_plan_id": task.execution_plan_id,
+            "recurrence_pattern": task.recurrence_pattern,
+            "requires_deliberation": task.requires_deliberation,
+            "council_approved": task.approved_by_council,
+            "head_approved": task.approved_by_head
+        },
+        # NEW: Error info
+        "error_info": {
+            "error_count": task.error_count,
+            "retry_count": task.retry_count,
+            "max_retries": task.max_retries,
+            "last_error": task.last_error
+        } if task.error_count > 0 else None,
         "created_at": task.created_at.isoformat() if task.created_at else None,
-        "updated_at": None,   # BaseEntity may not have updated_at
+        "updated_at": task.updated_at.isoformat() if hasattr(task, 'updated_at') and task.updated_at else None,
+        "event_count": len(task.events) if hasattr(task, 'events') else 0
     }
 
 
@@ -61,7 +78,6 @@ async def create_task(
     except ValueError:
         type_enum = TaskType.EXECUTION
 
-    # created_by is String(10) — truncate to be safe
     creator = str(current_user.get("sub", "user"))[:10]
 
     task = Task(
@@ -71,11 +87,33 @@ async def create_task(
         task_type=type_enum,
         status=TaskStatus.PENDING,
         created_by=creator,
+        # NEW: Set governance fields if provided
+        constitutional_basis=task_data.constitutional_basis,
+        parent_task_id=task_data.parent_task_id,
+        execution_plan_id=task_data.execution_plan_id,
+        recurrence_pattern=task_data.recurrence_pattern,
     )
 
     db.add(task)
     db.commit()
     db.refresh(task)
+
+    # Emit creation event
+    event = TaskEvent(
+        task_id=task.id,
+        event_type=TaskEventType.TASK_CREATED,
+        actor_id=creator,
+        actor_type="user",
+        data={
+            "title": task.title,
+            "description": task.description,
+            "priority": task.priority.value,
+            "task_type": task.task_type.value,
+            "created_by": creator
+        }
+    )
+    db.add(event)
+    db.commit()
 
     return _serialize(task)
 
@@ -84,18 +122,18 @@ async def create_task(
 async def list_tasks(
     status: Optional[str] = Query(None),
     agent_id: Optional[str] = Query(None),
+    parent_task_id: Optional[str] = Query(None),  # NEW: Filter by parent
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     current_user: dict = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
     """List tasks. Returns array of task objects."""
-    # Use noload to prevent the lazy="joined" on head_of_council
-    # from triggering extra queries / crashes on orphaned FKs
     query = db.query(Task).options(
         noload(Task.head_of_council),
         noload(Task.lead_agent),
         noload(Task.deliberation),
+        noload(Task.events)
     )
 
     if status:
@@ -112,6 +150,10 @@ async def list_tasks(
         query = query.filter(
             Task.assigned_task_agent_ids.contains([agent_id])
         )
+    
+    # NEW: Filter by parent task
+    if parent_task_id:
+        query = query.filter(Task.parent_task_id == parent_task_id)
 
     tasks = query.order_by(Task.created_at.desc()).offset(skip).limit(limit).all()
     return [_serialize(t) for t in tasks]
@@ -119,10 +161,12 @@ async def list_tasks(
 
 @router.get("/{task_id}")
 async def get_task(
-    task_id: str,        # UUID string, not int
+    task_id: str,
+    include_events: bool = Query(False),  # NEW: Optional event inclusion
     current_user: dict = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    """Get specific task by ID."""
     task = db.query(Task).options(
         noload(Task.head_of_council),
         noload(Task.lead_agent),
@@ -131,7 +175,19 @@ async def get_task(
 
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    return _serialize(task)
+    
+    result = _serialize(task)
+    
+    # NEW: Include events if requested
+    if include_events:
+        events = db.query(TaskEvent).filter_by(task_id=task_id).order_by(TaskEvent.created_at).all()
+        result["events"] = [e.to_dict() for e in events]
+    
+    # NEW: Include subtasks if any
+    if task.child_tasks:
+        result["subtasks"] = [{"id": t.id, "agentium_id": t.agentium_id, "title": t.title, "status": t.status.value} for t in task.child_tasks]
+    
+    return result
 
 
 @router.patch("/{task_id}")
@@ -141,24 +197,42 @@ async def update_task(
     current_user: dict = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    """Update task. Status changes go through state machine validation."""
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
+    # Handle status change with state machine validation
+    if task_data.status is not None:
+        try:
+            new_status = TaskStatus(task_data.status)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {task_data.status}")
+        
+        try:
+            # Use task's set_status method which includes state machine validation
+            task.set_status(new_status, str(current_user.get("sub", "user")), task_data.status_note)
+        except IllegalStateTransition as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    
+    # Update other fields
     if task_data.title is not None:
         task.title = task_data.title
     if task_data.description is not None:
         task.description = task_data.description
-    if task_data.status is not None:
-        try:
-            task.status = TaskStatus(task_data.status)
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {task_data.status}")
     if task_data.priority is not None:
         try:
             task.priority = TaskPriority(task_data.priority)
         except ValueError:
             raise HTTPException(status_code=400, detail=f"Invalid priority: {task_data.priority}")
+    
+    # NEW: Update governance fields
+    if task_data.constitutional_basis is not None:
+        task.constitutional_basis = task_data.constitutional_basis
+    if task_data.parent_task_id is not None:
+        task.parent_task_id = task_data.parent_task_id
+    if task_data.execution_plan_id is not None:
+        task.execution_plan_id = task_data.execution_plan_id
 
     db.commit()
     db.refresh(task)
@@ -172,6 +246,7 @@ async def execute_task(
     current_user: dict = Depends(get_current_active_user),
     db: Session = Depends(get_db)
 ):
+    """Execute a task by assigning it to an agent."""
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -183,8 +258,170 @@ async def execute_task(
         agents.append(agent_id)
         task.assigned_task_agent_ids = agents
 
-    task.status = TaskStatus.IN_PROGRESS
+    try:
+        task.set_status(TaskStatus.IN_PROGRESS, agent_id)
+    except IllegalStateTransition as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
     db.commit()
     db.refresh(task)
 
     return {"status": "success", "task": _serialize(task)}
+
+
+# ═══════════════════════════════════════════════════════════
+# NEW ENDPOINTS: Task Execution Architecture
+# ═══════════════════════════════════════════════════════════
+
+@router.post("/{task_id}/escalate")
+async def escalate_task(
+    task_id: str,
+    reason: str = Query(..., description="Reason for escalation"),
+    current_user: dict = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Manually escalate a task to Council.
+    Task must be in a state that allows escalation.
+    """
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    try:
+        task.escalate_to_council(reason, str(current_user.get("sub", "user")))
+        db.commit()
+        db.refresh(task)
+    except IllegalStateTransition as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    return {
+        "status": "success",
+        "message": f"Task {task.agentium_id} escalated to Council",
+        "task": _serialize(task)
+    }
+
+
+@router.get("/{task_id}/subtasks")
+async def get_subtasks(
+    task_id: str,
+    current_user: dict = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get all subtasks (child tasks) for a parent task."""
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    # Get child tasks
+    children = db.query(Task).filter(Task.parent_task_id == task_id).all()
+    
+    return {
+        "parent_task": {
+            "id": task.id,
+            "agentium_id": task.agentium_id,
+            "title": task.title
+        },
+        "subtasks": [_serialize(t) for t in children],
+        "count": len(children)
+    }
+
+
+@router.get("/{task_id}/events")
+async def get_task_events(
+    task_id: str,
+    event_type: Optional[str] = Query(None, description="Filter by event type"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    current_user: dict = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get event history for a task (Event Sourcing).
+    Returns immutable event log for complete audit trail.
+    """
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    query = db.query(TaskEvent).filter(TaskEvent.task_id == task_id)
+    
+    if event_type:
+        try:
+            et = TaskEventType(event_type)
+            query = query.filter(TaskEvent.event_type == et)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid event type. Valid: {[e.value for e in TaskEventType]}"
+            )
+    
+    events = query.order_by(TaskEvent.created_at.desc()).offset(skip).limit(limit).all()
+    
+    return {
+        "task_id": task_id,
+        "agentium_id": task.agentium_id,
+        "total_events": query.count(),
+        "events": [e.to_dict() for e in events]
+    }
+
+
+@router.post("/{task_id}/retry")
+async def retry_task(
+    task_id: str,
+    current_user: dict = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Manually retry a failed or escalated task.
+    Resets retry count and puts task back in progress.
+    """
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if task.status not in [TaskStatus.FAILED, TaskStatus.ESCALATED, TaskStatus.STOPPED]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot retry task in status {task.status.value}. Must be failed, escalated, or stopped."
+        )
+    
+    # Reset counters
+    task.retry_count = 0
+    task.error_count = 0
+    
+    try:
+        task.set_status(TaskStatus.IN_PROGRESS, str(current_user.get("sub", "user")), "Manual retry initiated")
+        db.commit()
+        db.refresh(task)
+    except IllegalStateTransition as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    return {
+        "status": "success",
+        "message": f"Task {task.agentium_id} queued for retry",
+        "task": _serialize(task)
+    }
+
+
+@router.get("/{task_id}/allowed-transitions")
+async def get_allowed_transitions(
+    task_id: str,
+    current_user: dict = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get list of allowed status transitions for a task."""
+    task = db.query(Task).filter(Task.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    allowed = TaskStateMachine.get_allowed_transitions(task.status)
+    
+    return {
+        "task_id": task_id,
+        "current_status": task.status.value,
+        "allowed_transitions": [s.value for s in allowed],
+        "is_terminal": TaskStateMachine.is_terminal_state(task.status)
+    }

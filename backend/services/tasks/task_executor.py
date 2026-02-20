@@ -1,25 +1,30 @@
 """
 Task execution handlers for Celery.
 Includes: task execution, constitution review, idle processing, 
-and channel message retry with circuit breaker support.
+self-healing execution loop, data retention, and channel message retry.
 """
 import logging
 import asyncio
-from typing import Optional, Dict, Any
+import json
+from typing import Optional, Dict, Any, List
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from contextlib import contextmanager
 
 from backend.celery_app import celery_app
 from backend.models.database import SessionLocal, engine
 from backend.models.entities.channels import ExternalMessage, ExternalChannel, ChannelStatus, ChannelType
-from backend.models.entities.task import Task, TaskStatus
+from backend.models.entities.task import Task, TaskStatus, TaskType, TaskPriority
+from backend.models.entities.task_events import TaskEvent, TaskEventType
+from backend.models.entities.agents import Agent, CouncilMember, HeadOfCouncil, AgentType
+from backend.models.entities.audit import AuditLog, AuditCategory, AuditLevel
+from backend.services.knowledge_governance import KnowledgeGovernanceService, KnowledgeCategory
 
 logger = logging.getLogger(__name__)
 
 
 # ═══════════════════════════════════════════════════════════
-# Database Session Context Manager (FIXED)
+# Database Session Context Manager
 # ═══════════════════════════════════════════════════════════
 
 @contextmanager
@@ -31,12 +36,12 @@ def get_task_db():
     db = SessionLocal()
     try:
         yield db
-        db.commit()  # Auto-commit on success
+        db.commit()
     except Exception:
-        db.rollback()  # Rollback on error
+        db.rollback()
         raise
     finally:
-        db.close()  # Always close
+        db.close()
 
 
 # ═══════════════════════════════════════════════════════════
@@ -69,7 +74,334 @@ def process_idle_tasks():
 
 
 # ═══════════════════════════════════════════════════════════
-# Channel Message Retry & Recovery (NEW)
+# Self-Healing Execution Loop (NEW)
+# ═══════════════════════════════════════════════════════════
+
+@celery_app.task
+def handle_task_escalation():
+    """
+    Handle tasks that have been escalated to Council after max retries.
+    Council decides: liquidate, modify scope, or allocate more resources.
+    """
+    with get_task_db() as db:
+        try:
+            # Find all escalated tasks
+            escalated_tasks = db.query(Task).filter(
+                Task.status == TaskStatus.ESCALATED,
+                Task.is_active == 'Y'
+            ).all()
+            
+            if not escalated_tasks:
+                return {"processed": 0}
+            
+            # Get Council members for deliberation
+            council_members = db.query(CouncilMember).filter_by(is_active="Y").all()
+            head = db.query(HeadOfCouncil).filter_by(agentium_id="00001").first()
+            
+            results = []
+            
+            for task in escalated_tasks:
+                logger.info(f"Processing escalated task {task.agentium_id}: {task.title}")
+                
+                # Create Council deliberation for escalated task
+                try:
+                    # Start deliberation
+                    deliberation = task.start_deliberation([m.agentium_id for m in council_members[:3]])
+                    db.add(deliberation)
+                    
+                    # Simulate Council decision (in production, this would be actual voting)
+                    # Decision options:
+                    # 1. LIQUIDATE: Cancel the task
+                    # 2. MODIFY_SCOPE: Update description and retry
+                    # 3. ALLOCATE_RESOURCES: Spawn additional agents
+                    
+                    decision = _simulate_council_decision(task)
+                    
+                    if decision == "liquidate":
+                        task.cancel(
+                            reason="Council decision: Task liquidated after escalation",
+                            cancelled_by="Council"
+                        )
+                        result = "liquidated"
+                        
+                    elif decision == "modify_scope":
+                        # Modify task description and retry
+                        task.description += "\n[Modified by Council after escalation]"
+                        task.retry_count = 0  # Reset retries
+                        task.error_count = 0
+                        task.set_status(TaskStatus.IN_PROGRESS, "Council", "Scope modified, retrying")
+                        result = "modified_and_retrying"
+                        
+                    elif decision == "allocate_resources":
+                        # Spawn additional agents (simulated)
+                        task.set_status(TaskStatus.IN_PROGRESS, "Council", "Additional resources allocated")
+                        # In production: actually spawn new 3xxxx agents
+                        result = "resources_allocated"
+                    
+                    # Log the decision
+                    AuditLog.log(
+                        db=db,
+                        level=AuditLevel.INFO,
+                        category=AuditCategory.GOVERNANCE,
+                        actor_type="agent",
+                        actor_id="Council",
+                        action="escalated_task_processed",
+                        target_type="task",
+                        target_id=task.id,
+                        description=f"Escalated task processed with decision: {result}",
+                        after_state={
+                            "task_id": task.agentium_id,
+                            "decision": result,
+                            "previous_retries": task.retry_count
+                        }
+                    )
+                    
+                    results.append({
+                        "task_id": task.agentium_id,
+                        "decision": result
+                    })
+                    
+                except Exception as e:
+                    logger.error(f"Failed to process escalated task {task.agentium_id}: {e}")
+                    results.append({
+                        "task_id": task.agentium_id,
+                        "error": str(e)
+                    })
+            
+            db.commit()
+            
+            logger.info(f"Processed {len(results)} escalated tasks")
+            return {
+                "processed": len(results),
+                "details": results,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in handle_task_escalation: {e}")
+            return {"error": str(e)}
+
+
+def _simulate_council_decision(task: Task) -> str:
+    """
+    Simulate Council decision for escalated task.
+    In production, this would be actual democratic voting.
+    """
+    # Simple heuristic for demo:
+    # - If task has been retried many times, liquidate
+    # - If task is important (high priority), allocate resources
+    # - Otherwise, modify scope and retry
+    
+    if task.retry_count >= task.max_retries:
+        if task.priority in [TaskPriority.CRITICAL, TaskPriority.SOVEREIGN]:
+            return "allocate_resources"
+        else:
+            return "liquidate"
+    
+    return "modify_scope"
+
+
+# ═══════════════════════════════════════════════════════════
+# Data Retention & Sovereign Optimization (NEW)
+# ═══════════════════════════════════════════════════════════
+
+@celery_app.task
+def sovereign_data_retention():
+    """
+    Daily data retention and cleanup task.
+    - Delete completed tasks older than 30 days (preserving audit snapshots)
+    - Remove orphan embeddings from vector DB
+    - Compress execution logs
+    - Archive constitutional history
+    - Remove ethos of deleted agents
+    """
+    with get_task_db() as db:
+        try:
+            results = {
+                "tasks_archived": 0,
+                "embeddings_removed": 0,
+                "logs_compressed": 0,
+                "ethos_removed": 0,
+                "errors": []
+            }
+            
+            cutoff_date = datetime.utcnow() - timedelta(days=30)
+            
+            # 1. Archive completed tasks older than 30 days
+            old_tasks = db.query(Task).filter(
+                Task.status.in_([TaskStatus.COMPLETED, TaskStatus.CANCELLED, TaskStatus.FAILED]),
+                Task.completed_at < cutoff_date,
+                Task.is_active == 'Y'
+            ).all()
+            
+            for task in old_tasks:
+                try:
+                    # Create audit snapshot before soft-delete
+                    AuditLog.log(
+                        db=db,
+                        level=AuditLevel.INFO,
+                        category=AuditCategory.GOVERNANCE,
+                        actor_type="system",
+                        actor_id="DATA_RETENTION",
+                        action="task_archived",
+                        target_type="task",
+                        target_id=task.id,
+                        before_state=task.to_dict(),
+                        description=f"Task archived after 30 days: {task.agentium_id}"
+                    )
+                    
+                    # Soft delete (mark inactive)
+                    task.is_active = 'N'
+                    results["tasks_archived"] += 1
+                    
+                except Exception as e:
+                    results["errors"].append(f"Failed to archive task {task.agentium_id}: {e}")
+            
+            # 2. Remove orphan embeddings (those without active tasks)
+            try:
+                from backend.core.vector_store import get_vector_store
+                vector_store = get_vector_store()
+                
+                # Get all active task IDs
+                active_task_ids = [t.agentium_id for t in db.query(Task).filter(
+                    Task.is_active == 'Y'
+                ).all()]
+                
+                # Check staging collection for orphans
+                try:
+                    staging = vector_store.get_collection("staging")
+                    staging_docs = staging.get()
+                    
+                    if staging_docs and staging_docs['ids']:
+                        for doc_id, metadata in zip(staging_docs['ids'], staging_docs['metadatas']):
+                            task_ref = metadata.get('submission_id', '') if metadata else ''
+                            # If referenced task doesn't exist or is inactive, remove embedding
+                            if task_ref and not any(t.startswith(task_ref) for t in active_task_ids):
+                                staging.delete(ids=[doc_id])
+                                results["embeddings_removed"] += 1
+                except Exception as e:
+                    results["errors"].append(f"Vector cleanup error: {e}")
+                    
+            except Exception as e:
+                results["errors"].append(f"Vector store error: {e}")
+            
+            # 3. Compress old execution logs (older than 90 days)
+            log_cutoff = datetime.utcnow() - timedelta(days=90)
+            old_logs = db.query(AuditLog).filter(
+                AuditLog.created_at < log_cutoff,
+                AuditLog.category == AuditCategory.GOVERNANCE
+            ).limit(1000).all()
+            
+            # Mark as compressed (in production, move to archive table)
+            for log in old_logs:
+                if log.action_details is None:
+                    log.action_details = {}
+                if isinstance(log.action_details, dict):
+                    log.action_details['_compressed'] = True
+            
+            results["logs_compressed"] = len(old_logs)
+            
+            # 4. Remove ethos of deleted/inactive agents
+            try:
+                inactive_agents = db.query(Agent).filter(
+                    Agent.is_active == 'N'
+                ).all()
+                
+                for agent in inactive_agents:
+                    # Clear ethos (stored as JSON field on Agent)
+                    if hasattr(agent, 'ethos') and agent.ethos:
+                        agent.ethos = {}  # Or move to archive
+                        results["ethos_removed"] += 1
+                        
+            except Exception as e:
+                results["errors"].append(f"Ethos cleanup error: {e}")
+            
+            db.commit()
+            
+            logger.info(f"Data retention complete: {results}")
+            return {
+                "status": "completed",
+                "results": results,
+                "timestamp": datetime.utcnow().isoformat()
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in sovereign_data_retention: {e}")
+            return {"error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════
+# Auto-Scaling Governance (NEW)
+# ═══════════════════════════════════════════════════════════
+
+@celery_app.task
+def auto_scale_check():
+    """
+    Monitor queue depth and trigger auto-scaling if needed.
+    If pending tasks exceed threshold, request Council micro-vote to spawn agents.
+    """
+    with get_task_db() as db:
+        try:
+            # Count pending tasks
+            pending_count = db.query(Task).filter(
+                Task.status.in_([
+                    TaskStatus.PENDING,
+                    TaskStatus.DELIBERATING,
+                    TaskStatus.APPROVED,
+                    TaskStatus.ASSIGNED
+                ]),
+                Task.is_active == 'Y'
+            ).count()
+            
+            threshold = 10  # Configurable threshold
+            
+            if pending_count > threshold:
+                logger.info(f"Queue depth {pending_count} exceeds threshold {threshold}, requesting scaling")
+                
+                # Request Council micro-vote for scaling
+                # In production: actual vote, here we simulate approval
+                head = db.query(HeadOfCouncil).filter_by(agentium_id="00001").first()
+                
+                if head:
+                    # Log scaling decision
+                    AuditLog.log(
+                        db=db,
+                        level=AuditLevel.INFO,
+                        category=AuditCategory.GOVERNANCE,
+                        actor_type="agent",
+                        actor_id="SYSTEM",
+                        action="auto_scale_triggered",
+                        description=f"Auto-scaling triggered: {pending_count} pending tasks",
+                        after_state={
+                            "pending_count": pending_count,
+                            "threshold": threshold,
+                            "recommended_agents": 3  # Spawn 3 new 3xxxx agents
+                        }
+                    )
+                    
+                    # In production: actually spawn agents via reincarnation_service
+                    
+                    return {
+                        "scaled": True,
+                        "pending_count": pending_count,
+                        "threshold": threshold,
+                        "new_agents_requested": 3,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }
+            
+            return {
+                "scaled": False,
+                "pending_count": pending_count,
+                "threshold": threshold
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in auto_scale_check: {e}")
+            return {"error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════
+# Channel Message Retry & Recovery
 # ═══════════════════════════════════════════════════════════
 
 @celery_app.task(bind=True, max_retries=3)
@@ -80,33 +412,26 @@ def retry_channel_message(self, message_id: str, agent_id: str, content: str, ri
     """
     with get_task_db() as db:
         try:
-            # Import here to avoid circular imports
             from backend.services.channel_manager import ChannelManager, circuit_breaker, RichMediaContent
             
-            # Get message
             message = db.query(ExternalMessage).filter_by(id=message_id).first()
             if not message:
                 logger.error(f"Message {message_id} not found for retry")
                 return {"success": False, "error": "Message not found"}
             
-            # Check if channel is still active
             channel = db.query(ExternalChannel).filter_by(id=message.channel_id).first()
             if not channel or channel.status != ChannelStatus.ACTIVE:
                 logger.warning(f"Channel {message.channel_id} not active, aborting retry")
                 return {"success": False, "error": "Channel not active"}
             
-            # Check circuit breaker
             if not circuit_breaker.can_execute(channel.id):
-                # Reschedule for later
                 logger.info(f"Circuit breaker open for channel {channel.id}, rescheduling retry")
-                raise self.retry(countdown=600)  # 10 minutes
+                raise self.retry(countdown=600)
             
-            # Reconstruct rich media if provided
             rich_media = None
             if rich_media_dict:
                 rich_media = RichMediaContent(**rich_media_dict)
             
-            # Attempt to send
             success = ChannelManager.send_response(
                 message_id=message_id,
                 response_content=content,
@@ -118,7 +443,6 @@ def retry_channel_message(self, message_id: str, agent_id: str, content: str, ri
             if not success:
                 raise Exception("Send returned False")
             
-            # Record success
             circuit_breaker.record_success(channel.id)
             logger.info(f"Successfully retried message {message_id}")
             
@@ -132,22 +456,18 @@ def retry_channel_message(self, message_id: str, agent_id: str, content: str, ri
             retry_count = self.request.retries
             
             if retry_count < 3:
-                # Exponential backoff: 5min, 10min, 20min
                 countdown = 300 * (2 ** retry_count)
                 logger.warning(f"Retry {retry_count + 1}/3 for message {message_id} in {countdown}s: {exc}")
                 raise self.retry(exc=exc, countdown=countdown)
             
-            # Max retries exceeded
             logger.error(f"Max retries exceeded for message {message_id}: {exc}")
             
-            # Mark as permanently failed
             message = db.query(ExternalMessage).filter_by(id=message_id).first()
             if message:
                 message.status = "failed"
                 message.last_error = f"Max retries exceeded: {str(exc)}"
                 db.commit()
             
-            # Open circuit breaker
             if message:
                 circuit_breaker.record_failure(message.channel_id)
             
@@ -160,10 +480,7 @@ def retry_channel_message(self, message_id: str, agent_id: str, content: str, ri
 
 @celery_app.task
 def cleanup_old_channel_messages(days: int = 30):
-    """
-    Archive old channel messages.
-    Keeps recent messages for context, archives old ones.
-    """
+    """Archive old channel messages."""
     cutoff = datetime.utcnow() - timedelta(days=days)
     
     with get_task_db() as db:
@@ -183,10 +500,7 @@ def cleanup_old_channel_messages(days: int = 30):
 
 @celery_app.task
 def check_channel_health():
-    """
-    Periodic health check for all channels.
-    Auto-disables channels with low success rates.
-    """
+    """Periodic health check for all channels."""
     from backend.services.channel_manager import ChannelManager, CircuitState
     
     with get_task_db() as db:
@@ -198,7 +512,6 @@ def check_channel_health():
         for channel in channels:
             health = ChannelManager.get_channel_health(channel.id)
             
-            # Auto-disable unhealthy channels
             if (health['overall_status'] == 'degraded' and 
                 health['circuit_breaker']['success_rate'] < 0.5):
                 
@@ -217,7 +530,6 @@ def check_channel_health():
                     f"(success rate: {health['circuit_breaker']['success_rate']:.2%})"
                 )
             
-            # Log circuit breaker state changes
             elif health['circuit_breaker']['circuit_state'] != 'closed':
                 results.append({
                     "channel_id": channel.id,
@@ -236,15 +548,10 @@ def check_channel_health():
 
 @celery_app.task
 def start_imap_receivers():
-    """
-    Ensure IMAP receivers are running for all email channels.
-    Called periodically to recover from crashes.
-    FIXED: Proper session handling with eager loading
-    """
+    """Ensure IMAP receivers are running for all email channels."""
     from backend.services.channel_manager import imap_receiver
     
     with get_task_db() as db:
-        # FIXED: Use eager loading to prevent detached object issues
         from sqlalchemy.orm import joinedload
         
         email_channels = db.query(ExternalChannel).filter(
@@ -252,7 +559,6 @@ def start_imap_receivers():
             ExternalChannel.status == ChannelStatus.ACTIVE
         ).all()
         
-        # Convert to dict before session closes to avoid detached object issues
         channel_configs = []
         for channel in email_channels:
             channel_configs.append({
@@ -260,12 +566,10 @@ def start_imap_receivers():
                 'config': channel.config if isinstance(channel.config, dict) else {}
             })
         
-        # Process outside of session if asyncio needed
         started = 0
         for channel_data in channel_configs:
             if channel_data['config'].get('enable_imap') or channel_data['config'].get('imap_host'):
                 try:
-                    # Use asyncio to start IMAP
                     asyncio.run(
                         imap_receiver.start_channel(channel_data['id'], channel_data['config'])
                     )
@@ -283,29 +587,20 @@ def start_imap_receivers():
 
 @celery_app.task
 def send_channel_heartbeat():
-    """
-    Send periodic heartbeat to all active channels.
-    Useful for detecting stale connections.
-    FIXED: Proper query execution with immediate consumption
-    """
-    from datetime import datetime, timedelta
+    """Send periodic heartbeat to all active channels."""
     
     with get_task_db() as db:
-        # FIXED: Execute query and consume results immediately before any other operations
         cutoff_time = datetime.utcnow() - timedelta(hours=24)
         
-        # Use .all() to fully consume the query immediately
         active_channels = db.query(ExternalChannel).filter(
             ExternalChannel.status == ChannelStatus.ACTIVE,
             ExternalChannel.last_message_at > cutoff_time
         ).all()
         
-        # Convert to list of IDs to avoid keeping ORM objects attached
         channel_ids = [ch.id for ch in active_channels]
         
         heartbeats_sent = 0
         for channel_id in channel_ids:
-            # Update each channel in separate transaction to avoid long-running transaction
             try:
                 channel = db.query(ExternalChannel).filter_by(id=channel_id).first()
                 if channel:
@@ -325,10 +620,7 @@ def send_channel_heartbeat():
 
 @celery_app.task
 def broadcast_to_channels(channel_ids: list, message: str, agent_id: str):
-    """
-    Broadcast a message to multiple channels.
-    Used for announcements or alerts.
-    """
+    """Broadcast a message to multiple channels."""
     from backend.services.channel_manager import ChannelManager
     
     results = []
@@ -336,7 +628,6 @@ def broadcast_to_channels(channel_ids: list, message: str, agent_id: str):
     with get_task_db() as db:
         for channel_id in channel_ids:
             try:
-                # Create a test message record
                 test_msg = ExternalMessage(
                     channel_id=channel_id,
                     sender_id="system",
@@ -346,7 +637,7 @@ def broadcast_to_channels(channel_ids: list, message: str, agent_id: str):
                     status="pending"
                 )
                 db.add(test_msg)
-                db.commit()  # Commit immediately to get ID
+                db.commit()
                 
                 success = ChannelManager.send_response(
                     message_id=test_msg.id,

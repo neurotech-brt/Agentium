@@ -1,6 +1,7 @@
 """
 Task management for Agentium.
 Includes IDLE TASK support for continuous background optimization.
+Updated for Task Execution Architecture: Governance Alignment
 """
 
 from datetime import datetime
@@ -13,56 +14,78 @@ import enum
 
 class TaskPriority(str, enum.Enum):
     """Task priority levels."""
+    SOVEREIGN = "sovereign"    # Highest priority - skips all governance
     CRITICAL = "critical"
     HIGH = "high"
     NORMAL = "normal"
     LOW = "low"
-    IDLE = "idle"  # NEW: Background optimization priority (lowest)
+    IDLE = "idle"  # Background optimization priority (lowest)
 
 class TaskStatus(str, enum.Enum):
-    """Task lifecycle states."""
+    """Task lifecycle states - Governance Architecture Aligned."""
+    # Initial states
     PENDING = "pending"
     DELIBERATING = "deliberating"
     APPROVED = "approved"
     REJECTED = "rejected"
+    
+    # Delegation states
     DELEGATING = "delegating"
     ASSIGNED = "assigned"
+    
+    # Execution states
     IN_PROGRESS = "in_progress"
     REVIEW = "review"
+    
+    # Completion states
     COMPLETED = "completed"
-    FAILED = "failed"
     CANCELLED = "cancelled"
+    
+    # Failure & Recovery states (NEW)
+    FAILED = "failed"
+    RETRYING = "retrying"      # NEW: Task is being retried after failure
+    ESCALATED = "escalated"    # NEW: Max retries exceeded, escalated to Council
+    STOPPED = "stopped"        # NEW: Task manually stopped or liquidated
+    
     # IDLE-specific states
-    IDLE_PENDING = "idle_pending"      # Waiting for idle time
-    IDLE_RUNNING = "idle_running"      # Being processed by persistent agent
-    IDLE_PAUSED = "idle_paused"        # Interrupted by user task
-    IDLE_COMPLETED = "idle_completed"  # Successfully finished in idle mode
+    IDLE_PENDING = "idle_pending"
+    IDLE_RUNNING = "idle_running"
+    IDLE_PAUSED = "idle_paused"
+    IDLE_COMPLETED = "idle_completed"
 
 class TaskType(str, enum.Enum):
     """Categories of tasks."""
+    # Governance types
     CONSTITUTIONAL = "constitutional"
     SYSTEM = "system"
+    
+    # User task types (NEW)
+    ONE_TIME = "one_time"      # NEW: Single execution task
+    RECURRING = "recurring"    # NEW: Recurring scheduled task
+    
+    # Execution types
     EXECUTION = "execution"
     RESEARCH = "research"
     AUTOMATION = "automation"
     ANALYSIS = "analysis"
     COMMUNICATION = "communication"
-    CONSTITUTION_READ = "constitution_read" 
-    # IDLE OPTIMIZATION TASKS (NEW)
-    VECTOR_MAINTENANCE = "vector_maintenance"      # ChromaDB optimization
-    STORAGE_DEDUPE = "storage_dedupe"              # Database deduplication
-    AUDIT_ARCHIVAL = "audit_archival"              # Log compression/archival
-    PREDICTIVE_PLANNING = "predictive_planning"    # Future task prediction
-    CONSTITUTION_REFINE = "constitution_refine"    # Constitutional amendments
-    AGENT_HEALTH_SCAN = "agent_health_scan"        # Proactive health checks
-    ETHOS_OPTIMIZATION = "ethos_optimization"      # Ethos refinement
-    CACHE_OPTIMIZATION = "cache_optimization"      # Redis/vector cache tuning
-    IDLE_COMPLETED = "idle_completed"  
-    IDLE_PAUSED = "idle_paused" 
+    CONSTITUTION_READ = "constitution_read"
+    
+    # IDLE optimization tasks
+    VECTOR_MAINTENANCE = "vector_maintenance"
+    STORAGE_DEDUPE = "storage_dedupe"
+    AUDIT_ARCHIVAL = "audit_archival"
+    PREDICTIVE_PLANNING = "predictive_planning"
+    CONSTITUTION_REFINE = "constitution_refine"
+    AGENT_HEALTH_SCAN = "agent_health_scan"
+    ETHOS_OPTIMIZATION = "ethos_optimization"
+    CACHE_OPTIMIZATION = "cache_optimization"
+    IDLE_COMPLETED = "idle_completed"
+    IDLE_PAUSED = "idle_paused"
 
 
 class Task(BaseEntity):
-    """Central task entity with IDLE GOVERNANCE support."""
+    """Central task entity with IDLE GOVERNANCE support and Governance Architecture."""
     
     __tablename__ = 'tasks'
     
@@ -71,11 +94,19 @@ class Task(BaseEntity):
     task_type = Column(Enum(TaskType), default=TaskType.EXECUTION, nullable=False)
     priority = Column(Enum(TaskPriority), default=TaskPriority.NORMAL, nullable=False)
     
-    # IDLE-specific flag (NEW)
+    # NEW: Constitutional governance fields
+    constitutional_basis = Column(Text, nullable=True)  # Reason task is constitutionally valid
+    recurrence_pattern = Column(String(100), nullable=True)  # Cron expression for recurring tasks
+    
+    # Hierarchical task structure (NEW)
+    parent_task_id = Column(String(36), ForeignKey('tasks.id'), nullable=True)
+    execution_plan_id = Column(String(36), nullable=True)  # Link to execution plan
+    
+    # IDLE-specific flag
     is_idle_task = Column(Boolean, default=False, nullable=False, index=True)
-    idle_task_category = Column(String(50), nullable=True)  # e.g., "storage", "planning", "maintenance"
-    estimated_tokens = Column(Integer, default=0)  # For token budget management
-    tokens_used = Column(Integer, default=0)  # Actual tokens consumed
+    idle_task_category = Column(String(50), nullable=True)
+    estimated_tokens = Column(Integer, default=0)
+    tokens_used = Column(Integer, default=0)
     
     status = Column(Enum(TaskStatus), default=TaskStatus.PENDING, nullable=False)
     status_history = Column(JSON, default=list)
@@ -110,19 +141,24 @@ class Task(BaseEntity):
     error_count = Column(Integer, default=0)
     last_error = Column(Text, nullable=True)
     retry_count = Column(Integer, default=0)
-    max_retries = Column(Integer, default=3)
+    max_retries = Column(Integer, default=5)  # UPDATED: from 3 to 5
     
+    # Relationships
     head_of_council = relationship("Agent", foreign_keys=[head_of_council_id], lazy="joined")
     lead_agent = relationship("Agent", foreign_keys=[lead_agent_id])
     deliberation = relationship(
-    "TaskDeliberation",
-    primaryjoin="Task.deliberation_id == TaskDeliberation.id",
-    foreign_keys=[deliberation_id],
-    back_populates="task",
-    uselist=False
+        "TaskDeliberation",
+        primaryjoin="Task.deliberation_id == TaskDeliberation.id",
+        foreign_keys=[deliberation_id],
+        back_populates="task",
+        uselist=False
     )
+    # NEW: Parent-child relationship
+    parent_task = relationship("Task", remote_side="Task.id", backref="child_tasks")
     subtasks = relationship("SubTask", back_populates="parent_task", lazy="dynamic")
     audit_logs = relationship("TaskAuditLog", back_populates="task", lazy="dynamic")
+    # NEW: Event sourcing relationship
+    events = relationship("TaskEvent", back_populates="task", lazy="dynamic", order_by="TaskEvent.created_at")
     
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -145,11 +181,17 @@ class Task(BaseEntity):
             self.is_idle_task = True
             self.priority = TaskPriority.IDLE
             self.requires_deliberation = False  # Idle tasks skip deliberation
+        
+        # Sovereign priority skips all governance
+        if self.priority == TaskPriority.SOVEREIGN:
+            self.requires_deliberation = False
+            self.approved_by_council = True
+            self.approved_by_head = True
     
     def _generate_task_id(self) -> str:
         """Generate task ID: T + 5-digit sequence number."""
         from backend.models.database import get_db_context
-        from sqlalchemy import text  # Add this line
+        from sqlalchemy import text
         
         with get_db_context() as db:
             result = db.execute(text("""
@@ -169,43 +211,76 @@ class Task(BaseEntity):
     
     @validates('priority')
     def validate_priority(self, key, priority):
-        """Critical tasks skip deliberation. Idle tasks skip deliberation."""
-        if priority in [TaskPriority.CRITICAL, TaskPriority.IDLE]:
+        """Critical and Sovereign tasks skip deliberation. Idle tasks skip deliberation."""
+        if priority in [TaskPriority.CRITICAL, TaskPriority.SOVEREIGN, TaskPriority.IDLE]:
             self.requires_deliberation = False
         return priority
+    
+    def set_status(self, new_status: TaskStatus, actor_id: str = "system", note: str = None):
+        """
+        Set task status with state machine validation.
+        This is the ONLY way to change status - enforces legal transitions.
+        """
+        from backend.services.task_state_machine import TaskStateMachine, IllegalStateTransition
+        
+        # Validate transition
+        TaskStateMachine.validate_transition(self.status, new_status)
+        
+        # Update status
+        old_status = self.status
+        self.status = new_status
+        
+        # Log the change
+        self._log_status_change(new_status.value, actor_id, note)
+        
+        # Emit event for event sourcing
+        self._emit_status_event(old_status, new_status, actor_id, note)
+        
+        return True
+    
+    def _emit_status_event(self, old_status: TaskStatus, new_status: TaskStatus, actor_id: str, note: str = None):
+        """Emit event for event sourcing."""
+        from backend.models.entities.task_events import TaskEvent, TaskEventType
+        
+        event = TaskEvent(
+            task_id=self.id,
+            event_type=TaskEventType.STATUS_CHANGED,
+            actor_id=actor_id,
+            data={
+                "old_status": old_status.value if old_status else None,
+                "new_status": new_status.value,
+                "note": note
+            }
+        )
+        # Note: Event will be added to session by caller or via relationship
     
     def start_idle_execution(self, agent_id: str):
         """Mark task for idle execution."""
         if not self.is_idle_task:
             raise ValueError("Not an idle task")
         
-        self.status = TaskStatus.IDLE_RUNNING
+        self.set_status(TaskStatus.IDLE_RUNNING, agent_id)
         self.started_at = datetime.utcnow()
-        self._log_status_change("idle_started", agent_id)
     
     def pause_for_user_task(self):
         """Pause idle task when user task arrives."""
         if self.status == TaskStatus.IDLE_RUNNING:
-            self.status = TaskStatus.IDLE_PAUSED
-            self._log_status_change("idle_paused", "System", "User task priority")
+            self.set_status(TaskStatus.IDLE_PAUSED, "System", "User task priority")
     
     def resume_idle_task(self):
         """Resume paused idle task."""
         if self.status == TaskStatus.IDLE_PAUSED:
-            self.status = TaskStatus.IDLE_RUNNING
-            self._log_status_change("idle_resumed", "System")
+            self.set_status(TaskStatus.IDLE_RUNNING, "System")
     
     def complete_idle(self, result_summary: str, tokens_used: int = 0):
         """Complete idle task."""
-        self.status = TaskStatus.IDLE_COMPLETED
+        self.set_status(TaskStatus.IDLE_COMPLETED, self.assigned_task_agent_ids[0] if self.assigned_task_agent_ids else "System")
         self.result_summary = result_summary
         self.completed_at = datetime.utcnow()
         self.tokens_used = tokens_used
         
         if self.started_at:
             self.time_actual = int((self.completed_at - self.started_at).total_seconds())
-        
-        self._log_status_change("idle_completed", self.assigned_task_agent_ids[0] if self.assigned_task_agent_ids else "System")
     
     def start_deliberation(self, council_member_ids: List[str]) -> 'TaskDeliberation':
         """Start council deliberation."""
@@ -217,9 +292,8 @@ class Task(BaseEntity):
         
         from backend.models.entities.voting import TaskDeliberation
         
-        self.status = TaskStatus.DELIBERATING
+        self.set_status(TaskStatus.DELIBERATING, "System", f"Council members: {', '.join(council_member_ids)}")
         self.assigned_council_ids = council_member_ids
-        self._log_status_change("deliberation_started", "System")
         
         deliberation = TaskDeliberation(
             task_id=self.id,
@@ -234,24 +308,20 @@ class Task(BaseEntity):
         """Mark task as council-approved."""
         if votes_for > votes_against:
             self.approved_by_council = True
-            self.status = TaskStatus.APPROVED
-            self._log_status_change("council_approved", "Council")
+            self.set_status(TaskStatus.APPROVED, "Council", f"Votes: {votes_for} for, {votes_against} against")
         else:
-            self.status = TaskStatus.REJECTED
-            self._log_status_change("council_rejected", "Council")
+            self.set_status(TaskStatus.REJECTED, "Council", f"Votes: {votes_for} for, {votes_against} against")
     
     def approve_by_head(self, head_agentium_id: str):
         """Final Head of Council approval."""
         self.approved_by_head = True
         self.head_of_council_id = head_agentium_id
-        self.status = TaskStatus.DELEGATING
-        self._log_status_change("head_approved", head_agentium_id)
+        self.set_status(TaskStatus.DELEGATING, head_agentium_id)
     
     def delegate_to_lead(self, lead_agent_id: str):
         """Assign task to Lead Agent."""
         self.lead_agent_id = lead_agent_id
-        self.status = TaskStatus.ASSIGNED
-        self._log_status_change("delegated_to_lead", lead_agent_id)
+        self.set_status(TaskStatus.ASSIGNED, lead_agent_id)
         self._auto_generate_subtasks()
     
     def _auto_generate_subtasks(self):
@@ -272,7 +342,7 @@ class Task(BaseEntity):
         """
         # Assign immediately - no blocking operations
         self.assigned_task_agent_ids = task_agent_ids
-        self.status = TaskStatus.IN_PROGRESS
+        self.set_status(TaskStatus.IN_PROGRESS, self.lead_agent_id or "System")
         self.started_at = datetime.utcnow()
         
         # Quick pre-task check (non-blocking)
@@ -285,14 +355,12 @@ class Task(BaseEntity):
                     ritual = agent.pre_task_ritual(db)
                     if ritual["constitution_refreshed"]:
                         print(f"📖 Agent {agent_id} refreshed Constitution awareness (v{ritual['constitution_version']})")
-        
-        self._log_status_change("execution_started", self.lead_agent_id)
 
     def complete(self, result_summary: str, result_data: Dict = None):
         """Mark task as completed - Ethos execution happens here (post-task)."""
         from backend.models.database import get_db_context
         
-        self.status = TaskStatus.COMPLETED
+        self.set_status(TaskStatus.COMPLETED, self.assigned_task_agent_ids[0] if self.assigned_task_agent_ids else "System")
         self.result_summary = result_summary
         self.result_data = result_data or {}
         self.completion_percentage = 100
@@ -311,7 +379,6 @@ class Task(BaseEntity):
                         agent.complete_task(success=True)
                         
                         # POST-TASK: Execute ethos updates (self-improvement)
-                        # This doesn't block next assignment since task is already done
                         post_results = agent.post_task_ritual(db)
                         
                         if post_results["ethos_executed"]:
@@ -319,7 +386,6 @@ class Task(BaseEntity):
                         if post_results["constitution_refreshed"]:
                             print(f"📖 Agent {agent_id} refreshed Constitution (post-task)")
         
-        self._log_status_change("completed", self.assigned_task_agent_ids[0] if self.assigned_task_agent_ids else "System")
         self._update_agent_stats(success=True)
     
     def update_progress(self, percentage: int, note: str = None):
@@ -329,18 +395,34 @@ class Task(BaseEntity):
             self._log_status_change(f"progress_{percentage}%", "System", note)
     
     def fail(self, error_message: str, can_retry: bool = True):
-        """Mark task as failed."""
+        """
+        Mark task as failed with structured failure reason storage.
+        Implements self-healing: retry → escalate to Council.
+        """
+        import json
+        
         self.error_count += 1
-        self.last_error = error_message
+        # Structured failure reason (NEW)
+        self.last_error = json.dumps({
+            "message": error_message,
+            "retry_number": self.retry_count,
+            "timestamp": datetime.utcnow().isoformat()
+        })
         
         if can_retry and self.retry_count < self.max_retries:
             self.retry_count += 1
-            self.status = TaskStatus.ASSIGNED
-            self._log_status_change("retrying", "System", f"Retry {self.retry_count}/{self.max_retries}: {error_message}")
+            # UPDATED: Use RETRYING status instead of ASSIGNED
+            self.set_status(TaskStatus.RETRYING, "System", f"Retry {self.retry_count}/{self.max_retries}: {error_message}")
         else:
-            self.status = TaskStatus.FAILED
-            self._log_status_change("failed", "System", error_message)
-            self._update_agent_stats(success=False)
+            # UPDATED: Escalate to Council after max retries
+            self.set_status(TaskStatus.ESCALATED, "System", f"Max retries ({self.max_retries}) exceeded: {error_message}")
+    
+    def escalate_to_council(self, reason: str, escalated_by: str = "system"):
+        """
+        Manually escalate task to Council for deliberation.
+        Used by self-healing loop or manual escalation.
+        """
+        self.set_status(TaskStatus.ESCALATED, escalated_by, reason)
     
     def _update_agent_stats(self, success: bool):
         """Update statistics for assigned agents."""
@@ -362,8 +444,15 @@ class Task(BaseEntity):
         if self.status in [TaskStatus.COMPLETED, TaskStatus.FAILED]:
             raise ValueError("Cannot cancel completed or failed task")
         
-        self.status = TaskStatus.CANCELLED
-        self._log_status_change("cancelled", cancelled_by, reason)
+        self.set_status(TaskStatus.CANCELLED, cancelled_by, reason)
+        self.is_active = 'N'
+    
+    def stop(self, reason: str, stopped_by: str):
+        """Stop task (manual intervention)."""
+        if self.status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:
+            raise ValueError("Cannot stop already terminal task")
+        
+        self.set_status(TaskStatus.STOPPED, stopped_by, reason)
         self.is_active = 'N'
     
     def to_dict(self) -> Dict[str, Any]:
@@ -392,6 +481,12 @@ class Task(BaseEntity):
                 'council_approved': self.approved_by_council,
                 'head_approved': self.approved_by_head
             },
+            'governance': {
+                'constitutional_basis': self.constitutional_basis,
+                'parent_task_id': self.parent_task_id,
+                'execution_plan_id': self.execution_plan_id,
+                'recurrence_pattern': self.recurrence_pattern
+            },
             'timing': {
                 'created': self.created_at.isoformat() if self.created_at else None,
                 'started': self.started_at.isoformat() if self.started_at else None,
@@ -403,7 +498,13 @@ class Task(BaseEntity):
                 'data': self.result_data,
                 'files': self.result_files
             } if self.status == TaskStatus.COMPLETED else None,
-            'history': self.status_history
+            'history': self.status_history,
+            'error_info': {
+                'error_count': self.error_count,
+                'retry_count': self.retry_count,
+                'max_retries': self.max_retries,
+                'last_error': self.last_error
+            } if self.error_count > 0 else None
         })
         return base
 
@@ -460,7 +561,7 @@ class SubTask(BaseEntity):
         all_completed = all(s.status == TaskStatus.COMPLETED for s in siblings)
         
         if all_completed:
-            combined_result = "\\n".join([s.result for s in siblings if s.result])
+            combined_result = "\n".join([s.result for s in siblings if s.result])
             self.parent_task.complete(
                 result_summary=combined_result,
                 result_data={s.agentium_id: s.output_data for s in siblings}

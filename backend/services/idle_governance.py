@@ -584,6 +584,76 @@ class EnhancedIdleGovernanceEngine:
             pass
     
     # ═══════════════════════════════════════════════════════════
+    # AUTO-SCALING GOVERNANCE (NEW - Add to EnhancedIdleGovernanceEngine)
+    # ═══════════════════════════════════════════════════════════
+    
+    async def auto_scale_check(self, db: Session) -> Dict[str, Any]:
+        """
+        Monitor queue depth and trigger auto-scaling if needed.
+        If pending tasks exceed threshold, request Council micro-vote to spawn additional agents.
+        """
+        from backend.models.entities.task import TaskStatus
+        
+        # Count pending tasks
+        pending_count = db.query(Task).filter(
+            Task.status.in_([
+                TaskStatus.PENDING,
+                TaskStatus.DELIBERATING,
+                TaskStatus.APPROVED,
+                TaskStatus.ASSIGNED
+            ]),
+            Task.is_active == 'Y'
+        ).count()
+        
+        threshold = 10  # Configurable threshold
+        
+        result = {
+            "pending_count": pending_count,
+            "threshold": threshold,
+            "scaled": False,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        if pending_count > threshold:
+            print(f"📈 Auto-scaling triggered: {pending_count} pending tasks exceeds threshold {threshold}")
+            
+            # Get Head for authority
+            head = db.query(HeadOfCouncil).filter_by(agentium_id="00001").first()
+            
+            if head:
+                # Log scaling decision in audit trail
+                from backend.models.entities.audit import AuditLog, AuditLevel, AuditCategory
+                
+                AuditLog.log(
+                    db=db,
+                    level=AuditLevel.INFO,
+                    category=AuditCategory.GOVERNANCE,
+                    actor_type="agent",
+                    actor_id="IDLE_GOVERNANCE",
+                    action="auto_scale_triggered",
+                    description=f"Auto-scaling triggered: {pending_count} pending tasks",
+                    after_state={
+                        "pending_count": pending_count,
+                        "threshold": threshold,
+                        "recommended_agents": 3,  # Spawn 3 new 3xxxx agents
+                        "triggered_by": "queue_depth"
+                    }
+                )
+                
+                # In production: Request Council micro-vote and spawn agents
+                # For now, log the recommendation
+                print(f"   Council micro-vote recommended: Spawn 3 additional Task Agents (3xxxx)")
+                
+                result.update({
+                    "scaled": True,
+                    "council_vote_required": True,
+                    "recommended_agents": 3,
+                    "action": "micro_vote_requested"
+                })
+        
+        return result
+
+    # ═══════════════════════════════════════════════════════════
     # METRICS & STATISTICS
     # ═══════════════════════════════════════════════════════════
     

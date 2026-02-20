@@ -12,6 +12,7 @@ from backend.models.entities.task_events import TaskEvent, TaskEventType
 from backend.api.schemas.task import TaskCreate, TaskResponse, TaskUpdate
 from backend.core.auth import get_current_active_user
 from backend.services.task_state_machine import TaskStateMachine, IllegalStateTransition
+from backend.services.acceptance_criteria import AcceptanceCriteriaService  # Phase 6.3
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
@@ -47,7 +48,10 @@ def _serialize(task: Task) -> dict:
             "recurrence_pattern": task.recurrence_pattern,
             "requires_deliberation": task.requires_deliberation,
             "council_approved": task.approved_by_council,
-            "head_approved": task.approved_by_head
+            "head_approved": task.approved_by_head,
+            # Phase 6.3
+            "acceptance_criteria": task.acceptance_criteria,
+            "veto_authority": task.veto_authority,
         },
         # NEW: Error info
         "error_info": {
@@ -95,6 +99,25 @@ async def create_task(
         execution_plan_id=task_data.execution_plan_id,
         recurrence_pattern=task_data.recurrence_pattern,
     )
+
+    # Phase 6.3: Validate and store acceptance_criteria + veto_authority
+    if task_data.acceptance_criteria:
+        try:
+            parsed_criteria = AcceptanceCriteriaService.parse_and_validate(
+                task_data.acceptance_criteria
+            )
+            task.acceptance_criteria = AcceptanceCriteriaService.to_json(parsed_criteria)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+
+    if task_data.veto_authority:
+        valid_veto = {"code", "output", "plan"}
+        if task_data.veto_authority not in valid_veto:
+            raise HTTPException(
+                status_code=422,
+                detail=f"veto_authority must be one of: {sorted(valid_veto)}"
+            )
+        task.veto_authority = task_data.veto_authority
 
     db.add(task)
     db.commit()
@@ -237,6 +260,17 @@ async def update_task(
         task.parent_task_id = task_data.parent_task_id
     if task_data.execution_plan_id is not None:
         task.execution_plan_id = task_data.execution_plan_id
+
+    # Phase 6.3: Update acceptance_criteria and veto_authority
+    if task_data.acceptance_criteria is not None:
+        try:
+            raw = [c.dict() for c in task_data.acceptance_criteria]
+            parsed = AcceptanceCriteriaService.parse_and_validate(raw)
+            task.acceptance_criteria = AcceptanceCriteriaService.to_json(parsed)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+    if task_data.veto_authority is not None:
+        task.veto_authority = task_data.veto_authority
 
     db.commit()
     db.refresh(task)

@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = 'add_custom_capabilities'
-down_revision = None  # TODO: Set this to your current latest migration revision
+down_revision = '001'
 branch_labels = None
 depends_on = None
 
@@ -41,7 +41,7 @@ def upgrade():
         """
     )
     
-    print("✅ Phase 3 Migration: Added custom_capabilities column to agents table")
+    print("DONE Phase 3 Migration: Added custom_capabilities column to agents table")
 
 
 def downgrade():
@@ -49,4 +49,4 @@ def downgrade():
     Remove custom_capabilities column.
     """
     op.drop_column('agents', 'custom_capabilities')
-    print("⏪ Phase 3 Migration: Removed custom_capabilities column from agents table")
+    print("BACK Phase 3 Migration: Removed custom_capabilities column from agents table")

@@ -179,14 +179,14 @@ class Constitution(BaseEntity):
             'effective_date': self.effective_date.isoformat() if self.effective_date else None,
             'replaces_version': self.replaces_version.version if self.replaces_version else None,
             'is_archived': self.archived_date is not None,
-            'is_active': self.is_active == 'Y'
+            'is_active': self.is_active
         })
         return base
     
     def archive(self):
         """Archive this constitution version when new one takes effect."""
         self.archived_date = datetime.utcnow()
-        self.is_active = 'N'
+        self.is_active = False
 
         # Table indexes for Phase 0 verification
     __table_args__ = (

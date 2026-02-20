@@ -150,7 +150,7 @@ async def get_key_status(
     """
     Get detailed status for a specific API key.
     """
-    key = db.query(UserModelConfig).filter_by(id=key_id, is_active='Y').first()
+    key = db.query(UserModelConfig).filter_by(id=key_id, is_active=True).first()
     if not key:
         raise HTTPException(status_code=404, detail="Key not found")
     
@@ -307,7 +307,7 @@ async def get_provider_availability(
     for provider, available in availability.items():
         count = db.query(UserModelConfig).filter_by(
             provider=provider,
-            is_active='Y'
+            is_active=True
         ).filter(
             UserModelConfig.priority < 999
         ).count()
@@ -400,7 +400,7 @@ async def delete_key(
         # Check if it's the only key for this provider
         other_keys = db.query(UserModelConfig).filter(
             UserModelConfig.provider == key.provider,
-            UserModelConfig.is_active == 'Y',
+            UserModelConfig.is_active == True,
             UserModelConfig.id != key_id
         ).count()
         
@@ -411,7 +411,7 @@ async def delete_key(
             )
     
     # Soft delete
-    key.is_active = 'N'
+    key.is_active = False
     db.commit()
     
     return {

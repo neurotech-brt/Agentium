@@ -91,7 +91,7 @@ def upgrade():
     op.create_table(
         'conversations',
         sa.Column('id',              sa.String(36),   primary_key=True),
-        sa.Column('user_id',         sa.Integer(),    sa.ForeignKey('users.id'), nullable=False),
+        sa.Column('user_id',         sa.String(36),   sa.ForeignKey('users.id'), nullable=False),
         sa.Column('title',           sa.String(200),  nullable=True),
         sa.Column('context',         sa.Text(),       nullable=True),
         sa.Column('created_at',      sa.DateTime(),   server_default=sa.func.now()),
@@ -110,7 +110,7 @@ def upgrade():
         'chat_messages',
         sa.Column('id',               sa.String(36),   primary_key=True),
         sa.Column('conversation_id',  sa.String(36),   sa.ForeignKey('conversations.id'), nullable=True),
-        sa.Column('user_id',          sa.Integer(),    sa.ForeignKey('users.id'), nullable=False),
+        sa.Column('user_id',          sa.String(36),   sa.ForeignKey('users.id'), nullable=False),
         sa.Column('role',             sa.String(50),   nullable=False),
         sa.Column('content',          sa.Text(),       nullable=False),
         sa.Column('attachments',      sa.JSON(),       nullable=True),
@@ -304,59 +304,33 @@ def upgrade():
     # Schema fixes on existing tables
     # ─────────────────────────────────────────────────────────────────────────
 
-    # users: add is_pending if not already there
-    # (001 schema may have omitted it)
-    try:
-        op.add_column('users', sa.Column('is_pending', sa.Boolean(), server_default='true', nullable=False))
-    except Exception:
-        pass  # Column already exists — safe to ignore
+    # users: add is_pending (was missing from 001)
+    op.add_column('users', sa.Column('is_pending', sa.Boolean(), server_default='true', nullable=False))
 
     # user_model_configs: add columns present in user_config.py but missing from 001
     new_config_columns = [
-        ('provider_name',      sa.Column('provider_name',      sa.String(50),   nullable=True)),
-        ('api_key_masked',     sa.Column('api_key_masked',      sa.String(10),   nullable=True)),
-        ('api_base_url',       sa.Column('api_base_url',        sa.String(500),  nullable=True)),
-        ('azure_endpoint',     sa.Column('azure_endpoint',      sa.String(500),  nullable=True)),
-        ('azure_deployment',   sa.Column('azure_deployment',    sa.String(100),  nullable=True)),
-        ('available_models',   sa.Column('available_models',    sa.JSON(),       nullable=True)),
-        ('model_family',       sa.Column('model_family',        sa.String(50),   nullable=True)),
-        ('local_server_url',   sa.Column('local_server_url',    sa.String(500),  nullable=True)),
-        ('top_p',              sa.Column('top_p',               sa.Float(),      server_default='1.0')),
-        ('timeout_seconds',    sa.Column('timeout_seconds',     sa.Integer(),    server_default='60')),
-        ('last_error',         sa.Column('last_error',          sa.Text(),       nullable=True)),
-        ('last_tested_at',     sa.Column('last_tested_at',      sa.DateTime(),   nullable=True)),
-        ('last_used_at',       sa.Column('last_used_at',        sa.DateTime(),   nullable=True)),
-        ('total_requests',     sa.Column('total_requests',      sa.Integer(),    server_default='0')),
-        ('total_tokens',       sa.Column('total_tokens',        sa.Integer(),    server_default='0')),
-        ('rate_limit',         sa.Column('rate_limit',          sa.Integer(),    nullable=True)),
-        ('estimated_cost_usd', sa.Column('estimated_cost_usd',  sa.Float(),      server_default='0.0')),
-        ('extra_params',       sa.Column('extra_params',        sa.JSON(),       nullable=True)),
+        sa.Column('provider_name',      sa.String(50),   nullable=True),
+        sa.Column('api_key_masked',     sa.String(10),   nullable=True),
+        sa.Column('api_base_url',       sa.String(500),  nullable=True),
+        sa.Column('azure_endpoint',     sa.String(500),  nullable=True),
+        sa.Column('azure_deployment',   sa.String(100),  nullable=True),
+        sa.Column('available_models',   sa.JSON(),       nullable=True),
+        sa.Column('model_family',       sa.String(50),   nullable=True),
+        sa.Column('local_server_url',   sa.String(500),  nullable=True),
+        sa.Column('top_p',              sa.Float(),      server_default='1.0'),
+        sa.Column('timeout_seconds',    sa.Integer(),    server_default='60'),
+        sa.Column('last_error',         sa.Text(),       nullable=True),
+        sa.Column('last_tested_at',     sa.DateTime(),   nullable=True),
+        sa.Column('last_used_at',       sa.DateTime(),   nullable=True),
+        sa.Column('total_requests',     sa.Integer(),    server_default='0'),
+        sa.Column('total_tokens',       sa.Integer(),    server_default='0'),
+        sa.Column('rate_limit',         sa.Integer(),    nullable=True),
+        sa.Column('estimated_cost_usd', sa.Float(),      server_default='0.0'),
+        sa.Column('extra_params',       sa.JSON(),       nullable=True),
     ]
-    for col_name, col_def in new_config_columns:
-        try:
-            op.add_column('user_model_configs', col_def)
-        except Exception:
-            pass  # Column already exists — safe to ignore
+    for col_def in new_config_columns:
+        op.add_column('user_model_configs', col_def)
 
-    # agents: add custom_capabilities if the add_custom_capabilities migration
-    # wasn't chained correctly (defensive — no-op if already present)
-    try:
-        op.add_column(
-            'agents',
-            sa.Column(
-                'custom_capabilities',
-                sa.Text(),
-                nullable=True,
-                comment='JSON: {"granted": [...], "revoked": [...]}'
-            )
-        )
-        op.execute("""
-            UPDATE agents
-            SET custom_capabilities = '{"granted": [], "revoked": []}'
-            WHERE custom_capabilities IS NULL
-        """)
-    except Exception:
-        pass
 
 
 def downgrade():

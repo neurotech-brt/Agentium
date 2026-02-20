@@ -358,7 +358,7 @@ def init_api_manager(db: Session) -> APIManager:
     
     try:
         # Check if any configurations exist
-        config_count = db.query(UserModelConfig).filter_by(is_active='Y').count()
+        config_count = db.query(UserModelConfig).filter_by(is_active=True).count()
         
         if config_count == 0:
             # Create a default local configuration
@@ -370,7 +370,7 @@ def init_api_manager(db: Session) -> APIManager:
                 provider_name="Local",
                 default_model="kimi-2.5",
                 is_default=True,
-                is_active='Y',
+                is_active=True,
                 status='active',
                 rate_limit=60
             )

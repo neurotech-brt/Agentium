@@ -132,7 +132,7 @@ class AmendmentService:
         # Verify proposer exists in DB
         proposer = (
             self.db.query(Agent)
-            .filter_by(agentium_id=proposer_id, is_active='Y')
+            .filter_by(agentium_id=proposer_id, is_active=True)
             .first()
         )
         if not proposer:
@@ -141,7 +141,7 @@ class AmendmentService:
         # Get current active constitution
         current_constitution = (
             self.db.query(Constitution)
-            .filter_by(is_active='Y')
+            .filter_by(is_active=True)
             .order_by(Constitution.version_number.desc())
             .first()
         )
@@ -618,7 +618,7 @@ class AmendmentService:
             self.db.query(Agent)
             .filter(
                 Agent.agent_type.in_([AgentType.COUNCIL_MEMBER, AgentType.HEAD_OF_COUNCIL]),
-                Agent.is_active == 'Y',
+                Agent.is_active == True,
             )
             .all()
         )

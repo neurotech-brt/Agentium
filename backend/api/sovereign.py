@@ -150,7 +150,7 @@ async def manage_container(
         target_id=container_id,
         description=f"Sovereign manually {action}ed container {container_id}",
         after_state={"action": action, "container": container_id},
-        is_active='Y',
+        is_active=True,
         created_at=datetime.utcnow()
     )
     db.add(audit)
@@ -184,7 +184,7 @@ async def execute_sovereign_command(
         target_id="root",
         description=f"Sovereign executed: {command_req.command}",
         after_state={"command": command_req.command, "params": command_req.params},
-        is_active='Y',
+        is_active=True,
         created_at=datetime.utcnow()
     )
     db.add(audit)
@@ -260,7 +260,7 @@ async def block_agent(
         target_id=agentium_id,
         description=f"Agent {agentium_id} blocked by sovereign: {req.reason}",
         after_state={"reason": req.reason, "blocked": True},
-        is_active='Y',
+        is_active=True,
         created_at=datetime.utcnow()
     )
     db.add(audit)

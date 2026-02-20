@@ -490,7 +490,7 @@ async def spawn_agent_container(
     # Generate agentium_id based on type
     agent_count = db.query(Agent).filter(
         Agent.agent_type == request.agent_type,
-        Agent.is_active == 'Y'
+        Agent.is_active == True
     ).count()
     
     prefix = {'council_member': '1', 'lead_agent': '2', 'task_agent': '3'}.get(request.agent_type, '3')
@@ -522,7 +522,7 @@ async def spawn_agent_container(
             parent_id=request.parent_id,
             status='initializing',
             constitution_version='v1.0.0',
-            is_active='Y'
+            is_active=True
         )
         db.add(new_agent)
         db.commit()
@@ -685,7 +685,7 @@ def log_host_operation(
                 'operation': operation,
                 'target': target
             },
-            is_active='Y',
+            is_active=True,
             created_at=datetime.utcnow()
         )
         db.add(audit)

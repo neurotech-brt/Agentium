@@ -13,8 +13,8 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 
-revision = None
-down_revision = None   # Set to your latest migration revision
+revision = '6_1_tool_management'
+down_revision = '002_add_missing_tables'
 branch_labels = None
 depends_on = None
 

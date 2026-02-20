@@ -6,7 +6,7 @@ Three types: CodeCritic (4xxxx), OutputCritic (5xxxx), PlanCritic (6xxxx).
 
 from datetime import datetime
 from typing import Optional, Dict, Any, List
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer, Enum, Float
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer, Enum, Float, JSON
 from sqlalchemy.orm import relationship, Session
 from backend.models.entities.base import BaseEntity
 from backend.models.entities.agents import Agent, AgentType, AgentStatus
@@ -160,6 +160,11 @@ class CritiqueReview(BaseEntity):
     model_used = Column(String(100), nullable=True)  # Track which model did the review
     output_hash = Column(String(64), nullable=True)   # SHA-256 of reviewed output (dedup)
     
+    # Phase 6.3: Per-criterion evaluation results
+    criteria_results = Column(JSON, nullable=True)    # List[CriterionResult.to_dict()]
+    criteria_evaluated = Column(Integer, nullable=True)
+    criteria_passed = Column(Integer, nullable=True)
+    
     # Timestamps
     reviewed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
@@ -192,5 +197,14 @@ class CritiqueReview(BaseEntity):
             'review_duration_ms': self.review_duration_ms,
             'model_used': self.model_used,
             'reviewed_at': self.reviewed_at.isoformat() if self.reviewed_at else None,
+            # Phase 6.3
+            'criteria_results': self.criteria_results or [],
+            'criteria_evaluated': self.criteria_evaluated,
+            'criteria_passed': self.criteria_passed,
+            'criteria_failed': (
+                (self.criteria_evaluated - self.criteria_passed)
+                if self.criteria_evaluated is not None and self.criteria_passed is not None
+                else None
+            ),
         })
         return base

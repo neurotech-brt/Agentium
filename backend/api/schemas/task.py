@@ -1,10 +1,11 @@
 """
 Pydantic schemas for Task API.
-Updated for Task Execution Architecture: Governance Alignment
+Maps to/from backend.models.entities.task (Task entity).
+Updated: Phase 6.3 — Pre-Declared Acceptance Criteria
 """
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator as pydantic_validator
 from datetime import datetime
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 
 from backend.models.entities.task import TaskStatus, TaskType, TaskPriority
 
@@ -14,34 +15,24 @@ class AssignedAgents(BaseModel):
     lead: Optional[str] = None
     task_agents: List[str] = []
 
-    class Config:
-        extra = "allow"
 
+class AcceptanceCriterionSchema(BaseModel):
+    """
+    Single success criterion submitted alongside a task proposal.
+    Validated by critic agents during review.
+    """
+    metric: str = Field(..., min_length=1, pattern=r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+    threshold: Any
+    validator: str = Field(..., description="code | output | plan")
+    is_mandatory: bool = True
+    description: str = ""
 
-class GovernanceInfo(BaseModel):
-    """NEW: Governance-related fields."""
-    constitutional_basis: Optional[str] = None
-    hierarchical_id: Optional[str] = None
-    parent_task_id: Optional[str] = None
-    execution_plan_id: Optional[str] = None
-    recurrence_pattern: Optional[str] = None  # Cron expression for recurring tasks
-    requires_deliberation: bool = True
-    council_approved: bool = False
-    head_approved: bool = False
-
-    class Config:
-        extra = "allow"
-
-
-class ErrorInfo(BaseModel):
-    """NEW: Error tracking information."""
-    error_count: int = 0
-    retry_count: int = 0
-    max_retries: int = 5
-    last_error: Optional[str] = None
-
-    class Config:
-        extra = "allow"
+    @pydantic_validator("validator")
+    def validate_validator(cls, v: str) -> str:
+        allowed = {"code", "output", "plan"}
+        if v not in allowed:
+            raise ValueError(f"validator must be one of {sorted(allowed)}")
+        return v
 
 
 class TaskCreate(BaseModel):
@@ -49,35 +40,66 @@ class TaskCreate(BaseModel):
     description: str = Field(..., min_length=1)
     priority: str = Field(default="normal")
     task_type: str = Field(default="execution")
-    # NEW: Governance fields
-    constitutional_basis: Optional[str] = Field(None, description="Constitutional justification for task")
-    hierarchical_id: Optional[str] = Field(None, description="Hierarchical dot-notated ID")
-    parent_task_id: Optional[str] = Field(None, description="Parent task ID for hierarchical tasks")
-    execution_plan_id: Optional[str] = Field(None, description="Linked execution plan ID")
-    recurrence_pattern: Optional[str] = Field(None, description="Cron expression for recurring tasks")
 
-    @validator("priority")
+    # Governance (pre-existing)
+    constitutional_basis: Optional[str] = None
+    hierarchical_id: Optional[str] = None
+    parent_task_id: Optional[str] = None
+    execution_plan_id: Optional[str] = None
+    recurrence_pattern: Optional[str] = None
+
+    # Phase 6.3 — Acceptance Criteria
+    acceptance_criteria: Optional[List[AcceptanceCriterionSchema]] = Field(
+        default=None,
+        description="Pre-declared success criteria evaluated by critic agents on review."
+    )
+    veto_authority: Optional[str] = Field(
+        default=None,
+        description="Critic type with veto authority: code | output | plan"
+    )
+
+    @pydantic_validator("priority")
     def validate_priority(cls, v):
-        # Map frontend "urgent" -> "high" (entity has no "urgent")
-        # Map "sovereign" -> "sovereign" (new highest priority)
+        allowed = [p.value for p in TaskPriority]
         mapping = {"urgent": "high"}
         v = mapping.get(v, v)
-        allowed = [p.value for p in TaskPriority]
         if v not in allowed:
-            return "normal"
+            raise ValueError(f"priority must be one of {allowed}")
         return v
 
-    @validator("task_type")
+    @pydantic_validator("task_type")
     def validate_task_type(cls, v):
         allowed = [t.value for t in TaskType]
         if v not in allowed:
             return "execution"
         return v
 
+    @pydantic_validator("veto_authority")
+    def validate_veto_authority(cls, v):
+        if v is None:
+            return v
+        if v not in {"code", "output", "plan"}:
+            raise ValueError("veto_authority must be one of: code, output, plan")
+        return v
+
+    @pydantic_validator("acceptance_criteria", each_item=False)
+    def validate_unique_metrics(cls, v):
+        if not v:
+            return v
+        metrics = [c.metric for c in v]
+        if len(metrics) != len(set(metrics)):
+            dupes = {m for m in metrics if metrics.count(m) > 1}
+            raise ValueError(f"Duplicate metric names in acceptance_criteria: {dupes}")
+        return v
+
+    def acceptance_criteria_as_dicts(self) -> Optional[List[Dict[str, Any]]]:
+        if not self.acceptance_criteria:
+            return None
+        return [c.dict() for c in self.acceptance_criteria]
+
 
 class TaskResponse(BaseModel):
-    id: str
-    agentium_id: Optional[str] = None
+    id: int
     title: str
     description: str
     status: str
@@ -85,28 +107,31 @@ class TaskResponse(BaseModel):
     task_type: str = "execution"
     progress: float = 0.0
     assigned_agents: AssignedAgents = AssignedAgents()
-    # NEW: Governance fields
-    governance: GovernanceInfo = GovernanceInfo()
-    # NEW: Error info
-    error_info: Optional[ErrorInfo] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
-    event_count: int = 0
+    created_at: datetime
+    updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
-        extra = "allow"
 
 
 class TaskUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     status: Optional[str] = None
+    status_note: Optional[str] = None
     priority: Optional[str] = None
-    # NEW: Optional note for status changes
-    status_note: Optional[str] = Field(None, description="Note explaining status change")
-    # NEW: Governance fields
     constitutional_basis: Optional[str] = None
     hierarchical_id: Optional[str] = None
     parent_task_id: Optional[str] = None
     execution_plan_id: Optional[str] = None
+    # Phase 6.3
+    acceptance_criteria: Optional[List[AcceptanceCriterionSchema]] = None
+    veto_authority: Optional[str] = None
+
+    @pydantic_validator("veto_authority")
+    def validate_veto_authority(cls, v):
+        if v is None:
+            return v
+        if v not in {"code", "output", "plan"}:
+            raise ValueError("veto_authority must be one of: code, output, plan")
+        return v

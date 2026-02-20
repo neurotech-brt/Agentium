@@ -76,6 +76,8 @@ ENV PYTHONPATH=/app \
     HOST_FS_MOUNT=/host \
     HOST_HOME_MOUNT=/host_home
 
+ENTRYPOINT ["sh", "-c", "python scripts/init_db.py && exec \"$@\"", "--"]
+
 EXPOSE 8000
 
 # Health check

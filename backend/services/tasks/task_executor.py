@@ -88,7 +88,7 @@ def handle_task_escalation():
             # Find all escalated tasks
             escalated_tasks = db.query(Task).filter(
                 Task.status == TaskStatus.ESCALATED,
-                Task.is_active == 'Y'
+                Task.is_active == True
             ).all()
             
             if not escalated_tasks:
@@ -231,7 +231,7 @@ def sovereign_data_retention():
             old_tasks = db.query(Task).filter(
                 Task.status.in_([TaskStatus.COMPLETED, TaskStatus.CANCELLED, TaskStatus.FAILED]),
                 Task.completed_at < cutoff_date,
-                Task.is_active == 'Y'
+                Task.is_active == True
             ).all()
             
             for task in old_tasks:
@@ -251,7 +251,7 @@ def sovereign_data_retention():
                     )
                     
                     # Soft delete (mark inactive)
-                    task.is_active = 'N'
+                    task.is_active = False
                     results["tasks_archived"] += 1
                     
                 except Exception as e:
@@ -264,7 +264,7 @@ def sovereign_data_retention():
                 
                 # Get all active task IDs
                 active_task_ids = [t.agentium_id for t in db.query(Task).filter(
-                    Task.is_active == 'Y'
+                    Task.is_active == True
                 ).all()]
                 
                 # Check staging collection for orphans
@@ -304,7 +304,7 @@ def sovereign_data_retention():
             # 4. Remove ethos of deleted/inactive agents
             try:
                 inactive_agents = db.query(Agent).filter(
-                    Agent.is_active == 'N'
+                    Agent.is_active == False
                 ).all()
                 
                 for agent in inactive_agents:

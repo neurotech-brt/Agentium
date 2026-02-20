@@ -5,7 +5,7 @@ Provides common functionality like timestamps, UUIDs, and serialization.
 
 from datetime import datetime
 from typing import Any, Dict, Optional
-from sqlalchemy import Column, String, DateTime, event
+from sqlalchemy import Column, String, DateTime, event, Boolean
 from sqlalchemy.ext.declarative import declared_attr
 from sqlalchemy.orm import declarative_base
 import uuid
@@ -29,7 +29,7 @@ class BaseEntity(Base):
     
     # Soft delete for audit trail preservation
     deleted_at = Column(DateTime, nullable=True)
-    is_active = Column(String(1), default='Y', nullable=False)  # Y/N
+    is_active = Column(Boolean, default=True, nullable=False)
     
     @declared_attr.directive
     def __tablename__(cls) -> str:
@@ -43,17 +43,17 @@ class BaseEntity(Base):
             'agentium_id': self.agentium_id,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
-            'is_active': self.is_active == 'Y'
+            'is_active': self.is_active
         }
     
     def deactivate(self):
         """Soft delete the entity."""
-        self.is_active = 'N'
+        self.is_active = False
         self.deleted_at = datetime.utcnow()
     
     def reactivate(self):
         """Reactivate a soft-deleted entity."""
-        self.is_active = 'Y'
+        self.is_active = True
         self.deleted_at = None
         self.updated_at = datetime.utcnow()
     

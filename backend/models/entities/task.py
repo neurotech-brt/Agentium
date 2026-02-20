@@ -143,6 +143,15 @@ class Task(BaseEntity):
     last_error = Column(Text, nullable=True)
     retry_count = Column(Integer, default=0)
     max_retries = Column(Integer, default=5)  # UPDATED: from 3 to 5
+
+    # ── Phase 6.3: Pre-Declared Acceptance Criteria ──────────────────────────
+    # Stored as a JSON array of AcceptanceCriterion dicts.
+    # Populated at task-creation time; validated by critic agents on review.
+    acceptance_criteria = Column(JSON, nullable=True)
+
+    # Which critic type has veto authority over this task's output.
+    # Values: "code" | "output" | "plan"  (maps to CriticType enum)
+    veto_authority = Column(String(20), nullable=True)
     
     # Relationships
     head_of_council = relationship("Agent", foreign_keys=[head_of_council_id], lazy="joined")
@@ -447,7 +456,7 @@ class Task(BaseEntity):
             raise ValueError("Cannot cancel completed or failed task")
         
         self.set_status(TaskStatus.CANCELLED, cancelled_by, reason)
-        self.is_active = 'N'
+        self.is_active = False
     
     def stop(self, reason: str, stopped_by: str):
         """Stop task (manual intervention)."""
@@ -455,7 +464,7 @@ class Task(BaseEntity):
             raise ValueError("Cannot stop already terminal task")
         
         self.set_status(TaskStatus.STOPPED, stopped_by, reason)
-        self.is_active = 'N'
+        self.is_active = False
     
     def to_dict(self) -> Dict[str, Any]:
         base = super().to_dict()
@@ -488,7 +497,9 @@ class Task(BaseEntity):
                 'hierarchical_id': self.hierarchical_id,
                 'parent_task_id': self.parent_task_id,
                 'execution_plan_id': self.execution_plan_id,
-                'recurrence_pattern': self.recurrence_pattern
+                'recurrence_pattern': self.recurrence_pattern,
+                'acceptance_criteria': self.acceptance_criteria,
+                'veto_authority': self.veto_authority,
             },
             'timing': {
                 'created': self.created_at.isoformat() if self.created_at else None,

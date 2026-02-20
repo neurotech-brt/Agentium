@@ -335,7 +335,7 @@ class KnowledgeService:
         from sqlalchemy import func
         
         # Embed active constitution
-        active_const = db.query(Constitution).filter_by(is_active='Y').order_by(
+        active_const = db.query(Constitution).filter_by(is_active=True).order_by(
             Constitution.version_number.desc()
         ).first()
         

@@ -509,7 +509,7 @@ async def get_lifecycle_stats(
     for prefix in ['0', '1', '2', '3']:
         count = db.query(func.count(Agent.id)).filter(
             Agent.agentium_id.like(f"{prefix}%"),
-            Agent.is_active == 'Y'
+            Agent.is_active == True
         ).scalar()
         active_by_tier[f"tier_{prefix}"] = count
     

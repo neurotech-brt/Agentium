@@ -83,7 +83,7 @@ class ReincarnationService:
             parent_id=parent.id,
             agent_type=AgentType.TASK,
             status=AgentStatus.ACTIVE,
-            is_active='Y',
+            is_active=True,
             is_persistent=False,
             idle_mode_enabled=False,
             created_by=parent.agentium_id
@@ -168,7 +168,7 @@ class ReincarnationService:
             parent_id=parent.id,
             agent_type=AgentType.LEAD,
             status=AgentStatus.ACTIVE,
-            is_active='Y',
+            is_active=True,
             is_persistent=False,
             created_by=parent.agentium_id
         )
@@ -221,7 +221,7 @@ class ReincarnationService:
             PermissionError: If promoter lacks authority
         """
         # Get the Task Agent
-        task_agent = db.query(TaskAgent).filter_by(agentium_id=agent_id, is_active='Y').first()
+        task_agent = db.query(TaskAgent).filter_by(agentium_id=agent_id, is_active=True).first()
         
         if not task_agent:
             raise ValueError(f"Task Agent {agent_id} not found or inactive")
@@ -283,7 +283,7 @@ class ReincarnationService:
         task_agent.status = AgentStatus.TERMINATED
         task_agent.terminated_at = datetime.utcnow()
         task_agent.termination_reason = f"Promoted to Lead Agent {new_lead_id}"
-        task_agent.is_active = 'N'
+        task_agent.is_active = False
         
         # Revoke old Task Agent capabilities
         CapabilityRegistry.revoke_all_capabilities(
@@ -357,7 +357,7 @@ class ReincarnationService:
             ValueError: If agent is protected (e.g., Head 00001)
         """
         # Get the agent
-        agent = db.query(Agent).filter_by(agentium_id=agent_id, is_active='Y').first()
+        agent = db.query(Agent).filter_by(agentium_id=agent_id, is_active=True).first()
         
         if not agent:
             raise ValueError(f"Agent {agent_id} not found or already terminated")
@@ -434,7 +434,7 @@ class ReincarnationService:
                 liquidation_summary["tasks_cancelled"] += 1
         
         # STEP 2: Notify child agents
-        child_agents = db.query(Agent).filter_by(parent_id=agent.id, is_active='Y').all()
+        child_agents = db.query(Agent).filter_by(parent_id=agent.id, is_active=True).all()
         
         for child in child_agents:
             # Reassign children to grandparent or orphan them
@@ -694,7 +694,7 @@ class ReincarnationService:
             agent.status = AgentStatus.TERMINATED
             agent.terminated_at = datetime.utcnow()
             agent.termination_reason = termination_note
-            agent.is_active = 'N'
+            agent.is_active = False
             agent.current_task_id = None
             
             # DON'T revoke capabilities during reincarnation (successor inherits)

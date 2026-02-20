@@ -36,6 +36,127 @@ def upgrade() -> None:
         sa.Column('created_at', sa.DateTime(), default=sa.func.now()),
         sa.Column('updated_at', sa.DateTime(), default=sa.func.now(), onupdate=sa.func.now()),
     )
+
+    # User model configs
+    op.create_table(
+        'user_model_configs',
+        sa.Column('id', sa.String(36), primary_key=True),
+        sa.Column('user_id', sa.String(36), sa.ForeignKey('users.id')),
+        sa.Column('config_name', sa.String(100), nullable=False),
+        sa.Column('provider', sa.String(20), nullable=False),
+        sa.Column('default_model', sa.String(50), nullable=False),
+        sa.Column('api_key_encrypted', sa.Text(), nullable=True),
+        sa.Column('base_url', sa.String(255), nullable=True),
+        sa.Column('temperature', sa.Float(), default=0.7),
+        sa.Column('max_tokens', sa.Integer(), default=2048),
+        sa.Column('is_default', sa.Boolean(), default=False),
+        sa.Column('status', sa.String(20), default='active'),
+        sa.Column('is_active', sa.String(1), default='Y'),
+        sa.Column('created_at', sa.DateTime(), default=sa.func.now()),
+        sa.Column('updated_at', sa.DateTime(), default=sa.func.now(), onupdate=sa.func.now()),
+    )
+
+    # Ethos
+    op.create_table(
+        'ethos',
+        sa.Column('id', sa.String(36), primary_key=True),
+        sa.Column('agentium_id', sa.String(20), unique=True, nullable=True),
+        sa.Column('agent_type', sa.String(20), nullable=False),
+        sa.Column('mission_statement', sa.Text(), nullable=False),
+        sa.Column('core_values', sa.Text(), nullable=False),
+        sa.Column('behavioral_rules', sa.Text(), nullable=False),
+        sa.Column('restrictions', sa.Text(), nullable=False),
+        sa.Column('capabilities', sa.Text(), nullable=False),
+        sa.Column('created_by_agentium_id', sa.String(10), nullable=False),
+        sa.Column('version', sa.Integer(), default=1),
+        sa.Column('agent_id', sa.String(36), nullable=False),
+        sa.Column('verified_by_agentium_id', sa.String(10), nullable=True),
+        sa.Column('verified_at', sa.DateTime(), nullable=True),
+        sa.Column('is_verified', sa.Boolean(), default=False),
+        sa.Column('last_updated_by_agent', sa.Boolean(), default=False),
+        sa.Column('is_active', sa.String(1), default='Y'),
+        sa.Column('created_at', sa.DateTime(), default=sa.func.now()),
+        sa.Column('updated_at', sa.DateTime(), default=sa.func.now(), onupdate=sa.func.now()),
+    )
+
+    # Agents (base table) - Moved up to satisfy foreign keys
+    op.create_table(
+        'agents',
+        sa.Column('id', sa.String(36), primary_key=True),
+        sa.Column('agentium_id', sa.String(20), unique=True, nullable=False),
+        sa.Column('agent_type', sa.String(20), nullable=False),
+        sa.Column('name', sa.String(100), nullable=False),
+        sa.Column('description', sa.Text(), nullable=True),
+        sa.Column('incarnation_number', sa.Integer(), default=1),
+        sa.Column('parent_id', sa.String(36), sa.ForeignKey('agents.id'), nullable=True),
+        sa.Column('status', sa.String(20), default='initializing'),
+        sa.Column('terminated_at', sa.DateTime(), nullable=True),
+        sa.Column('termination_reason', sa.Text(), nullable=True),
+        sa.Column('preferred_config_id', sa.String(36), sa.ForeignKey('user_model_configs.id'), nullable=True),
+        sa.Column('system_prompt_override', sa.Text(), nullable=True),
+        sa.Column('ethos_id', sa.String(36), sa.ForeignKey('ethos.id'), nullable=True),
+        sa.Column('constitution_version', sa.String(10), nullable=True),
+        sa.Column('spawned_at_task_count', sa.Integer(), default=0),
+        sa.Column('tasks_completed', sa.Integer(), default=0),
+        sa.Column('tasks_failed', sa.Integer(), default=0),
+        sa.Column('current_task_id', sa.String(36), nullable=True),
+        sa.Column('is_persistent', sa.Boolean(), default=False),
+        sa.Column('idle_mode_enabled', sa.Boolean(), default=False),
+        sa.Column('last_idle_action_at', sa.DateTime(), nullable=True),
+        sa.Column('idle_task_count', sa.Integer(), default=0),
+        sa.Column('idle_tokens_saved', sa.Integer(), default=0),
+        sa.Column('current_idle_task_id', sa.String(36), nullable=True),
+        sa.Column('persistent_role', sa.String(50), nullable=True),
+        sa.Column('last_constitution_read_at', sa.DateTime(), nullable=True),
+        sa.Column('constitution_read_count', sa.Integer(), default=0),
+        sa.Column('ethos_last_read_at', sa.DateTime(), nullable=True),
+        sa.Column('ethos_action_pending', sa.Boolean(), default=False),
+        sa.Column('is_active', sa.String(1), default='Y'),
+        sa.Column('created_at', sa.DateTime(), default=sa.func.now()),
+        sa.Column('updated_at', sa.DateTime(), default=sa.func.now(), onupdate=sa.func.now()),
+    )
+    op.create_index('idx_agent_type_status', 'agents', ['agent_type', 'status'])
+    op.create_index('idx_parent_id', 'agents', ['parent_id'])
+    op.create_index('idx_agents_is_persistent', 'agents', ['is_persistent'])
+    op.create_index('idx_agents_last_idle', 'agents', ['last_idle_action_at'])
+
+    # Head of Council (inherits from agents)
+    op.create_table(
+        'head_of_council',
+        sa.Column('id', sa.String(36), sa.ForeignKey('agents.id'), primary_key=True),
+        sa.Column('emergency_override_used_at', sa.DateTime(), nullable=True),
+        sa.Column('last_constitution_update', sa.DateTime(), nullable=True),
+    )
+    
+    # Council Members
+    op.create_table(
+        'council_members',
+        sa.Column('id', sa.String(36), sa.ForeignKey('agents.id'), primary_key=True),
+        sa.Column('specialization', sa.String(50), nullable=True),
+        sa.Column('votes_participated', sa.Integer(), default=0),
+        sa.Column('votes_abstained', sa.Integer(), default=0),
+    )
+    
+    # Lead Agents
+    op.create_table(
+        'lead_agents',
+        sa.Column('id', sa.String(36), sa.ForeignKey('agents.id'), primary_key=True),
+        sa.Column('team_size', sa.Integer(), default=0),
+        sa.Column('max_team_size', sa.Integer(), default=10),
+        sa.Column('department', sa.String(50), nullable=True),
+        sa.Column('spawn_threshold', sa.Integer(), default=5),
+    )
+    
+    # Task Agents
+    op.create_table(
+        'task_agents',
+        sa.Column('id', sa.String(36), sa.ForeignKey('agents.id'), primary_key=True),
+        sa.Column('assigned_tools', sa.Text(), nullable=True),
+        sa.Column('execution_timeout', sa.Integer(), default=300),
+        sa.Column('sandbox_enabled', sa.Boolean(), default=True),
+    )
+
+    # Scheduled Tasks
     op.create_table(
         'scheduled_tasks',
         sa.Column('id', sa.String(36), primary_key=True),
@@ -81,25 +202,6 @@ def upgrade() -> None:
     op.create_index('idx_sched_exec_task', 'scheduled_task_executions', ['scheduled_task_id'])
     op.create_index('idx_sched_exec_time', 'scheduled_task_executions', ['started_at'])
 
-    # User model configs
-    op.create_table(
-        'user_model_configs',
-        sa.Column('id', sa.String(36), primary_key=True),
-        sa.Column('user_id', sa.String(36), sa.ForeignKey('users.id')),
-        sa.Column('config_name', sa.String(100), nullable=False),
-        sa.Column('provider', sa.String(20), nullable=False),
-        sa.Column('default_model', sa.String(50), nullable=False),
-        sa.Column('api_key_encrypted', sa.Text(), nullable=True),
-        sa.Column('base_url', sa.String(255), nullable=True),
-        sa.Column('temperature', sa.Float(), default=0.7),
-        sa.Column('max_tokens', sa.Integer(), default=2048),
-        sa.Column('is_default', sa.Boolean(), default=False),
-        sa.Column('status', sa.String(20), default='active'),
-        sa.Column('is_active', sa.String(1), default='Y'),
-        sa.Column('created_at', sa.DateTime(), default=sa.func.now()),
-        sa.Column('updated_at', sa.DateTime(), default=sa.func.now(), onupdate=sa.func.now()),
-    )
-    
     # Constitutions
     op.create_table(
         'constitutions',
@@ -128,106 +230,6 @@ def upgrade() -> None:
     op.create_index('idx_constitution_version_number', 'constitutions', ['version_number'])
     op.create_index('idx_constitution_active', 'constitutions', ['is_active'])
     op.create_index('idx_constitution_effective', 'constitutions', ['effective_date'])
-    
-    # Ethos
-    op.create_table(
-        'ethos',
-        sa.Column('id', sa.String(36), primary_key=True),
-        sa.Column('agentium_id', sa.String(20), unique=True, nullable=True),
-        sa.Column('agent_type', sa.String(20), nullable=False),
-        sa.Column('mission_statement', sa.Text(), nullable=False),
-        sa.Column('core_values', sa.Text(), nullable=False),
-        sa.Column('behavioral_rules', sa.Text(), nullable=False),
-        sa.Column('restrictions', sa.Text(), nullable=False),
-        sa.Column('capabilities', sa.Text(), nullable=False),
-        sa.Column('created_by_agentium_id', sa.String(10), nullable=False),
-        sa.Column('version', sa.Integer(), default=1),
-        sa.Column('agent_id', sa.String(36), nullable=False),
-        sa.Column('verified_by_agentium_id', sa.String(10), nullable=True),
-        sa.Column('verified_at', sa.DateTime(), nullable=True),
-        sa.Column('is_verified', sa.Boolean(), default=False),
-        sa.Column('last_updated_by_agent', sa.Boolean(), default=False),
-        sa.Column('is_active', sa.String(1), default='Y'),
-        sa.Column('created_at', sa.DateTime(), default=sa.func.now()),
-        sa.Column('updated_at', sa.DateTime(), default=sa.func.now(), onupdate=sa.func.now()),
-    )
-    
-    # Agents (base table)
-    op.create_table(
-        'agents',
-        sa.Column('id', sa.String(36), primary_key=True),
-        sa.Column('agentium_id', sa.String(20), unique=True, nullable=False),
-        sa.Column('agent_type', sa.String(20), nullable=False),
-        sa.Column('name', sa.String(100), nullable=False),
-        sa.Column('description', sa.Text(), nullable=True),
-        sa.Column('incarnation_number', sa.Integer(), default=1),
-        sa.Column('parent_id', sa.String(36), sa.ForeignKey('agents.id'), nullable=True),
-        sa.Column('status', sa.String(20), default='initializing'),
-        sa.Column('terminated_at', sa.DateTime(), nullable=True),
-        sa.Column('termination_reason', sa.Text(), nullable=True),
-        sa.Column('preferred_config_id', sa.String(36), sa.ForeignKey('user_model_configs.id'), nullable=True),
-        sa.Column('system_prompt_override', sa.Text(), nullable=True),
-        sa.Column('ethos_id', sa.String(36), sa.ForeignKey('ethos.id'), nullable=True),
-        sa.Column('constitution_version', sa.String(10), nullable=True),
-        sa.Column('spawned_at_task_count', sa.Integer(), default=0),
-        sa.Column('tasks_completed', sa.Integer(), default=0),
-        sa.Column('tasks_failed', sa.Integer(), default=0),
-        sa.Column('current_task_id', sa.String(36), nullable=True),
-        sa.Column('is_persistent', sa.Boolean(), default=False),
-        sa.Column('idle_mode_enabled', sa.Boolean(), default=False),
-        sa.Column('last_idle_action_at', sa.DateTime(), nullable=True),
-        sa.Column('idle_task_count', sa.Integer(), default=0),
-        sa.Column('idle_tokens_saved', sa.Integer(), default=0),
-        sa.Column('current_idle_task_id', sa.String(36), nullable=True),
-        sa.Column('persistent_role', sa.String(50), nullable=True),
-        sa.Column('last_constitution_read_at', sa.DateTime(), nullable=True),
-        sa.Column('constitution_read_count', sa.Integer(), default=0),
-        sa.Column('ethos_last_read_at', sa.DateTime(), nullable=True),
-        sa.Column('ethos_action_pending', sa.Boolean(), default=False),
-        sa.Column('is_active', sa.String(1), default='Y'),
-        sa.Column('created_at', sa.DateTime(), default=sa.func.now()),
-        sa.Column('updated_at', sa.DateTime(), default=sa.func.now(), onupdate=sa.func.now()),
-    )
-    op.create_index('idx_agent_type_status', 'agents', ['agent_type', 'status'])
-    op.create_index('idx_parent_id', 'agents', ['parent_id'])
-    op.create_index('idx_agents_is_persistent', 'agents', ['is_persistent'])
-    op.create_index('idx_agents_last_idle', 'agents', ['last_idle_action_at'])
-    
-    # Head of Council (inherits from agents)
-    op.create_table(
-        'head_of_council',
-        sa.Column('id', sa.String(36), sa.ForeignKey('agents.id'), primary_key=True),
-        sa.Column('emergency_override_used_at', sa.DateTime(), nullable=True),
-        sa.Column('last_constitution_update', sa.DateTime(), nullable=True),
-    )
-    
-    # Council Members
-    op.create_table(
-        'council_members',
-        sa.Column('id', sa.String(36), sa.ForeignKey('agents.id'), primary_key=True),
-        sa.Column('specialization', sa.String(50), nullable=True),
-        sa.Column('votes_participated', sa.Integer(), default=0),
-        sa.Column('votes_abstained', sa.Integer(), default=0),
-    )
-    
-    # Lead Agents
-    op.create_table(
-        'lead_agents',
-        sa.Column('id', sa.String(36), sa.ForeignKey('agents.id'), primary_key=True),
-        sa.Column('team_size', sa.Integer(), default=0),
-        sa.Column('max_team_size', sa.Integer(), default=10),
-        sa.Column('department', sa.String(50), nullable=True),
-        sa.Column('spawn_threshold', sa.Integer(), default=5),
-    )
-    
-    # Task Agents
-    op.create_table(
-        'task_agents',
-        sa.Column('id', sa.String(36), sa.ForeignKey('agents.id'), primary_key=True),
-        sa.Column('assigned_tools', sa.Text(), nullable=True),
-        sa.Column('execution_timeout', sa.Integer(), default=300),
-        sa.Column('sandbox_enabled', sa.Boolean(), default=True),
-    )
     
     # Tasks
     op.create_table(

@@ -774,7 +774,7 @@ class AgentOrchestrator:
     
     def _get_agent(self, agent_id: str) -> Optional[Agent]:
         """Query agent from DB (cacheable in production)."""
-        return self.db.query(Agent).filter_by(agentium_id=agent_id, is_active='Y').first()
+        return self.db.query(Agent).filter_by(agentium_id=agent_id, is_active=True).first()
     
     def _get_parent_id(self, agent_id: str) -> str:
         """Get parent agent ID from DB."""

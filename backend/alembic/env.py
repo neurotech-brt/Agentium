@@ -15,12 +15,22 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 
 from backend.models.entities.base import Base
 from backend.models.entities.agents import Agent, HeadOfCouncil, CouncilMember, LeadAgent, TaskAgent
-from backend.models.entities.constitution import Constitution, Ethos, AmendmentVoting
-from backend.models.entities.task import Task, SubTask, TaskAuditLog, TaskDeliberation
+from backend.models.entities.constitution import Constitution, Ethos
+from backend.models.entities.voting import AmendmentVoting
+from backend.models.entities.task import Task, SubTask, TaskAuditLog
+from backend.models.entities.voting import TaskDeliberation
 from backend.models.entities.voting import IndividualVote, VotingRecord
 from backend.models.entities.audit import AuditLog, ConstitutionViolation, SessionLog, HealthCheck
-from backend.models.entities.channels import Channel, ChannelMessage
-from backend.models.entities.monitoring import SystemMetric, AgentMetric
+from backend.models.entities.channels import ExternalChannel, ExternalMessage, ChannelType, ChannelStatus
+from backend.models.entities.monitoring import (
+    AgentHealthReport, 
+    ViolationReport, 
+    TaskVerification, 
+    PerformanceMetric, 
+    MonitoringAlert,
+    MonitoringStatus,
+    ViolationSeverity
+)
 from backend.models.entities.user import User
 from backend.models.entities.user_config import UserModelConfig
 

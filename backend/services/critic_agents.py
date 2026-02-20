@@ -20,6 +20,9 @@ from backend.models.entities.critics import (
 )
 from backend.models.entities.task import Task, TaskStatus
 from backend.models.entities.audit import AuditLog, AuditLevel, AuditCategory
+from backend.services.acceptance_criteria import (   # Phase 6.3
+    AcceptanceCriteriaService, AcceptanceCriterion, CriterionResult
+)
 
 
 class CriticService:
@@ -95,19 +98,78 @@ class CriticService:
                 'cached': True,
             }
         
-        # 5. Perform the review
+        # 5. Load acceptance criteria for this task (Phase 6.3)
+        task_for_criteria = db.query(Task).filter_by(id=task_id).first()
+        task_criteria: list[AcceptanceCriterion] = []
+        criteria_results: list[CriterionResult] = []
+        if task_for_criteria and task_for_criteria.acceptance_criteria:
+            task_criteria = AcceptanceCriteriaService.from_json(
+                task_for_criteria.acceptance_criteria
+            )
+
+        # 6. Run deterministic criteria checks (before AI model call)
+        if task_criteria:
+            criteria_results = AcceptanceCriteriaService.evaluate_criteria(
+                task_criteria, output_content, critic_type.value
+            )
+            aggregation = AcceptanceCriteriaService.aggregate(criteria_results)
+            if not aggregation["all_mandatory_passed"]:
+                # Mandatory criterion failed — reject immediately, skip AI call
+                failed_metrics = ", ".join(aggregation["mandatory_failures"])
+                duration_ms = (time.monotonic() - start_time) * 1000
+                review = CritiqueReview(
+                    task_id=task_id,
+                    subtask_id=subtask_id,
+                    critic_type=critic_type,
+                    critic_agentium_id=critic.agentium_id,
+                    verdict=CriticVerdict.REJECT,
+                    rejection_reason=f"Mandatory acceptance criteria failed: {failed_metrics}",
+                    suggestions="Fix the criteria listed in criteria_results before resubmitting.",
+                    retry_count=retry_count,
+                    max_retries=self.DEFAULT_MAX_RETRIES,
+                    review_duration_ms=duration_ms,
+                    model_used=critic.preferred_review_model,
+                    output_hash=output_hash,
+                    criteria_results=[r.to_dict() for r in criteria_results],
+                    criteria_evaluated=aggregation["total"],
+                    criteria_passed=aggregation["passed"],
+                    agentium_id=f"CR{critic.agentium_id}",
+                )
+                db.add(review)
+                critic.record_review(CriticVerdict.REJECT, duration_ms)
+                critic.status = original_status
+                self._log_review(db, critic, task_id, CriticVerdict.REJECT,
+                                 f"Mandatory criteria failed: {failed_metrics}")
+                db.commit()
+                return {
+                    'verdict': CriticVerdict.REJECT.value,
+                    'review_id': review.id,
+                    'task_id': task_id,
+                    'critic_id': critic.agentium_id,
+                    'critic_type': critic_type.value,
+                    'rejection_reason': f"Mandatory acceptance criteria failed: {failed_metrics}",
+                    'suggestions': "Fix the criteria listed in criteria_results.",
+                    'criteria_results': [r.to_dict() for r in criteria_results],
+                    'criteria_summary': aggregation,
+                    'retry_count': retry_count,
+                    'max_retries': self.DEFAULT_MAX_RETRIES,
+                    'review_duration_ms': round(duration_ms, 1),
+                    'cached': False,
+                }
+
+        # 7. Perform the AI model review
         verdict, reason, suggestions = await self._execute_review(
             db, critic, task_id, output_content, critic_type
         )
         
         duration_ms = (time.monotonic() - start_time) * 1000
         
-        # 6. Determine if we should escalate
+        # 8. Determine if we should escalate
         if verdict == CriticVerdict.REJECT and retry_count >= self.DEFAULT_MAX_RETRIES:
             verdict = CriticVerdict.ESCALATE
             reason = f"Max retries ({self.DEFAULT_MAX_RETRIES}) exhausted. Original: {reason}"
         
-        # 7. Create review record
+        # 9. Create review record (Phase 6.3: include criteria_results)
         review = CritiqueReview(
             task_id=task_id,
             subtask_id=subtask_id,
@@ -121,21 +183,28 @@ class CriticService:
             review_duration_ms=duration_ms,
             model_used=critic.preferred_review_model,
             output_hash=output_hash,
+            criteria_results=[r.to_dict() for r in criteria_results] if criteria_results else None,
+            criteria_evaluated=len(criteria_results) if criteria_results else None,
+            criteria_passed=sum(1 for r in criteria_results if r.passed) if criteria_results else None,
             agentium_id=f"CR{critic.agentium_id}",  # CritiqueReview agentium_id
         )
         
         db.add(review)
         
-        # 8. Update critic stats
+        # 10. Update critic stats
         critic.record_review(verdict, duration_ms)
         critic.status = AgentStatus.ACTIVE
         
-        # 9. Audit log
+        # 11. Audit log
         self._log_review(db, critic, task_id, verdict, reason)
         
         db.commit()
         
-        # 10. Build response
+        # 12. Build response
+        criteria_aggregation = (
+            AcceptanceCriteriaService.aggregate(criteria_results)
+            if criteria_results else None
+        )
         result = {
             'verdict': verdict.value,
             'review_id': review.id,
@@ -144,20 +213,22 @@ class CriticService:
             'critic_type': critic_type.value,
             'rejection_reason': reason if verdict != CriticVerdict.PASS else None,
             'suggestions': suggestions,
+            'criteria_results': [r.to_dict() for r in criteria_results] if criteria_results else [],
+            'criteria_summary': criteria_aggregation,
             'retry_count': retry_count,
             'max_retries': self.DEFAULT_MAX_RETRIES,
             'review_duration_ms': round(duration_ms, 1),
             'cached': False,
         }
         
-        # 11. Handle escalation
+        # 13. Handle escalation
         if verdict == CriticVerdict.ESCALATE:
             result['escalation'] = await self._escalate_to_council(
                 db, task_id, critic_type, reason
             )
         
         return result
-    
+
     def _get_available_critic(
         self, db: Session, critic_type: CriticType
     ) -> Optional[CriticAgent]:
@@ -528,7 +599,7 @@ Respond ONLY with a JSON object — no markdown, no preamble:
         """Get all critic reviews for a specific task."""
         reviews = db.query(CritiqueReview).filter(
             CritiqueReview.task_id == task_id,
-            CritiqueReview.is_active == 'Y',
+            CritiqueReview.is_active == True,
         ).order_by(CritiqueReview.reviewed_at.desc()).all()
         
         return [r.to_dict() for r in reviews]

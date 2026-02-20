@@ -1,6 +1,15 @@
 import { api } from './api';
 import { Task } from '../types';
 
+// Phase 6.3 — Acceptance Criteria
+export interface AcceptanceCriterion {
+    metric: string;                          // snake_case identifier
+    threshold: boolean | number | string | number[];
+    validator: 'code' | 'output' | 'plan';  // which critic validates this
+    is_mandatory: boolean;                   // mandatory = failure blocks task
+    description?: string;                    // human-readable, shown in dashboard
+}
+
 export interface CreateTaskRequest {
     title: string;
     description: string;
@@ -9,6 +18,9 @@ export interface CreateTaskRequest {
     constitutional_basis?: string;
     hierarchical_id?: string;
     parent_task_id?: string;
+    // Phase 6.3
+    acceptance_criteria?: AcceptanceCriterion[];
+    veto_authority?: 'code' | 'output' | 'plan';
 }
 
 export const tasksService = {
@@ -79,5 +91,13 @@ export const criticsService = {
     }) => {
         const response = await api.post('/api/v1/critics/review', payload);
         return response.data;
+    },
+
+    // Phase 6.3 — retrieve the acceptance criteria stored on a task
+    getTaskCriteria: async (taskId: string): Promise<AcceptanceCriterion[]> => {
+        const response = await api.get<{ governance: { acceptance_criteria?: AcceptanceCriterion[] } }>(
+            `/api/v1/tasks/${taskId}`
+        );
+        return response.data.governance?.acceptance_criteria ?? [];
     },
 };

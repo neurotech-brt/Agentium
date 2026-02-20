@@ -279,7 +279,7 @@ class ModelAllocationService:
         """
         Get report of current model allocations across all agents.
         """
-        agents = self.db.query(Agent).filter_by(is_active='Y').all()
+        agents = self.db.query(Agent).filter_by(is_active=True).all()
         
         report = {
             "total_agents": len(agents),

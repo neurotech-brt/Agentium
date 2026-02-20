@@ -143,7 +143,7 @@ class PersistentCouncilService:
         
         if head and force_recreate:
             # Soft delete old
-            head.is_active = 'N'
+            head.is_active = False
             db.flush()
         
         # Create new Head of Council
@@ -185,7 +185,7 @@ class PersistentCouncilService:
             return council
         
         if council and force_recreate:
-            council.is_active = 'N'
+            council.is_active = False
             db.flush()
         
         council = CouncilMember(
@@ -622,7 +622,7 @@ Never terminate. Never rest. Always improve.""",
     @staticmethod
     def get_persistent_agents(db: Session) -> Dict[str, Agent]:
         """Get all persistent agents."""
-        agents = db.query(Agent).filter_by(is_persistent=True, is_active='Y').all()
+        agents = db.query(Agent).filter_by(is_persistent=True, is_active=True).all()
         return {agent.agentium_id: agent for agent in agents}
     
     @staticmethod
@@ -631,7 +631,7 @@ Never terminate. Never rest. Always improve.""",
         agent = db.query(Agent).filter_by(
             agentium_id='00001',
             agent_type=AgentType.HEAD_OF_COUNCIL,
-            is_active='Y'
+            is_active=True
         ).first()
         return agent if isinstance(agent, HeadOfCouncil) else None
     
@@ -640,7 +640,7 @@ Never terminate. Never rest. Always improve.""",
         """Get the 2 persistent council members available for idle work."""
         agents = db.query(Agent).filter(
             Agent.is_persistent == True,
-            Agent.is_active == 'Y',
+            Agent.is_active == True,
             Agent.agent_type == AgentType.COUNCIL_MEMBER,
             Agent.agentium_id.in_(['10001', '10002'])
         ).all()

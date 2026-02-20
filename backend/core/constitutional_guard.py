@@ -475,7 +475,7 @@ class ConstitutionalGuard:
             from backend.models.entities.constitution import Constitution
             constitution = (
                 self.db.query(Constitution)
-                .filter_by(is_active='Y')
+                .filter_by(is_active=True)
                 .order_by(Constitution.version_number.desc())
                 .first()
             )

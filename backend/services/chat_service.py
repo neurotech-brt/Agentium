@@ -268,9 +268,9 @@ Progress: {task_progress or 'N/A'}%"""
         # Count agents by type
         agents = db.query(Agent).all()
 
-        head_count = sum(1 for a in agents if a.agent_type.value == "head_of_council" and a.is_active == 'Y')
-        council_count = sum(1 for a in agents if a.agent_type.value == "council_member" and a.is_active == 'Y')
-        lead_count = sum(1 for a in agents if a.agent_type.value == "lead_agent" and a.is_active == 'Y')
+        head_count = sum(1 for a in agents if a.agent_type.value == "head_of_council" and a.is_active == True)
+        council_count = sum(1 for a in agents if a.agent_type.value == "council_member" and a.is_active == True)
+        lead_count = sum(1 for a in agents if a.agent_type.value == "lead_agent" and a.is_active == True)
         task_count = sum(1 for a in agents if a.agent_type.value == "task_agent" and a.is_active == 'Y')
 
         # Get active tasks
@@ -279,7 +279,7 @@ Progress: {task_progress or 'N/A'}%"""
         # Get reincarnation stats
         reincarnation_info = ""
         for agent in agents:
-            if agent.is_active == 'Y':
+            if agent.is_active is True:
                 stats = context_manager.get_stats(agent.agentium_id)
                 if stats and stats.get('incarnation', 1) > 1:
                     reincarnation_info += f"\n  {agent.agentium_id}: Incarnation {stats['incarnation']}"
@@ -352,7 +352,7 @@ Progress: {task_progress or 'N/A'}%"""
             # Use enum comparison instead of string
             council = db.query(Agent).filter(
                 Agent.agent_type == AgentType.COUNCIL_MEMBER,
-                Agent.is_active == 'Y'
+                Agent.is_active == True
             ).all()
 
             if council:

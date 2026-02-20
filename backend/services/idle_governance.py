@@ -267,7 +267,7 @@ class EnhancedIdleGovernanceEngine:
         # Find agents with no activity in threshold period
         idle_agents = db.query(Agent).filter(
             and_(
-                Agent.is_active == 'Y',
+                Agent.is_active == True,
                 Agent.status == AgentStatus.ACTIVE,
                 Agent.is_persistent == False,  # Don't auto-terminate persistent agents
                 Agent.last_idle_action_at < threshold
@@ -308,7 +308,7 @@ class EnhancedIdleGovernanceEngine:
         # Find idle agents with NO active tasks
         idle_agents = db.query(Agent).filter(
             and_(
-                Agent.is_active == 'Y',
+                Agent.is_active == True,
                 Agent.status == AgentStatus.ACTIVE,
                 Agent.is_persistent == False,
                 Agent.last_idle_action_at < threshold
@@ -330,7 +330,7 @@ class EnhancedIdleGovernanceEngine:
             active_tasks = db.query(Task).filter(
                 Task.assigned_task_agent_ids.contains([agent.agentium_id]),
                 Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.DELIBERATING]),
-                Task.is_active == 'Y'
+                Task.is_active == True
             ).count()
             
             if active_tasks > 0:
@@ -391,7 +391,7 @@ class EnhancedIdleGovernanceEngine:
         """
         # Get all active agents (excluding persistent ones)
         agents = db.query(Agent).filter(
-            Agent.is_active == 'Y',
+            Agent.is_active == True,
             Agent.status == AgentStatus.ACTIVE,
             Agent.is_persistent == False
         ).all()
@@ -410,7 +410,7 @@ class EnhancedIdleGovernanceEngine:
             active_tasks = db.query(Task).filter(
                 Task.assigned_task_agent_ids.contains([agent.agentium_id]),
                 Task.status.in_([TaskStatus.PENDING, TaskStatus.IN_PROGRESS, TaskStatus.DELIBERATING]),
-                Task.is_active == 'Y'
+                Task.is_active == True
             ).count()
             
             agent_loads.append({
@@ -456,7 +456,7 @@ class EnhancedIdleGovernanceEngine:
             tasks = db.query(Task).filter(
                 Task.assigned_task_agent_ids.contains([overloaded_agent.agentium_id]),
                 Task.status.in_([TaskStatus.PENDING, TaskStatus.DELIBERATING]),  # Only pending/deliberating
-                Task.is_active == 'Y'
+                Task.is_active == True
             ).limit(2).all()  # Move max 2 tasks per agent
             
             for task in tasks:
@@ -523,14 +523,14 @@ class EnhancedIdleGovernanceEngine:
                 TaskStatus.DELIBERATING,
                 TaskStatus.IN_PROGRESS
             ]),
-            Task.is_active == 'Y'
+            Task.is_active == True
         ).all()
     
     def _get_available_persistent_agents(self, db: Session) -> List[Agent]:
         """Get persistent agents ready for idle work."""
         return db.query(Agent).filter(
             Agent.is_persistent == True,
-            Agent.is_active == 'Y',
+            Agent.is_active == True,
             Agent.status.in_([AgentStatus.ACTIVE, AgentStatus.IDLE_WORKING])
         ).order_by(Agent.last_idle_action_at).all()
     
@@ -602,7 +602,7 @@ class EnhancedIdleGovernanceEngine:
                 TaskStatus.APPROVED,
                 TaskStatus.ASSIGNED
             ]),
-            Task.is_active == 'Y'
+            Task.is_active == True
         ).count()
         
         threshold = 10  # Configurable threshold

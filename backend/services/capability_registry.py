@@ -484,7 +484,7 @@ class CapabilityRegistry:
         from sqlalchemy import func
         
         # Get all active agents
-        agents = db.query(Agent).filter_by(is_active='Y').all()
+        agents = db.query(Agent).filter_by(is_active=True).all()
         
         tier_distribution = {'0': 0, '1': 0, '2': 0, '3': 0}
         dynamic_grants = 0

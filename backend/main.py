@@ -302,7 +302,7 @@ async def create_agent(
         raise HTTPException(status_code=400, detail="Tier must be 0 (Head), 1 (Council), 2 (Lead), or 3 (Task)")
     
     # Get current constitution
-    constitution = db.query(Constitution).filter_by(is_active='Y').order_by(Constitution.effective_date.desc()).first()
+    constitution = db.query(Constitution).filter_by(is_active=True).order_by(Constitution.effective_date.desc()).first()
     if not constitution:
         raise HTTPException(status_code=500, detail="No active constitution found")
     
@@ -374,7 +374,7 @@ async def get_agent(
 async def get_constitution(db: Session = Depends(get_db)):
     """Get the current active constitution."""
     constitution = db.query(Constitution).filter_by(
-        is_active='Y'
+        is_active=True
     ).order_by(Constitution.effective_date.desc()).first()
     
     if not constitution:
@@ -392,7 +392,7 @@ async def update_constitution(
     """Update the constitution (sovereign only)."""
     import json as _json
 
-    current = db.query(Constitution).filter_by(is_active='Y').first()
+    current = db.query(Constitution).filter_by(is_active=True).first()
     if not current:
         raise HTTPException(status_code=404, detail="No active constitution found")
 
@@ -453,12 +453,12 @@ async def update_constitution(
         articles=new_articles,
         prohibited_actions=new_prohibited,
         sovereign_preferences=new_prefs,
-        is_active='Y',
+        is_active=True,
         created_by_agentium_id=current_user.get("username", "sovereign"),
         effective_date=datetime.utcnow()
     )
 
-    current.is_active = 'N'
+    current.is_active = False
     db.add(new_version)
     db.commit()
     db.refresh(new_version)

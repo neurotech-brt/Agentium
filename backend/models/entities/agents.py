@@ -60,6 +60,7 @@ class Agent(BaseEntity):
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     incarnation_number = Column(Integer, default=1) 
+    created_by_agentium_id = Column(String(10), nullable=True)
     
     # Hierarchy relationships
     parent_id = Column(String(36), ForeignKey('agents.id'), nullable=True)
@@ -102,14 +103,6 @@ class Agent(BaseEntity):
     parent = relationship("Agent", remote_side="Agent.id", backref="subordinates")
     ethos = relationship("Ethos", foreign_keys=[ethos_id])
     preferred_config = relationship("UserModelConfig", foreign_keys=[preferred_config_id])
-    agent_type = Column(Enum(AgentType), nullable=False)
-
-    agentium_id = Column(String(10), unique=True, nullable=False)  
-    name = Column(String(100), nullable=False)
-    description = Column(Text, nullable=True)
-    incarnation_number = Column(Integer, default=1)
-    created_by_agentium_id = Column(String(10), nullable=True)
-    
     __mapper_args__ = {
         'polymorphic_on': agent_type,
         'polymorphic_identity': None
@@ -194,7 +187,7 @@ class Agent(BaseEntity):
         from backend.models.entities.constitution import Constitution, Ethos
 
         constitution = db.query(Constitution).filter_by(
-            is_active='Y'
+            is_active=True
         ).order_by(Constitution.effective_date.desc()).first()
 
         if not constitution:
@@ -305,7 +298,7 @@ class Agent(BaseEntity):
         """
         from backend.models.entities.constitution import Ethos
 
-        subordinate = db.query(Agent).filter_by(agentium_id=subordinate_id, is_active='Y').first()
+        subordinate = db.query(Agent).filter_by(agentium_id=subordinate_id, is_active=True).first()
         if not subordinate:
             return None
 
@@ -335,7 +328,7 @@ class Agent(BaseEntity):
         from backend.models.entities.audit import AuditLog, AuditLevel, AuditCategory
         import json
 
-        subordinate = db.query(Agent).filter_by(agentium_id=subordinate_id, is_active='Y').first()
+        subordinate = db.query(Agent).filter_by(agentium_id=subordinate_id, is_active=True).first()
         if not subordinate:
             raise ValueError(f"Subordinate {subordinate_id} not found")
 
@@ -653,7 +646,7 @@ class Agent(BaseEntity):
         
         # READ ONLY: Fetch current constitution for awareness
         current_constitution = db.query(Constitution).filter_by(
-            is_active='Y'
+            is_active=True
         ).order_by(Constitution.effective_date.desc()).first()
         
         if not current_constitution:
@@ -710,7 +703,7 @@ class Agent(BaseEntity):
         self.status = AgentStatus.TERMINATED
         self.terminated_at = datetime.utcnow()
         self.termination_reason = reason
-        self.is_active = 'Y'
+        self.is_active = True
         
         if violation:
             self._log_violation_termination()
@@ -1108,7 +1101,7 @@ class HeadOfCouncil(Agent):
         from backend.models.entities.agents import CouncilMember
         council_members = db.query(CouncilMember).filter_by(
             is_persistent=True,
-            is_active='Y'
+            is_active=True
         ).all()
         
         assignments = []
@@ -1168,7 +1161,7 @@ class LeadAgent(Agent):
         return self.team_size < self.max_team_size
     
     def update_team_size(self):
-        self.team_size = len([sub for sub in self.subordinates if sub.is_active == 'Y'])
+        self.team_size = len([sub for sub in self.subordinates if sub.is_active is True])
 
 
 class TaskAgent(Agent):

@@ -104,6 +104,9 @@ from backend.models.entities.critics import (
     CriticVerdict
 )
 
+from backend.models.entities.system_settings import SystemSetting
+
+
 # All models for Alembic/database creation
 __all__ = [
     # Base
@@ -184,4 +187,7 @@ __all__ = [
     'CritiqueReview',
     'CriticType',
     'CriticVerdict',
+
+    # System Settings
+    'SystemSetting',
 ]

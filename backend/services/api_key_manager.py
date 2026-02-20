@@ -515,7 +515,7 @@ class APIKeyManager:
             }
         """
         def _query(db_session: Session):
-            query = db_session.query(UserModelConfig).filter_by(is_active='Y')
+            query = db_session.query(UserModelConfig).filter_by(is_active=True)
             if provider:
                 query = query.filter_by(provider=provider)
             
@@ -605,7 +605,7 @@ class APIKeyManager:
     
     def _get_key_status(self, key: UserModelConfig) -> str:
         """Determine health status string for a key."""
-        if not key.is_active or key.is_active == 'N':
+        if not key.is_active or key.is_active is False:
             return APIKeyHealthStatus.DISABLED
         
         now = datetime.utcnow()
@@ -705,7 +705,7 @@ class APIKeyManager:
                 # Get all active channels
                 channels = db_session.query(ExternalChannel).filter_by(
                     status='active',
-                    is_active='Y'
+                    is_active=True
                 ).all()
                 
                 for channel in channels:

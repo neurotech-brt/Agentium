@@ -352,7 +352,7 @@ class ToolCreationService:
                 "activated_by": agentium_id,
                 "timestamp": datetime.utcnow().isoformat(),
             },
-            is_active='Y',
+            is_active=True,
             created_at=datetime.utcnow(),
         )
         self.db.add(audit)

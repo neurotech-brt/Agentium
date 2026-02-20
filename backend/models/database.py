@@ -292,6 +292,14 @@ def init_db():
         CriticAgent, CritiqueReview, CriticType, CriticVerdict
     )
 
+    # ── Phase 6.1: Tool Management ───────────────────────────────────────────
+    from backend.models.entities.tool_staging import ToolStaging  # noqa: F401
+    from backend.models.entities.tool_version import ToolVersion  # noqa: F401
+    from backend.models.entities.tool_usage_log import ToolUsageLog  # noqa: F401
+    from backend.models.entities.tool_marketplace_listing import (  # noqa: F401
+        ToolMarketplaceListing
+    )
+
     # ── Channels ─────────────────────────────────────────────────────────────
     from backend.models.entities.channels import (  # noqa: F401
         ExternalChannel, ExternalMessage, ChannelType, ChannelStatus

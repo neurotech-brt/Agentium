@@ -540,6 +540,14 @@ class APIKeyRecord(BaseEntity):
 
 **Based on research: "If You Want Coherence, Orchestrate a Team of Rivals"**
 
+6.1 Tool Creation (foundation)
+└── 6.7 MCP Governance (extends 6.1)
+6.2 Critic Agents (mostly done)
+└── 6.3 Acceptance Criteria (feeds critics)
+6.4 Context Ray Tracing (enhances message_bus)
+6.5 Checkpointing (cross-cutting)
+6.6 Remote Executor (infrastructure)
+
 ### 6.1 Tool Creation Service 🆕 ✅
 
 **File:** `backend/services/tool_creation_service.py` ✅
@@ -570,10 +578,10 @@ class APIKeyRecord(BaseEntity):
 
 **Pending:**
 
-- [ ] Tool versioning and updates
-- [ ] Tool deprecation workflow
-- [ ] Usage analytics per tool
-- [ ] Tool marketplace (share between Agentium instances)
+- ✅ Tool versioning and updates
+- ✅ Tool deprecation workflow
+- ✅ Usage analytics per tool
+- ✅ Tool marketplace (share between Agentium instances)
 
 ### 6.2 Critic Agents with Veto Authority 🆕 (DONE)
 

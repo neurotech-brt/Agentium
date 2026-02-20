@@ -115,5 +115,69 @@ class ToolRegistry:
         except Exception as e:
             return {"status": "error", "error": str(e)}
 
+    def get_tool_function(self, name: str) -> Callable:
+        """
+        Return just the callable for a registered tool.
+        Used by ToolCreationService.execute_tool() to invoke the function directly.
+        Returns None if the tool does not exist.
+        """
+        tool = self.tools.get(name)
+        return tool["function"] if tool else None
+
+    def update_tool_function(self, name: str, function: Callable) -> bool:
+        """
+        Replace the callable for an existing tool (used after version update / rollback).
+        Called by ToolVersioningService.approve_update() and rollback().
+        Returns True if updated, False if tool not found.
+        """
+        if name not in self.tools:
+            return False
+        self.tools[name]["function"] = function
+        return True
+
+    def mark_deprecated(
+        self,
+        name: str,
+        reason: str,
+        replacement: str = None,
+    ) -> bool:
+        """
+        Soft-mark a tool as deprecated.
+        Tool remains callable but is flagged so callers can surface warnings.
+        Called by ToolDeprecationService.deprecate_tool().
+        Returns True if marked, False if tool not found.
+        """
+        if name not in self.tools:
+            return False
+        self.tools[name]["deprecated"] = True
+        self.tools[name]["deprecation_reason"] = reason
+        self.tools[name]["replacement"] = replacement
+        return True
+
+    def unmark_deprecated(self, name: str) -> bool:
+        """
+        Remove deprecation flag from a tool (used when restoring a deprecated tool).
+        Called by ToolDeprecationService.restore_tool().
+        Returns True if unmarked, False if tool not found.
+        """
+        if name not in self.tools:
+            return False
+        self.tools[name].pop("deprecated", None)
+        self.tools[name].pop("deprecation_reason", None)
+        self.tools[name].pop("replacement", None)
+        return True
+
+    def deregister_tool(self, name: str) -> bool:
+        """
+        Hard-remove a tool from the registry (used on sunset / hard removal).
+        Called by ToolDeprecationService.execute_sunset().
+        Returns True if removed, False if tool was not registered.
+        """
+        if name not in self.tools:
+            return False
+        del self.tools[name]
+        return True
+
+
 # Global registry instance
 tool_registry = ToolRegistry()

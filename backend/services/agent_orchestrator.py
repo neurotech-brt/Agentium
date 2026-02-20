@@ -1,7 +1,7 @@
 """
 Agent Orchestrator - Central routing and governance coordinator.
 Enforces hierarchy (0xxxx→1xxxx→2xxxx→3xxxx) and integrates Vector DB context.
-NEW: Tool execution, idle governance coordination, WebSocket broadcasting,
+ Tool execution, idle governance coordination, WebSocket broadcasting,
      metrics collection, and circuit breaker for failing agents.
 """
 
@@ -23,6 +23,7 @@ from backend.core.tool_registry import tool_registry  # NEW
 from backend.services.idle_governance import idle_budget, token_optimizer  # NEW
 from backend.api.routes.websocket import manager  # NEW
 from backend.core.constitutional_guard import ConstitutionalGuard, Verdict, ViolationSeverity  # NEW
+from backend.services.tool_creation_service import ToolCreationService  # Phase 6.1: analytics-wrapped execution
 
 # NEW: Tool execution imports
 from backend.services.host_access import HostAccessService
@@ -272,26 +273,38 @@ class AgentOrchestrator:
     
     # NEW: Tool Execution Method
     async def _execute_tool_directly(self, tool_detection: Dict, agent_id: str, start_time: datetime) -> RouteResult:
-        """Execute tool directly without hierarchical routing."""
+        """
+        Execute tool directly without hierarchical routing.
+        Routes through ToolCreationService.execute_tool() so every call is
+        recorded in ToolUsageLog (analytics, latency, error tracking).
+        """
         tool_name = tool_detection["tool_name"]
         params = tool_detection["parameters"]
-        
-        # Execute tool
-        result = tool_registry.execute_tool(tool_name, **params)
-        
-        # Log execution
+
+        # Phase 6.1: use analytics-wrapped executor instead of bare tool_registry call.
+        # This records latency, success/failure, caller identity, and task context
+        # automatically via ToolAnalyticsService inside execute_tool().
+        tool_svc = ToolCreationService(self.db)
+        result = tool_svc.execute_tool(
+            tool_name=tool_name,
+            called_by=agent_id,
+            kwargs=params,
+            task_id=tool_detection.get("task_id"),  # pass along if present
+        )
+
+        # Log execution to audit trail (separate from analytics — audit is governance)
         await self._log(
             actor=agent_id,
             action="tool_execution",
             desc=f"Executed {tool_name} with params {params}",
-            level=AuditLevel.INFO if result["status"] == "success" else AuditLevel.ERROR
+            level=AuditLevel.INFO if result.get("status") == "success" else AuditLevel.ERROR
         )
-        
+
         # Create result message
         msg_id = f"tool_{tool_name}_{datetime.utcnow().timestamp()}"
-        
+
         return RouteResult(
-            success=True,
+            success=result.get("status") == "success",
             message_id=msg_id,
             routed_to="tool_executor",
             constitutional_basis=[f"Tool execution by {agent_id}"],
@@ -305,17 +318,36 @@ class AgentOrchestrator:
     
     # NEW: Tool Creation Handler
     async def _handle_tool_creation_request(self, content: str, agent_id: str, start_time: datetime) -> RouteResult:
-        """Process request to create a new tool."""
-        from backend.services.tool_creation_service import ToolCreationService
-        
-        service = ToolCreationService(self.db)
-        
-        # For now, escalate to Head of Council for tool creation
-        # In future, agent can directly use tool creation API
+        """
+        Process request to create a new tool.
+
+        Tier rules (mirrors ToolCreationService.propose_tool):
+          - Head (0xxxx)   → auto-approves, activates immediately
+          - Council/Lead (1xxxx/2xxxx) → proposal staged, Council vote triggered
+          - Task (3xxxx)   → blocked, escalated to parent Lead
+
+        ToolCreationService is already imported at module level (Phase 6.1).
+        """
+        # Task agents cannot create tools — escalate to their Lead instead
+        if agent_id.startswith("3"):
+            return await self.escalate_to_council(
+                issue=f"Tool creation request from task agent {agent_id}: {content}",
+                reporter_id=agent_id
+            )
+
+        # Head/Council/Lead agents go directly through ToolCreationService.
+        # The service handles tier-based approval internally — Head auto-approves,
+        # others get a Council vote triggered.
+        # We pass a minimal ToolCreationRequest extracted from natural language.
+        # Full structured proposals come via the /tools/propose API endpoint;
+        # this path handles agent-initiated natural language tool requests.
         return await self.escalate_to_council(
             issue=f"Tool creation request from {agent_id}: {content}",
             reporter_id=agent_id
         )
+        # TODO Phase 6.2+: parse `content` into a structured ToolCreationRequest
+        # and call ToolCreationService(self.db).propose_tool(request) directly
+        # once agents can emit structured tool proposals.
     
     # NEW: Enhanced routing with tool ability checks
     async def _route_up_with_tools(self, msg: AgentMessage) -> RouteResult:

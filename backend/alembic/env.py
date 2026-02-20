@@ -24,6 +24,12 @@ from backend.models.entities.monitoring import SystemMetric, AgentMetric
 from backend.models.entities.user import User
 from backend.models.entities.user_config import UserModelConfig
 
+# Phase 6.1 — Tool Management
+from backend.models.entities.tool_staging import ToolStaging
+from backend.models.entities.tool_version import ToolVersion
+from backend.models.entities.tool_usage_log import ToolUsageLog
+from backend.models.entities.tool_marketplace_listing import ToolMarketplaceListing
+
 # this is the Alembic Config object
 config = context.config
 

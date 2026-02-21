@@ -310,6 +310,11 @@ def init_db():
         ScheduledTask, ScheduledTaskExecution
     )
 
+    # ── Phase 6.5: Checkpointing & Time-Travel Recovery ──────────────────────
+    from backend.models.entities.checkpoint import (  # noqa: F401
+        ExecutionCheckpoint, CheckpointPhase
+    )
+
     # Create all tables that don't exist yet
     Base.metadata.create_all(bind=engine)
 

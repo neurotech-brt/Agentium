@@ -246,7 +246,40 @@ class Task(BaseEntity):
         # Emit event for event sourcing
         self._emit_status_event(old_status, new_status, actor_id, note)
         
+        # Phase 6.5: Automated Checkpoint hook
+        self._trigger_checkpoint_if_needed(new_status, actor_id)
+        
         return True
+        
+    def _trigger_checkpoint_if_needed(self, new_status: TaskStatus, actor_id: str):
+        """Creates a system state checkpoint at key phase boundaries."""
+        from sqlalchemy.orm import object_session
+        from backend.services.checkpoint_service import CheckpointService
+        from backend.models.entities.checkpoint import CheckpointPhase
+
+        session = object_session(self)
+        if not session:
+            return  # Cannot create checkpoint if detached
+            
+        phase = None
+        if new_status == TaskStatus.IN_PROGRESS:
+            phase = CheckpointPhase.PLAN_APPROVED
+        elif new_status == TaskStatus.REVIEW:
+            phase = CheckpointPhase.EXECUTION_COMPLETE
+        elif new_status == TaskStatus.COMPLETED:
+            phase = CheckpointPhase.CRITIQUE_PASSED
+            
+        if phase:
+            try:
+                CheckpointService.create_checkpoint(
+                    db=session,
+                    task_id=self.id,
+                    phase=phase,
+                    actor_id=actor_id
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).error(f"Failed to create checkpoint for task {self.id}: {e}")
     
     def _emit_status_event(self, old_status: TaskStatus, new_status: TaskStatus, actor_id: str, note: str = None):
         """Emit event for event sourcing."""

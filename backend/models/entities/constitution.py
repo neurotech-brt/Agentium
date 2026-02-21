@@ -437,7 +437,7 @@ def log_constitution_creation(mapper, connection, target):
         action="constitution_created",
         target_type="constitution",
         target_id=target.agentium_id,
-        action_description=f"Constitution v{target.version} (revision {target.version_number}) created",  # FIXED
+        description=f"Constitution v{target.version} (revision {target.version_number}) created",  # FIXED
         after_state={
             'version': target.version,
             'version_number': target.version_number,

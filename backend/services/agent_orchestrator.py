@@ -832,7 +832,7 @@ class AgentOrchestrator:
             actor_type="agent",
             actor_id=actor,
             action=action,
-            action_description=desc,
+            description=desc,
             agentium_id=f"L{datetime.utcnow().strftime('%H%M%S')}",
             target_type="agent",
             target_id=target or "",

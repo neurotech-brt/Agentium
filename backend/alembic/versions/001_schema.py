@@ -549,22 +549,32 @@ def upgrade():
             sa.Column('category', sa.String(30), nullable=False),
             sa.Column('actor_type', sa.String(20), nullable=False),
             sa.Column('actor_id', sa.String(50), nullable=False),
-            sa.Column('action', sa.String(50), nullable=False),
-            sa.Column('target_type', sa.String(30), nullable=True),
-            sa.Column('target_id', sa.String(50), nullable=True),
-            sa.Column('description', sa.Text(), nullable=False),
+            sa.Column('action', sa.String(100), nullable=False),
+            sa.Column('description', sa.Text(), nullable=True),
+            sa.Column('target_type', sa.String(50), nullable=True),
+            sa.Column('target_id', sa.String(36), nullable=True),
+            sa.Column('session_id', sa.String(100), nullable=True),
+            sa.Column('ip_address', sa.String(45), nullable=True),
             sa.Column('before_state', sa.Text(), nullable=True),
             sa.Column('after_state', sa.Text(), nullable=True),
             sa.Column('metadata_json', sa.Text(), nullable=True),
-            sa.Column('ip_address', sa.String(45), nullable=True),
-            sa.Column('session_id', sa.String(36), nullable=True),
+            sa.Column('success', sa.String(1), server_default='Y', nullable=False),
+            sa.Column('result_message', sa.Text(), nullable=True),
+            sa.Column('error_code', sa.String(50), nullable=True),
+            sa.Column('error_details', sa.Text(), nullable=True),
+            sa.Column('parent_audit_id', sa.String(36), sa.ForeignKey('audit_logs.id'), nullable=True),
+            sa.Column('correlation_id', sa.String(36), nullable=True),
+            sa.Column('duration_ms', sa.Integer(), nullable=True),
+            sa.Column('memory_delta_mb', sa.Integer(), nullable=True),
             sa.Column('is_active', sa.Boolean(), server_default='true'),
             sa.Column('created_at', sa.DateTime(), server_default=sa.func.now()),
+            sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now()),
             sa.Column('deleted_at', sa.DateTime(), nullable=True),
         )
-        op.create_index('idx_audit_actor', 'audit_logs', ['actor_type', 'actor_id'])
-        op.create_index('idx_audit_target', 'audit_logs', ['target_type', 'target_id'])
-        op.create_index('idx_audit_created', 'audit_logs', ['created_at'])
+        op.create_index('idx_audit_timestamp', 'audit_logs', ['created_at'])
+        op.create_index('idx_audit_actor_action', 'audit_logs', ['actor_id', 'action'])
+        op.create_index('idx_audit_level_category', 'audit_logs', ['level', 'category'])
+        op.create_index('idx_audit_correlation', 'audit_logs', ['correlation_id'])
     
     # =========================================================================
     # 15. CHANNELS

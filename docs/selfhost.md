@@ -2,117 +2,187 @@
 
 > Quick setup guide for running Agentium in different environments.
 
-Agentium runs using Docker and includes:
+---
 
-Core Services (7 containers) - Postgres - ChromaDB - Redis - Backend
-(FastAPI) - Celery Worker - Celery Beat - Frontend
+## 📦 What's Included
 
-CI/CD Services (4 containers) - GitHub Runner - BuildKit - Registry
-Cache - Deployment Controller
+Agentium runs fully on Docker and ships with **11 containers** out of the box:
+
+**Core Services (7 containers)**
+
+| Container         | Role                       |
+| ----------------- | -------------------------- |
+| Postgres          | Primary database           |
+| ChromaDB          | Vector store               |
+| Redis             | Cache & message broker     |
+| Backend (FastAPI) | REST API                   |
+| Celery Worker     | Background task processing |
+| Celery Beat       | Scheduled tasks            |
+| Frontend          | Web UI                     |
+
+**CI/CD Services (4 containers)**
+
+| Container             | Role              |
+| --------------------- | ----------------- |
+| GitHub Runner         | Runs CI pipelines |
+| BuildKit              | Image builder     |
+| Registry Cache        | Local image cache |
+| Deployment Controller | Manages deploys   |
 
 ---
 
-# 🚀 Choose Your Deployment Type
+## 🚀 Choose Your Deployment Type
 
-Use Case Recommended Setup
-
----
-
-Local development Docker Compose
-Small production (1 server) Single VM + Docker Compose
-Scalable production Kubernetes / Swarm
-Automated deployment Enable CI/CD stack
+| Use Case                    | Recommended Setup          |
+| --------------------------- | -------------------------- |
+| Local development           | Docker Compose             |
+| Small production (1 server) | Single VM + Docker Compose |
+| Scalable production         | Kubernetes / Docker Swarm  |
+| Automated deployment        | Enable CI/CD stack         |
 
 ---
 
-# 1️⃣ Local Development
+## 1️⃣ Local Development
 
-Requirements: - Docker 20+ - Docker Compose v2+ - 8GB RAM minimum
+**Requirements**
 
-Setup:
+- Docker 20+
+- Docker Compose v2+
+- 8 GB RAM minimum
 
-git clone https://github.com/AshminDhungana/Agentium.git cd Agentium cp
-.env.example .env docker compose up -d
+**Setup**
 
-Access: - Frontend → http://localhost:3000 - Backend →
-http://localhost:8000 - API Docs → http://localhost:8000/docs
+```bash
+git clone https://github.com/AshminDhungana/Agentium.git
+cd Agentium
+docker compose up -d
+```
 
-Stop: docker compose down
+**Access your services**
 
----
+| Service  | URL                        |
+| -------- | -------------------------- |
+| Frontend | http://localhost:3000      |
+| Backend  | http://localhost:8000      |
+| API Docs | http://localhost:8000/docs |
 
-# 2️⃣ Single Server (Production VM)
+**Stop**
 
-Recommended: - 4 vCPU - 16GB RAM - 80GB SSD
-
-Setup:
-
-curl -fsSL https://get.docker.com \| sh git clone
-https://github.com/AshminDhungana/Agentium.git cd Agentium cp
-.env.example .env \# Configure strong secrets inside .env docker compose
--f docker-compose.prod.yml up -d
-
-Recommended additions: - Nginx reverse proxy - HTTPS via Let's Encrypt -
-Daily Postgres backups - Firewall enabled
-
----
-
-# 3️⃣ Scalable Deployment (Microservices)
-
-Recommended platforms: - Kubernetes - Docker Swarm
-
-Scaling Rules:
-
-Service Scalable
+```bash
+docker compose down
+```
 
 ---
 
-Backend Yes
-Celery Worker Yes
-Frontend Yes
-Postgres Single (or managed DB)
-Redis Single / Sentinel
-ChromaDB Single (stateful)
-Celery Beat Single
+## 2️⃣ Single Server (Production VM)
 
-Deploy using provided /k8s manifests or Helm charts.
+**Recommended specs**
+
+- 4 vCPU
+- 16 GB RAM
+- 80 GB SSD
+
+**Setup**
+
+```bash
+curl -fsSL https://get.docker.com | sh
+git clone https://github.com/AshminDhungana/Agentium.git
+cd Agentium
+.env        # ⚠️ Change and Configure strong secrets before continuing
+docker compose -f docker-compose.prod.yml up -d
+```
+
+**Recommended additions**
+
+- Nginx reverse proxy
+- HTTPS via Let's Encrypt
+- Daily Postgres backups
+- Firewall enabled
 
 ---
 
-# 4️⃣ CI/CD Deployment
+## 3️⃣ Scalable Deployment (Microservices)
 
-CI/CD handles: - Build - Test - Push images (GHCR) - Deploy
+**Recommended platforms:** Kubernetes · Docker Swarm
 
-Run CI/CD stack:
+**Scaling rules**
 
+| Service       | Scalable?                       |
+| ------------- | ------------------------------- |
+| Backend       | ✅ Yes                          |
+| Celery Worker | ✅ Yes                          |
+| Frontend      | ✅ Yes                          |
+| Postgres      | ⚠️ Single (or use a managed DB) |
+| Redis         | ⚠️ Single / Sentinel            |
+| ChromaDB      | ⚠️ Single (stateful)            |
+| Celery Beat   | ⚠️ Single                       |
+
+**Deploy**
+
+```bash
+# Kubernetes
+kubectl apply -f k8s/
+```
+
+Helm charts and `/k8s` manifests are provided in the repository.
+
+---
+
+## 4️⃣ CI/CD Deployment
+
+The CI/CD stack handles the full pipeline automatically:
+
+```
+Git Push → Build → Test → Push to GHCR → Deploy
+```
+
+**Images built and published to GHCR**
+
+| Image                    | Built From                        |
+| ------------------------ | --------------------------------- |
+| `agentium/backend`       | `./backend/Dockerfile.privileged` |
+| `agentium/frontend`      | `./frontend/Dockerfile`           |
+| `agentium/celery-worker` | `./backend/Dockerfile.privileged` |
+| `agentium/celery-beat`   | `./backend/Dockerfile.privileged` |
+
+All 4 images are built for both `linux/amd64` and `linux/arm64` using native runners and merged into a single multi-platform manifest.
+
+**Start the CI/CD stack**
+
+```bash
+docker compose -f docker-compose.cicd.yml up -d
+```
+
+---
+
+## 🔐 Production Best Practices
+
+| #   | Practice                                   |
+| --- | ------------------------------------------ |
+| 1   | Never commit `.env` to version control     |
+| 2   | Use strong, randomly generated secrets     |
+| 3   | Always enable HTTPS                        |
+| 4   | Set up daily Postgres backups              |
+| 5   | Avoid using the `latest` tag in production |
+
+---
+
+## 📌 Quick Command Reference
+
+```bash
+# Local development
+docker compose up -d
+
+# Production VM
+docker compose -f docker-compose.prod.yml up -d
+
+# CI/CD stack
 docker compose -f docker-compose.cicd.yml up -d
 
-Deployment flow:
-
-Git Push → Build → Test → Push → Deploy
-
----
-
-# 🔐 Production Best Practices
-
-- Never commit .env
-- Use strong secrets
-- Enable HTTPS
-- Backup Postgres daily
-- Avoid using latest tag in production
+# Kubernetes
+kubectl apply -f k8s/
+```
 
 ---
 
-# 📌 Summary Commands
-
-Local: docker compose up -d
-
-Production VM: docker compose -f docker-compose.prod.yml up -d
-
-CI/CD: docker compose -f docker-compose.cicd.yml up -d
-
-Kubernetes: kubectl apply -f k8s/
-
----
-
-Apache 2.0 License
+_Licensed under the [Apache 2.0 License](https://www.apache.org/licenses/LICENSE-2.0)_

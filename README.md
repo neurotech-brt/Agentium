@@ -207,7 +207,7 @@ docker compose up -d
 docker compose logs -f agentium-backend
 
 # Access the dashboard
-open http://localhost:3000
+open: http://localhost:3000
 ```
 
 **First Login**: You'll be guided through the Genesis Protocol where you name your AI Nation.

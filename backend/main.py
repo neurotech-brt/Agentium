@@ -183,7 +183,7 @@ async def lifespan(app: FastAPI):
         try:
             persistent_agents = persistent_council.get_persistent_agents(db)
             agent_list = list(persistent_agents.values())
-            init_token_optimizer(agent_list)
+            init_token_optimizer(db, agent_list)
             
             logger.info("✅ Token Optimizer initialized")
             logger.info(f"   - Idle Budget: ${idle_budget.daily_idle_budget_usd:.2f}/day")

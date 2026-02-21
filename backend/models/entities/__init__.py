@@ -106,6 +106,10 @@ from backend.models.entities.critics import (
 
 from backend.models.entities.system_settings import SystemSetting
 
+from backend.models.entities.checkpoint import (
+    ExecutionCheckpoint,
+    CheckpointPhase
+)
 
 # All models for Alembic/database creation
 __all__ = [
@@ -190,4 +194,8 @@ __all__ = [
 
     # System Settings
     'SystemSetting',
+    
+    # Checkpointing (Time-Travel)
+    'ExecutionCheckpoint',
+    'CheckpointPhase',
 ]

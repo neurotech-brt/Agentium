@@ -586,7 +586,61 @@ def upgrade():
         )
     
     # =========================================================================
-    # 16. SYSTEM SETTINGS
+    # 16. EXTERNAL CHANNELS & MESSAGES
+    # =========================================================================
+    if 'external_channels' not in existing_tables:
+        op.create_table(
+            'external_channels',
+            sa.Column('id', sa.String(36), primary_key=True),
+            sa.Column('agentium_id', sa.String(20), unique=True, nullable=False),
+            sa.Column('name', sa.String(100), nullable=False),
+            sa.Column('channel_type', sa.String(20), nullable=False),
+            sa.Column('status', sa.String(20), server_default='pending'),
+            sa.Column('config', sa.JSON(), server_default='{}'),
+            sa.Column('default_agent_id', sa.String(36), sa.ForeignKey('agents.id'), nullable=True),
+            sa.Column('auto_create_tasks', sa.Boolean(), server_default='true'),
+            sa.Column('require_approval', sa.Boolean(), server_default='false'),
+            sa.Column('webhook_path', sa.String(100), unique=True, nullable=True),
+            sa.Column('messages_received', sa.Integer(), server_default='0'),
+            sa.Column('messages_sent', sa.Integer(), server_default='0'),
+            sa.Column('last_message_at', sa.DateTime(), nullable=True),
+            sa.Column('last_tested_at', sa.DateTime(), nullable=True),
+            sa.Column('error_message', sa.Text(), nullable=True),
+            sa.Column('is_active', sa.Boolean(), server_default='true'),
+            sa.Column('created_at', sa.DateTime(), server_default=sa.func.now()),
+            sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now()),
+            sa.Column('deleted_at', sa.DateTime(), nullable=True),
+        )
+    
+    if 'external_messages' not in existing_tables:
+        op.create_table(
+            'external_messages',
+            sa.Column('id', sa.String(36), primary_key=True),
+            sa.Column('agentium_id', sa.String(20), unique=True, nullable=False),
+            sa.Column('channel_id', sa.String(36), sa.ForeignKey('external_channels.id'), nullable=False),
+            sa.Column('sender_id', sa.String(200), nullable=False),
+            sa.Column('sender_name', sa.String(100), nullable=True),
+            sa.Column('sender_metadata', sa.JSON(), server_default='{}'),
+            sa.Column('message_type', sa.String(20), server_default='text'),
+            sa.Column('content', sa.Text(), nullable=False),
+            sa.Column('media_url', sa.String(500), nullable=True),
+            sa.Column('raw_payload', sa.JSON(), nullable=True),
+            sa.Column('status', sa.String(20), server_default='received'),
+            sa.Column('assigned_agent_id', sa.String(36), sa.ForeignKey('agents.id'), nullable=True),
+            sa.Column('task_id', sa.String(36), sa.ForeignKey('tasks.id'), nullable=True),
+            sa.Column('response_content', sa.Text(), nullable=True),
+            sa.Column('responded_at', sa.DateTime(), nullable=True),
+            sa.Column('responded_by_agent_id', sa.String(36), sa.ForeignKey('agents.id'), nullable=True),
+            sa.Column('error_count', sa.Integer(), server_default='0'),
+            sa.Column('last_error', sa.Text(), nullable=True),
+            sa.Column('is_active', sa.Boolean(), server_default='true'),
+            sa.Column('created_at', sa.DateTime(), server_default=sa.func.now()),
+            sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now()),
+            sa.Column('deleted_at', sa.DateTime(), nullable=True),
+        )
+
+    # =========================================================================
+    # 17. SYSTEM SETTINGS
     # =========================================================================
     if 'system_settings' not in existing_tables:
         op.create_table(
@@ -994,6 +1048,30 @@ def upgrade():
         op.create_index('idx_sched_exec_task', 'scheduled_task_executions', ['scheduled_task_id'])
         op.create_index('idx_sched_exec_time', 'scheduled_task_executions', ['started_at'])
     
+    # =========================================================================
+    # 23. EXECUTION CHECKPOINTS (Phase 6.5)
+    # =========================================================================
+    if 'execution_checkpoints' not in existing_tables:
+        op.create_table(
+            'execution_checkpoints',
+            sa.Column('id', sa.String(36), primary_key=True),
+            sa.Column('agentium_id', sa.String(20), unique=True, nullable=False),
+            sa.Column('session_id', sa.String(100), nullable=False),
+            sa.Column('task_id', sa.String(36), sa.ForeignKey('tasks.id'), nullable=False),
+            sa.Column('phase', sa.String(50), nullable=False),
+            sa.Column('agent_states', sa.JSON(), server_default='{}'),
+            sa.Column('artifacts', sa.JSON(), server_default='[]'),
+            sa.Column('task_state_snapshot', sa.JSON(), server_default='{}'),
+            sa.Column('parent_checkpoint_id', sa.String(36), sa.ForeignKey('execution_checkpoints.id'), nullable=True),
+            sa.Column('branch_name', sa.String(100), nullable=True),
+            sa.Column('is_active', sa.Boolean(), server_default='true'),
+            sa.Column('created_at', sa.DateTime(), server_default=sa.func.now()),
+            sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now()),
+            sa.Column('deleted_at', sa.DateTime(), nullable=True),
+        )
+        op.create_index('idx_exec_ckpt_session', 'execution_checkpoints', ['session_id'])
+        op.create_index('idx_exec_ckpt_task', 'execution_checkpoints', ['task_id'])
+    
     print("✅ Complete schema migration finished successfully")
 
 
@@ -1004,11 +1082,12 @@ def downgrade():
     """
     # Tables are dropped in reverse order to handle FK constraints
     tables_to_drop = [
-        'scheduled_task_executions', 'scheduled_tasks',
+        'execution_checkpoints', 'scheduled_task_executions', 'scheduled_tasks',
         'tool_marketplace_listings', 'tool_usage_logs', 'tool_versions', 'tool_staging',
         'critique_reviews', 'monitoring_alerts', 'performance_metrics', 
         'task_verifications', 'violation_reports', 'agent_health_reports',
         'chat_messages', 'conversations', 'model_usage_logs',
+        'external_messages', 'external_channels',  # Added missing tables
         'channels', 'audit_logs', 'individual_votes', 'voting_records',
         'amendment_votings', 'task_audit_logs', 'task_events', 'task_deliberations',
         'subtasks', 'tasks', 'constitutions',

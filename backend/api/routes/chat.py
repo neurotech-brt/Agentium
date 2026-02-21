@@ -360,10 +360,10 @@ async def get_chat_history(
             {
                 "id": log.id,
                 "role": "head_of_council",
-                "content": log.after_state.get("response") if log.after_state else "",
+                "content": json.loads(log.after_state).get("response") if log.after_state else "",
                 "timestamp": log.created_at.isoformat(),
                 "metadata": {
-                    "prompt": log.before_state.get("prompt") if log.before_state else ""
+                    "prompt": json.loads(log.before_state).get("prompt") if log.before_state else ""
                 }
             }
             for log in reversed(logs)

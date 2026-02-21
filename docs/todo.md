@@ -726,7 +726,7 @@ class AgentMessage:
 - [x] No cross-contamination between execution branches
 
 
-### 6.5 Checkpointing & Time-Travel Recovery 🆕 (PENDING)
+### 6.5 Checkpointing & Time-Travel Recovery 🆕 (COMPLETE)
 
 **New File:** `backend/services/checkpoint_service.py`
 
@@ -734,10 +734,10 @@ class AgentMessage:
 
 **Implementation:**
 
-- [ ] Serialize complete system state after each phase
-- [ ] Store in PostgreSQL with versioning
-- [ ] Allow "time travel" to any checkpoint
-- [ ] Support branching (try different approaches from same checkpoint)
+- [x] Serialize complete system state after each phase
+- [x] Store in PostgreSQL with versioning
+- [x] Allow "time travel" to any checkpoint
+- [x] Support branching (try different approaches from same checkpoint)
 
 **Database Model:**
 
@@ -753,11 +753,11 @@ class ExecutionCheckpoint(BaseEntity):
 
 **Acceptance Criteria:**
 
-- [ ] Checkpoints created automatically at phase boundaries
-- [ ] Users can resume sessions after days/weeks
-- [ ] Retry from any checkpoint with different parameters
-- [ ] Complete audit trail of checkpoint transitions
-- [ ] Checkpoint cleanup (auto-delete after 90 days)
+- [x] Checkpoints created automatically at phase boundaries
+- [x] Users can resume sessions after days/weeks
+- [x] Retry from any checkpoint with different parameters
+- [x] Complete audit trail of checkpoint transitions
+- [x] Checkpoint cleanup (auto-delete after 90 days)
 
 ### 6.6 Remote Code Execution (Brains vs Hands) 🆕 (PENDING - CRITICAL)
 

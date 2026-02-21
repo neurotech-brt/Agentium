@@ -54,7 +54,7 @@ class AuditLog(BaseEntity):
     
     # Action details
     action = Column(String(100), nullable=False)  # e.g., "task_assigned", "constitution_amended"
-    action_description = Column(Text, nullable=True)  # Human-readable description
+    description = Column(Text, nullable=True)  # Human-readable description
     
     # Target (what was acted upon)
     target_type = Column(String(50), nullable=True)  # task, agent, constitution, etc.
@@ -63,13 +63,11 @@ class AuditLog(BaseEntity):
     # Context
     session_id = Column(String(100), nullable=True, index=True)  # WebSocket/HTTP session
     ip_address = Column(String(45), nullable=True)  # IPv4 or IPv6
-    user_agent = Column(String(200), nullable=True)
     
     # Detailed data
-    before_state = Column(JSON, nullable=True)  # State before action
-    after_state = Column(JSON, nullable=True)   # State after action
-    meta_data = Column(JSON, nullable=True)      # ✅ FIXED: Changed from 'metadata' to 'meta_data'
-    request_payload = Column(Text, nullable=True)  # Raw request data
+    before_state = Column(Text, nullable=True)  # State before action
+    after_state = Column(Text, nullable=True)   # State after action
+    metadata_json = Column(Text, nullable=True)      # ✅ FIXED: Changed from 'metadata' to 'metadata_json'
     
     # Result
     success = Column(String(1), default='Y', nullable=False)  # Y/N
@@ -121,13 +119,13 @@ class AuditLog(BaseEntity):
             actor_type=actor_type,
             actor_id=actor_id,
             action=action,
-            action_description=description,
+            description=description,
             target_type=target_type,
             target_id=target_id,
             success='Y' if success else 'N',
-            before_state=before_state,
-            after_state=after_state,
-            meta_data=meta_data,  # ✅ FIXED: Changed parameter name
+            before_state=json.dumps(before_state) if before_state else None,
+            after_state=json.dumps(after_state) if after_state else None,
+            metadata_json=json.dumps(meta_data) if meta_data else None,
             **kwargs
         )
         return entry
@@ -172,7 +170,7 @@ class AuditLog(BaseEntity):
                 'id': self.actor_id
             },
             'action': self.action,
-            'description': self.action_description,
+            'description': self.description,
             'target': {
                 'type': self.target_type,
                 'id': self.target_id
@@ -184,7 +182,7 @@ class AuditLog(BaseEntity):
             },
             'timestamp': self.created_at.isoformat(),
             'duration_ms': self.duration_ms,
-            'metadata': self.meta_data  # ✅ FIXED: Using meta_data attribute
+            'metadata': json.loads(self.metadata_json) if self.metadata_json else None
         })
         return base
 

@@ -23,6 +23,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Shield, Loader2 } from 'lucide-react';
 import { useState } from 'react';
 import { MonitoringPage } from '@/pages/MonitoringPage';
+import { VotingPage } from '@/pages/VotingPage';
 
 // Full-screen spinner shown while checkAuth() is in-flight on page load
 function AppLoader() {
@@ -215,6 +216,7 @@ export default function App() {
             <Route path="agents" element={<AgentsPage />} />
             <Route path="tasks" element={<TasksPage />} />
             <Route path="monitoring" element={<MonitoringPage />} />
+            <Route path="voting" element={<VotingPage />} />
             <Route path="constitution" element={<ConstitutionPage />} />
             <Route path="models" element={<ModelsPage />} />
             <Route path="channels" element={<ChannelsPage />} />

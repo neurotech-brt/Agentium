@@ -14,6 +14,7 @@ import {
     Cpu,
     Radio,
     Shield,
+    Gavel,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -68,6 +69,7 @@ export function MainLayout() {
         { path: '/agents', label: 'Agents', icon: Users },
         { path: '/tasks', label: 'Tasks', icon: ClipboardList },
         { path: '/monitoring', label: 'Monitoring', icon: Activity },
+        { path: '/voting', label: 'Voting', icon: Gavel },
         { path: '/constitution', label: 'Constitution', icon: BookOpen },
         { path: '/models', label: 'Models', icon: Cpu },
         { path: '/channels', label: 'Channels', icon: Radio },

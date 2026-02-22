@@ -35,7 +35,7 @@ class RemoteExecutionRecord(BaseEntity):
     # Execution identification
     execution_id = Column(String(50), unique=True, nullable=False, index=True)
     agent_id = Column(String(5), ForeignKey("agents.agentium_id"), nullable=False)
-    task_id = Column(String(50), ForeignKey("tasks.task_id"), nullable=True)
+    task_id = Column(String(36), ForeignKey("tasks.id"), nullable=True)
 
     # Execution content
     code = Column(Text, nullable=False)  # Python code to execute

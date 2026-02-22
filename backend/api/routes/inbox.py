@@ -13,6 +13,12 @@ from backend.services.channel_manager import ChannelManager
 
 router = APIRouter(prefix="/inbox", tags=["Unified Inbox"])
 
+def _user_id(current_user) -> str:
+    """Extract user id whether current_user is an ORM object or a dict."""
+    if isinstance(current_user, dict):
+        return str(current_user.get("user_id") or current_user.get("id", ""))
+    return str(current_user.id)
+
 class ReplyRequest(BaseModel):
     content: str
     message_type: str = "text"
@@ -27,7 +33,7 @@ async def list_unified_conversations(
 ):
     """List conversations for the unified inbox viewing."""
     query = db.query(Conversation).filter(
-        Conversation.user_id == str(current_user.id),
+        Conversation.user_id == _user_id(current_user),
         Conversation.is_deleted == 'N'
     )
     
@@ -53,7 +59,7 @@ async def get_unified_conversation(
     """Get a specific conversation to view in the inbox."""
     conversation = db.query(Conversation).filter(
         Conversation.id == conversation_id,
-        Conversation.user_id == str(current_user.id),
+        Conversation.user_id == _user_id(current_user),
         Conversation.is_deleted == 'N'
     ).first()
     
@@ -72,7 +78,7 @@ async def reply_to_conversation(
     """Send a reply to an external channel from the unified inbox."""
     conversation = db.query(Conversation).filter(
         Conversation.id == conversation_id,
-        Conversation.user_id == str(current_user.id),
+        Conversation.user_id == _user_id(current_user),
         Conversation.is_deleted == 'N'
     ).first()
     
@@ -103,7 +109,7 @@ async def reply_to_conversation(
     success = await ChannelManager.send_response(
         message_id=orig_msg.id,
         response_content=request.content,
-        agent_id=str(current_user.id),
+        agent_id=_user_id(current_user),
         rich_media=None, # Expand later if attachments are supported from frontend
         db=db
     )

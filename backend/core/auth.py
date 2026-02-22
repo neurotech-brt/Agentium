@@ -63,13 +63,15 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
         )
     
     # Normalize the payload to ensure consistent field names
-    # Map "sub" to "username" for easier access
     normalized_payload = {
         "user_id": payload.get("user_id"),
         "username": payload.get("sub"),  # "sub" is the standard JWT subject claim
         "is_admin": payload.get("is_admin", False),
         "is_active": payload.get("is_active", True),
         "role": payload.get("role", "user"),
+        # Agent-specific fields for MCP tool governance and tier enforcement
+        "tier": payload.get("tier", "3xxxx"),
+        "agentium_id": payload.get("agentium_id", payload.get("sub")),
     }
     
     return normalized_payload
@@ -82,6 +84,26 @@ async def get_current_active_user(current_user: Dict[str, Any] = Depends(get_cur
             detail="Inactive user"
         )
     return current_user
+
+async def get_current_agent_tier(
+    current_user: Dict[str, Any] = Depends(get_current_active_user),
+) -> str:
+    """
+    Extract agent tier from JWT claims.
+    Tier format: '0xxxx' = Head of Council, '1xxxx' = Council, '3xxxx' = Task agent (default).
+    Used by tools.py for MCP governance and execution_guard.py for permission checks.
+    """
+    return current_user.get("tier", "3xxxx")
+
+async def get_current_agent_id(
+    current_user: Dict[str, Any] = Depends(get_current_active_user),
+) -> str:
+    """
+    Extract agent ID from JWT claims.
+    Falls back to username (JWT 'sub') if agentium_id is not present.
+    Used by tools.py to forward agent identity to MCPGovernanceService for audit logging.
+    """
+    return current_user.get("agentium_id", current_user.get("username", "unknown"))
 
 def verify_slack_signature(request_body: bytes, signature: str, timestamp: str, signing_secret: str) -> bool:
     """

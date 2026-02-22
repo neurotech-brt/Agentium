@@ -190,3 +190,9 @@ export interface MonitoringDashboard {
     recent_violations: ViolationReport[];
     latest_health_reports: AgentHealthReport[];
 }
+
+export type CheckpointPhase = 
+  | 'plan_approved' 
+  | 'execution_complete' 
+  | 'critique_passed' 
+  | 'manual';

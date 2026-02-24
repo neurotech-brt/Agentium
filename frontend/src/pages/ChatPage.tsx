@@ -42,6 +42,7 @@ import toast from 'react-hot-toast';
 import { fileApi, UploadedFile as ApiUploadedFile } from '@/services/fileApi';
 import { voiceApi } from '@/services/voiceApi';
 import { chatApi } from '@/services/chatApi';
+import { localVoice } from '@/services/localVoice';
 
 interface UploadedFile {
     id: string;
@@ -87,6 +88,8 @@ export function ChatPage() {
     const [imagePreview, setImagePreview] = useState<{ url: string; name: string } | null>(null);
     const [voiceAvailable, setVoiceAvailable] = useState<boolean | null>(null);
     const [showVoiceTooltip, setShowVoiceTooltip] = useState(false);
+    const [isLocalMode, setIsLocalMode] = useState(false);
+    const [interimTranscript, setInterimTranscript] = useState('');
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -190,6 +193,7 @@ export function ChatPage() {
     const checkVoiceAvailability = async () => {
         const status = await voiceApi.checkStatus();
         setVoiceAvailable(status.available);
+        setIsLocalMode(status.provider === 'local');
     };
 
     const loadChatHistory = async () => {
@@ -322,21 +326,76 @@ export function ChatPage() {
     };
 
     const handleVoiceButtonClick = async () => {
-        if (isRecording) { stopRecording(); return; }
+        if (isRecording) {
+            stopRecording();
+            return;
+        }
+        
         const isAvailable = await voiceApi.checkAvailability();
         if (!isAvailable) return;
-        startRecording();
+        
+        const status = await voiceApi.checkStatus();
+        setIsLocalMode(status.provider === 'local');
+        
+        if (status.provider === 'local') {
+            startLocalRecording();
+        } else {
+            startOpenAIRecording();
+        }
     };
 
-    const startRecording = async () => {
+    const startLocalRecording = async () => {
+        try {
+            setIsRecording(true);
+            setRecordingTime(0);
+            setInterimTranscript('');
+            
+            // Start timer for UI
+            recordingIntervalRef.current = setInterval(() => {
+                setRecordingTime(prev => prev + 1);
+            }, 1000);
+            
+            // Start local speech recognition
+            await localVoice.transcribe(
+                (result) => {
+                    if (result.isFinal) {
+                        setInput(prev => {
+                            const separator = prev && !prev.endsWith(' ') ? ' ' : '';
+                            return prev + separator + result.text;
+                        });
+                        setInterimTranscript('');
+                    } else {
+                        setInterimTranscript(result.text);
+                    }
+                },
+                (error) => {
+                    toast.error(`Voice error: ${error}`);
+                    stopRecording();
+                }
+            );
+            
+            toast.success('Listening... Speak now');
+        } catch (error: any) {
+            toast.error(`Failed to start: ${error.message}`);
+            setIsRecording(false);
+        }
+    };
+
+    const startOpenAIRecording = async () => {
         try {
             const { recorder, stream } = await voiceApi.startRecording();
             const chunks: BlobPart[] = [];
-            recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+            
+            recorder.ondataavailable = (e) => {
+                if (e.data.size > 0) chunks.push(e.data);
+            };
+            
             recorder.onstop = async () => {
                 const audioBlob = new Blob(chunks, { type: recorder.mimeType });
                 stream.getTracks().forEach(track => track.stop());
-                toast.loading('Transcribing voice...', { id: 'transcribing' });
+                
+                toast.loading('Transcribing...', { id: 'transcribing' });
+                
                 try {
                     const result = await voiceApi.transcribe(audioBlob);
                     setInput(prev => {
@@ -345,35 +404,64 @@ export function ChatPage() {
                     });
                     toast.success('Voice transcribed', { id: 'transcribing' });
                 } catch (error: any) {
-                    if (!error.message?.includes('OpenAI provider'))
-                        toast.error(`Transcription failed: ${error.message}`, { id: 'transcribing' });
+                    // If OpenAI fails, try local fallback
+                    toast.error('Cloud transcription failed, trying local...', { id: 'transcribing' });
+                    setIsLocalMode(true);
+                    await startLocalRecording();
+                    return;
                 }
+                
                 setIsRecording(false);
                 setRecordingTime(0);
             };
+            
             recorder.onerror = () => {
                 toast.error('Recording error');
                 setIsRecording(false);
                 stream.getTracks().forEach(track => track.stop());
             };
+            
             recorder.start();
             setMediaRecorder(recorder);
             setAudioStream(stream);
             setIsRecording(true);
             setRecordingTime(0);
-            recordingIntervalRef.current = setInterval(() => setRecordingTime(prev => prev + 1), 1000);
+            
+            recordingIntervalRef.current = setInterval(() => {
+                setRecordingTime(prev => prev + 1);
+            }, 1000);
+            
             toast.success('Recording started');
         } catch (error: any) {
-            toast.error(`Microphone access denied: ${error.message}`);
+            // If microphone fails, try local as fallback
+            toast.error('Recording failed, trying local voice...');
+            setIsLocalMode(true);
+            await startLocalRecording();
         }
     };
 
-    const stopRecording = () => {
-        if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
-        if (audioStream) audioStream.getTracks().forEach(track => track.stop());
-        if (recordingIntervalRef.current) clearInterval(recordingIntervalRef.current);
+    const stopRecording = async () => {
+        if (isLocalMode) {
+            // Stop local recognition
+            await localVoice.stopTranscribe();
+            localVoice.abortTranscribe();
+        } else if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+            // Stop OpenAI recording
+            mediaRecorder.stop();
+        }
+        
+        if (audioStream) {
+            audioStream.getTracks().forEach(track => track.stop());
+        }
+        
+        if (recordingIntervalRef.current) {
+            clearInterval(recordingIntervalRef.current);
+        }
+        
         setMediaRecorder(null);
         setAudioStream(null);
+        setIsRecording(false);
+        setInterimTranscript('');
     };
 
     const copyMessage = (content: string) => {
@@ -779,13 +867,23 @@ export function ChatPage() {
                                         <div className="flex items-center gap-3">
                                             <div className="flex items-center gap-2">
                                                 <div className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-                                                <span className="text-sm font-medium text-red-900 dark:text-red-400">Recording</span>
+                                                <span className="text-sm font-medium text-red-900 dark:text-red-400">
+                                                    {isLocalMode ? 'Listening (Local)' : 'Recording'}
+                                                </span>
                                             </div>
                                             <span className="text-sm font-mono font-semibold text-red-900 dark:text-red-400">
                                                 {formatRecordingTime(recordingTime)}
                                             </span>
+                                            {interimTranscript && (
+                                                <span className="text-sm text-gray-500 dark:text-gray-400 italic truncate max-w-xs">
+                                                    "{interimTranscript}"
+                                                </span>
+                                            )}
                                         </div>
-                                        <button onClick={stopRecording} className="px-4 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors">
+                                        <button 
+                                            onClick={stopRecording} 
+                                            className="px-4 py-1.5 bg-red-600 hover:bg-red-700 text-white text-sm font-medium rounded-lg transition-colors"
+                                        >
                                             Stop
                                         </button>
                                     </div>
@@ -832,6 +930,8 @@ export function ChatPage() {
                                                     ? 'bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-500/30'
                                                     : voiceAvailable === false
                                                     ? 'text-orange-500 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-500/10'
+                                                    : isLocalMode
+                                                    ? 'text-green-500 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-500/10'
                                                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-[#1e2535]'
                                             }`}>
                                             {isRecording ? <MicOff className="w-5 h-5" /> : voiceAvailable === false ? <AlertCircle className="w-5 h-5" /> : <Mic className="w-5 h-5" />}

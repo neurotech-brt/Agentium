@@ -113,6 +113,40 @@ def get_whisper_client(api_key: str):
         return None
 
 
+
+
+@router.get("/enhanced-status")
+async def get_enhanced_voice_status(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user)
+):
+    """
+    Get detailed voice status including local fallback availability.
+    Frontend uses this to decide between OpenAI and local voice.
+    """
+    user_id = str(current_user.id)
+    
+    # Check OpenAI availability
+    openai_status = check_voice_available(db, user_id)
+    
+    # Always return local as fallback option
+    return {
+        "openai": {
+            "available": openai_status["available"],
+            "message": openai_status["message"],
+            "action_required": openai_status.get("action_required")
+        },
+        "local": {
+            "available": True,  # Browser API is always "available" as a concept
+            "message": "Browser-native Web Speech API (fallback)",
+            "supports_recognition": True,
+            "supports_synthesis": True
+        },
+        "recommended": "openai" if openai_status["available"] else "local",
+        "current": "openai" if openai_status["available"] else "local"
+    }
+
+    
 @router.get("/status")
 async def get_voice_status(
     db: Session = Depends(get_db),

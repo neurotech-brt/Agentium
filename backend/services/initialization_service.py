@@ -3,43 +3,57 @@ Initialization Service for Agentium.
 Genesis protocol - bootstraps the governance system from scratch.
 """
 
-import os
-import json  
-from typing import Optional, Dict, Any, List
+import asyncio
+import json
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy.orm import Session
 
-from backend.models.database import get_db
-from backend.models.entities.agents import Agent, HeadOfCouncil, CouncilMember, AgentType, AgentStatus
-from backend.models.entities.critics import CriticAgent, CriticType
-from backend.models.entities.constitution import Constitution, Ethos
-from backend.models.entities.user import User
-from backend.models.entities.voting import VotingSession, IndividualVote
-from backend.models.entities.audit import AuditLog, AuditCategory, AuditLevel
-from backend.models.entities.user_config import UserConfig  
 from backend.core.vector_store import get_vector_store
+from backend.models.database import get_db
+from backend.models.entities.agents import (
+    AgentStatus,
+    CouncilMember,
+    HeadOfCouncil,
+)
+from backend.models.entities.constitution import Constitution, Ethos
+from backend.models.entities.critics import CriticAgent, CriticType
+from backend.models.entities.user import User
+from backend.models.entities.user_config import UserConfig
+from backend.models.entities.voting import IndividualVote
 from backend.services.knowledge_service import get_knowledge_service
+
+
+class InitializationError(Exception):
+    """Raised when genesis protocol fails."""
+    pass
+
+
+class CountryNameTimeoutError(Exception):
+    """Raised when country name selection times out."""
+    pass
 
 
 class InitializationService:
     """
     Bootstraps Agentium from zero state.
+    
     Implements the Genesis Protocol:
     1. Create Head 00001
-    2. Create Council Members (configurable count)
-    3. Vote on country name (first democratic process)
+    2. Create Council Members (2 Council + 1 Head = 3 votes for anti-tyranny quorum)
+    3. Vote on country name (first democratic process) - with user input timeout
     4. Load and customize constitution
     5. Index to Vector DB
     6. Grant Council admin rights
+    7. Seed persistent critic agents
     """
     
     DEFAULT_COUNCIL_SIZE = 2  
-    MIN_COUNCIL_VOTES_FOR_INIT = 2
-    GENESIS_LOG_PATH = "docs_ministry/genesis_log.md"
-    CONSTITUTION_TEMPLATE_PATH = "docs_ministry/templates/constitution_template.md"
+    COUNTRY_NAME_TIMEOUT_SECONDS = 60  # Time to wait for user input
 
     # Phase 6.2: Critic agents — persistent, outside democratic chain
-    CRITIC_SEED = [
+    CRITIC_SEED: List[Dict[str, Any]] = [
         {
             "agentium_id": "40001",
             "critic_specialty": CriticType.CODE,
@@ -47,7 +61,8 @@ class InitializationService:
             "name": "Code Critic Prime",
             "description": (
                 "Validates code syntax, security, and logic. "
-                "Operates outside the democratic chain with absolute veto authority."
+                "Operates outside the democratic chain with absolute "
+                "veto authority."
             ),
             "specialization": "Code Security & Correctness",
         },
@@ -58,7 +73,8 @@ class InitializationService:
             "name": "Output Critic Prime",
             "description": (
                 "Validates agent outputs against user intent. "
-                "Operates outside the democratic chain with absolute veto authority."
+                "Operates outside the democratic chain with absolute "
+                "veto authority."
             ),
             "specialization": "Output Quality & Relevance",
         },
@@ -69,17 +85,20 @@ class InitializationService:
             "name": "Plan Critic Prime",
             "description": (
                 "Validates execution DAG soundness and plan feasibility. "
-                "Operates outside the democratic chain with absolute veto authority."
+                "Operates outside the democratic chain with absolute "
+                "veto authority."
             ),
             "specialization": "Execution Planning & DAG Validation",
         },
     ]
     
-    def __init__(self, db: Session = None):
+    def __init__(self, db: Optional[Session] = None) -> None:
         self.db = db
         self.vector_store = get_vector_store()
         self.knowledge_service = get_knowledge_service()
-        self.genesis_log = []
+        self.genesis_log: List[str] = []
+        self._pending_country_name: Optional[str] = None
+        self._country_name_event: Optional[asyncio.Event] = None
     
     def is_system_initialized(self) -> bool:
         """Check if Head 00001 exists (system already bootstrapped)."""
@@ -89,9 +108,138 @@ class InitializationService:
         ).first()
         return head_exists is not None
     
-    async def run_genesis_protocol(self, force: bool = False) -> Dict[str, Any]:
+    def set_country_name(self, name: str) -> None:
+        """
+        Receive country name from user via external call (API/WebSocket).
+        Called by frontend when user submits name.
+        """
+        if self._country_name_event and not self._country_name_event.is_set():
+            self._pending_country_name = name.strip() if name else None
+            self._country_name_event.set()
+    
+    async def _broadcast_to_user(self, message: str, is_urgent: bool = False) -> None:
+        """
+        Broadcast message to user via all available channels.
+        
+        Uses:
+        1. WebSocket ConnectionManager (real-time dashboard)
+        2. ChannelManager (external channels: Slack, WhatsApp, etc.)
+        """
+        # Find sovereign user
+        sovereign_user = self.db.query(User).filter_by(
+            is_admin=True, 
+            is_active=True
+        ).first()
+        
+        if not sovereign_user:
+            self._log("WARNING", "No sovereign user found for broadcast")
+            return
+        
+        # 1. Broadcast via WebSocket (real-time dashboard)
+        try:
+            # Import here to avoid circular imports
+            from backend.api.routes.websocket import manager as ws_manager
+            
+            await ws_manager.broadcast({
+                "type": "genesis_prompt",
+                "role": "head_of_council",
+                "content": message,
+                "is_urgent": is_urgent,
+                "timestamp": datetime.utcnow().isoformat(),
+                "metadata": {
+                    "requires_response": True,
+                    "timeout_seconds": self.COUNTRY_NAME_TIMEOUT_SECONDS,
+                    "prompt_type": "country_name"
+                }
+            })
+            self._log("INFO", "Broadcast via WebSocket sent")
+        except Exception as e:
+            self._log("WARNING", f"WebSocket broadcast failed: {e}")
+        
+        # 2. Broadcast via external channels (Slack, WhatsApp, etc.)
+        try:
+            from backend.services.channel_manager import ChannelManager
+            
+            # Fire and forget - don't block genesis on external channels
+            asyncio.create_task(
+                ChannelManager.broadcast_to_channels(
+                    user_id=sovereign_user.id,
+                    content=message,
+                    db=self.db,
+                    is_silent=False
+                )
+            )
+            self._log("INFO", "Broadcast via external channels initiated")
+        except Exception as e:
+            self._log("WARNING", f"External channel broadcast failed: {e}")
+    
+    async def _prompt_for_country_name(self, timeout: int = 60) -> Optional[str]:
+        """
+        Prompt user for country name via broadcast and wait for response.
+        
+        Returns:
+            User-provided name or None if timeout
+        """
+        self._country_name_event = asyncio.Event()
+        self._pending_country_name = None
+        
+        # Broadcast prompt to all channels
+        prompt_message = (
+            "🏛️ **Welcome to Agentium**\n\n"
+            "I am the Head of Council. Before we establish your AI Nation, "
+            "what shall we name this sovereign domain?\n\n"
+            f"*You have {timeout} seconds to respond. If no name is provided, "
+            "I shall designate it 'The Agentium Sovereignty'.*\n\n"
+            "**To respond:** Reply with `name: YourChosenName`"
+        )
+        
+        await self._broadcast_to_user(prompt_message, is_urgent=True)
+        
+        try:
+            await asyncio.wait_for(
+                self._country_name_event.wait(),
+                timeout=timeout
+            )
+            return self._pending_country_name
+        except asyncio.TimeoutError:
+            return None
+        finally:
+            self._country_name_event = None
+            self._pending_country_name = None
+    
+    async def _notify_country_name_decision(
+        self, 
+        name: str, 
+        user_provided: bool
+    ) -> None:
+        """Notify user of the final country name decision."""
+        if user_provided:
+            message = (
+                f"🏛️ **Nation Established: {name}**\n\n"
+                f"The Council has ratified your chosen name. "
+                f"Welcome to the sovereign domain of {name}!"
+            )
+        else:
+            message = (
+                f"🏛️ **Nation Established: {name}**\n\n"
+                f"No name was provided within the allotted time. "
+                f"I have designated this domain as '{name}' by default. "
+                f"You may propose a constitutional amendment to rename it later."
+            )
+        
+        await self._broadcast_to_user(message, is_urgent=False)
+    
+    async def run_genesis_protocol(
+        self, 
+        force: bool = False,
+        country_name: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Main entry point: Run the complete genesis protocol.
+        
+        Args:
+            force: Force re-initialization even if already initialized
+            country_name: Optional pre-provided name (skips prompt)
         """
         if self.is_system_initialized() and not force:
             return {
@@ -116,18 +264,40 @@ class InitializationService:
             results["steps_completed"].append("created_head_00001")
             self._log("INFO", f"Head 00001 created: {head.id}")
             
-            # Step 2: Create Council Members (only 2 for idle governance)
+            # Step 2: Create Council Members (2 Council + 1 Head = 3 votes for anti-tyranny)
             council = await self._create_council_members()
             results["steps_completed"].append(f"created_council_members:{len(council)}")
             self._log("INFO", f"Created {len(council)} Council Members")
             
-            # Step 3: Democratic vote on country name
-            country_name = await self._vote_on_country_name(council)
-            results["country_name"] = country_name
+            # Step 3: Democratic vote on country name (with user input timeout)
+            if country_name:
+                # Pre-provided name (e.g., from API call)
+                selected_name = country_name.strip()
+                user_provided = True
+                self._log("INFO", f"Using provided country name: {selected_name}")
+            else:
+                # Prompt user with timeout
+                user_name = await self._prompt_for_country_name(
+                    timeout=self.COUNTRY_NAME_TIMEOUT_SECONDS
+                )
+                if user_name:
+                    selected_name = user_name
+                    user_provided = True
+                else:
+                    selected_name = "The Agentium Sovereignty"
+                    user_provided = False
+                    self._log("INFO", "Country name prompt timed out, using default")
+            
+            # Record the vote and notify
+            await self._vote_on_country_name(council, selected_name)
+            await self._notify_country_name_decision(selected_name, user_provided)
+            
+            results["country_name"] = selected_name
+            results["user_provided"] = user_provided
             results["steps_completed"].append("country_name_voted")
             
             # Step 4: Load and customize constitution
-            constitution = await self._load_constitution(country_name, head, council)
+            constitution = await self._load_constitution(selected_name, head, council)
             results["constitution_version"] = constitution.version
             results["steps_completed"].append("constitution_loaded")
             
@@ -143,11 +313,10 @@ class InitializationService:
             critics = await self._create_critic_agents(constitution)
             results["steps_completed"].append(f"created_critic_agents:{len(critics)}")
             self._log("INFO", f"Created {len(critics)} Critic Agents (40001, 50001, 60001)")
-            
-            self._save_genesis_log(results)
+
             
             self.db.commit()
-            results["message"] = f"Agentium initialized: {country_name}"
+            results["message"] = f"Agentium initialized: {selected_name}"
             return results
             
         except Exception as e:
@@ -220,36 +389,50 @@ class InitializationService:
         self.db.flush()
         return council
     
-    async def _vote_on_country_name(self, council: List[CouncilMember]) -> str:
-        """Democratic vote on country name."""
-        selected_name = "The Agentium Sovereignty"
-        
+    async def _vote_on_country_name(
+        self, 
+        council: List[CouncilMember], 
+        country_name: str
+    ) -> None:
+        """Record democratic vote on country name."""
         for member in council:
             vote = IndividualVote(
                 voter_agentium_id=member.agentium_id,
                 vote="for",
                 voted_at=datetime.utcnow(),
-                rationale="Genesis vote",
+                rationale=f"Genesis vote for '{country_name}'",
                 agentium_id=f"V{member.agentium_id}_GENESIS"
             )
             self.db.add(vote)
         
-        # Check if UserConfig exists, if not skip this part
+        # Also record Head's vote
+        head_vote = IndividualVote(
+            voter_agentium_id="00001",
+            vote="for",
+            voted_at=datetime.utcnow(),
+            rationale=f"Head ratifies '{country_name}'",
+            agentium_id="V00001_GENESIS"
+        )
+        self.db.add(head_vote)
+        
+        # Store in UserConfig for persistence
         try:
             config = UserConfig(
                 user_id="SYSTEM",
                 config_name="country_name",
-                config_value=selected_name,
+                config_value=country_name,
                 is_active="Y"
             )
             self.db.add(config)
-        except:
-            pass  # UserConfig might not exist
-        
-        return selected_name
+        except Exception:
+            pass  # UserConfig table might not exist in early migrations
     
-    async def _load_constitution(self, country_name: str, head: HeadOfCouncil, 
-                                council: List[CouncilMember]) -> Constitution:
+    async def _load_constitution(
+        self, 
+        country_name: str, 
+        head: HeadOfCouncil, 
+        council: List[CouncilMember]
+    ) -> Constitution:
         """Load constitution template."""
         template = self._get_constitution_template()
         preamble = template["preamble"].replace("{{COUNTRY_NAME}}", country_name)
@@ -282,8 +465,11 @@ class InitializationService:
         
         return constitution
     
-    async def _index_to_vector_db(self, constitution: Constitution, 
-                                  council: List[CouncilMember]):
+    async def _index_to_vector_db(
+        self, 
+        constitution: Constitution, 
+        council: List[CouncilMember]
+    ) -> None:
         """Index to Vector DB."""
         try:
             self.vector_store.initialize()
@@ -299,7 +485,7 @@ class InitializationService:
         except Exception as e:
             self._log("WARNING", f"Vector DB indexing skipped: {e}")
     
-    async def _grant_council_privileges(self, council: List[CouncilMember]):
+    async def _grant_council_privileges(self, council: List[CouncilMember]) -> None:
         """Grant Council admin rights."""
         for member in council:
             if member.ethos:
@@ -400,7 +586,10 @@ class InitializationService:
         return ethos
     
 
-    async def _create_critic_agents(self, constitution: Constitution) -> List[CriticAgent]:
+    async def _create_critic_agents(
+        self, 
+        constitution: Constitution
+    ) -> List[CriticAgent]:
         """
         Seed the three persistent critic agents: 40001, 50001, 60001.
 
@@ -594,7 +783,7 @@ class InitializationService:
             ]
         }
     
-    async def _clear_existing_data(self):
+    async def _clear_existing_data(self) -> None:
         """Clear existing data."""
         try:
             self.db.execute("TRUNCATE TABLE agents CASCADE")
@@ -603,18 +792,12 @@ class InitializationService:
         except Exception as e:
             self._log("ERROR", f"Clear failed: {e}")
     
-    def _log(self, level: str, message: str):
+    def _log(self, level: str, message: str) -> None:
         """Log to genesis log."""
         entry = f"[{datetime.utcnow().isoformat()}] [{level}] {message}"
         self.genesis_log.append(entry)
         print(entry)
     
-    def _save_genesis_log(self, results: Dict[str, Any]):
-        """Save genesis log."""
-        os.makedirs("docs_ministry", exist_ok=True)
-        # Simplified log saving...
-
-    # ✅ STATIC METHOD for creating default constitution
     @staticmethod
     def create_default_constitution(db: Session) -> Constitution:
         """Create a default constitution for fresh installs (static method)."""
@@ -665,19 +848,25 @@ class InitializationService:
         return constitution
 
 
-class InitializationError(Exception):
-    """Raised when genesis protocol fails."""
-    pass
-
-
 # Convenience function
-async def initialize_agentium(db: Session = None, force: bool = False) -> Dict[str, Any]:
-    """Public API to run genesis protocol."""
+async def initialize_agentium(
+    db: Optional[Session] = None, 
+    force: bool = False,
+    country_name: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Public API to run genesis protocol.
+    
+    Args:
+        db: Database session
+        force: Force re-initialization
+        country_name: Optional pre-provided country name (skips user prompt)
+    """
     if db is None:
         from backend.models.database import get_db
         with next(get_db()) as session:
             service = InitializationService(session)
-            return await service.run_genesis_protocol(force)
+            return await service.run_genesis_protocol(force, country_name)
     else:
         service = InitializationService(db)
-        return await service.run_genesis_protocol(force)
+        return await service.run_genesis_protocol(force, country_name)

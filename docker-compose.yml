@@ -10,7 +10,7 @@ services:
       POSTGRES_USER: agentium
       POSTGRES_PASSWORD: agentium
     volumes:
-      - postgres_data:/var/lib/postgresql/data 
+      - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
@@ -37,11 +37,19 @@ services:
       - "8001:8000"
     networks:
       - agentium-network
+    # FIX: previous healthcheck used "chroma help" which only checks that the
+    # CLI binary exists, not that the HTTP API is actually accepting connections.
+    # Replaced with a direct HTTP heartbeat probe against the live API endpoint.
     healthcheck:
-      test: ["CMD", "chroma", "help"]
+      test:
+        [
+          "CMD-SHELL",
+          "curl -sf http://localhost:8000/api/v1/heartbeat || exit 1",
+        ]
       interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 20s
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # Redis (Celery Task Queue)
@@ -77,9 +85,9 @@ services:
       - AUTH_DIR=/app/auth_info
       - LOG_LEVEL=${LOG_LEVEL:-info}
     ports:
-      - "3001:3001"          # expose for debugging; remove in production
+      - "3001:3001"
     volumes:
-      - whatsapp_auth:/app/auth_info   # persists QR auth — survives restarts
+      - whatsapp_auth:/app/auth_info
     restart: unless-stopped
     networks:
       - agentium-network
@@ -118,6 +126,8 @@ services:
     environment:
       - DATABASE_URL=postgresql://agentium:agentium@postgres:5432/agentium
       - PYTHONPATH=/app
+      # FIX: CHROMA_HOST now correctly points to the ChromaDB service name so
+      # the backend HttpClient connects to the container instead of localhost.
       - CHROMA_HOST=chromadb
       - CHROMA_PORT=8000
       - REDIS_URL=redis://redis:6379/0
@@ -130,7 +140,6 @@ services:
       - HOST_DOCKER_SOCKET=/var/run/docker.sock
       - HOST_FS_MOUNT=/host
       - HOST_HOME_MOUNT=/host_home
-      # WhatsApp bridge — used as the default bridge_url when creating channels
       - WHATSAPP_BRIDGE_URL=ws://whatsapp-bridge:3001
       - WHATSAPP_BRIDGE_TOKEN=${WHATSAPP_BRIDGE_TOKEN:-changeme}
     restart: unless-stopped
@@ -147,7 +156,13 @@ services:
     networks:
       - agentium-network
     healthcheck:
-      test: ["CMD", "python", "-c", "import http.client; conn = http.client.HTTPConnection('localhost', 8000); conn.request('GET', '/api/health'); exit(0 if conn.getresponse().status == 200 else 1)"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import http.client; conn = http.client.HTTPConnection('localhost', 8000); conn.request('GET', '/api/health'); exit(0 if conn.getresponse().status == 200 else 1)",
+        ]
       interval: 30s
       timeout: 10s
       start_period: 60s
@@ -157,7 +172,7 @@ services:
   # Celery Worker - PRIVILEGED
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   celery-worker:
-    build:  
+    build:
       context: ./backend
       dockerfile: Dockerfile.privileged
     container_name: agentium-celery
@@ -208,7 +223,7 @@ services:
   # Celery Beat - PRIVILEGED
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   celery-beat:
-    build:  
+    build:
       context: ./backend
       dockerfile: Dockerfile.privileged
     container_name: agentium-celery-beat
@@ -278,7 +293,7 @@ volumes:
     driver: local
   redis_data:
     driver: local
-  whatsapp_auth:         
+  whatsapp_auth:
     driver: local
 
 networks:

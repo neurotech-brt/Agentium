@@ -15,6 +15,9 @@ export interface WebSocketMessage {
         task_id?: string;
         tokens_used?: number;
         connection_id?: number;
+        // Genesis prompt flag - just a hint for UI styling
+        requires_response?: boolean;
+        prompt_type?: string;
     };
     timestamp?: string;
     agent_id?: string;
@@ -41,9 +44,9 @@ const WS_CONFIG = {
     MAX_RECONNECT_ATTEMPTS: 5,
     BASE_RECONNECT_DELAY_MS: 1000,
     MAX_RECONNECT_DELAY_MS: 30000,
-    PING_INTERVAL_MS: 30000,      // Send ping every 30s
-    PONG_TIMEOUT_MS: 10000,       // Expect pong within 10s
-    CONNECTION_TIMEOUT_MS: 10000, // Connection must establish within 10s
+    PING_INTERVAL_MS: 30000,
+    PONG_TIMEOUT_MS: 10000,
+    CONNECTION_TIMEOUT_MS: 10000,
 } as const;
 
 export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): UseWebSocketChatReturn {
@@ -63,14 +66,12 @@ export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): Us
     const connectionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const reconnectAttemptsRef = useRef(0);
     const isManualDisconnect = useRef(false);
-    const lastPingTimeRef = useRef<number | null>(null); // MOVED INSIDE COMPONENT
+    const lastPingTimeRef = useRef<number | null>(null);
 
-    // Get auth state from store
     const user = useAuthStore(state => state.user);
     const isAuthenticated = user?.isAuthenticated ?? false;
     const logout = useAuthStore(state => state.logout);
 
-    // Cleanup all timers
     const clearAllTimers = useCallback(() => {
         if (reconnectTimeoutRef.current) {
             clearTimeout(reconnectTimeoutRef.current);
@@ -90,7 +91,6 @@ export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): Us
         }
     }, []);
 
-    // Stop heartbeat (ping/pong)
     const stopHeartbeat = useCallback(() => {
         if (pingIntervalRef.current) {
             clearInterval(pingIntervalRef.current);
@@ -102,7 +102,6 @@ export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): Us
         }
     }, []);
 
-    // Start heartbeat to keep connection alive
     const startHeartbeat = useCallback(() => {
         stopHeartbeat();
 
@@ -113,17 +112,14 @@ export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): Us
                 setConnectionStats(prev => ({ ...prev, lastPingTime: pingTime }));
                 ws.current.send(JSON.stringify({ type: 'ping', timestamp: pingTime }));
 
-                // Set timeout for pong response
                 pongTimeoutRef.current = setTimeout(() => {
                     console.warn('[WebSocket] Pong timeout - connection may be dead');
-                    // Force reconnect on pong timeout
                     ws.current?.close();
                 }, WS_CONFIG.PONG_TIMEOUT_MS);
             }
         }, WS_CONFIG.PING_INTERVAL_MS);
     }, [stopHeartbeat]);
 
-    // Handle pong response
     const handlePong = useCallback((_timestamp: string) => {
         if (pongTimeoutRef.current) {
             clearTimeout(pongTimeoutRef.current);
@@ -133,13 +129,11 @@ export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): Us
         setConnectionStats(prev => ({ ...prev, latencyMs: latency }));
     }, []);
 
-    // Disconnect WebSocket
     const disconnect = useCallback((isManual: boolean = false) => {
         isManualDisconnect.current = isManual;
         clearAllTimers();
 
         if (ws.current) {
-            // Remove event handlers to prevent reconnect logic firing
             ws.current.onopen = null;
             ws.current.onclose = null;
             ws.current.onerror = null;
@@ -160,15 +154,12 @@ export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): Us
         }
     }, [clearAllTimers]);
 
-    // Connect WebSocket
     const connect = useCallback(() => {
-        // Validate authentication
         if (!isAuthenticated) {
             setError('Not authenticated');
             return;
         }
 
-        // Prevent multiple simultaneous connections
         if (ws.current?.readyState === WebSocket.CONNECTING) {
             console.log('[WebSocket] Already connecting...');
             return;
@@ -179,19 +170,16 @@ export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): Us
             return;
         }
 
-        // Get token
         const token = localStorage.getItem('access_token');
         if (!token) {
             setError('No access token - please login');
             return;
         }
 
-        // Set connecting state
         setIsConnecting(true);
         setError(null);
         isManualDisconnect.current = false;
 
-        // Build WebSocket URL - CONNECT DIRECTLY TO BACKEND (bypass Vite proxy)
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws/chat?token=${encodeURIComponent(token)}`;
 
@@ -200,7 +188,6 @@ export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): Us
         try {
             ws.current = new WebSocket(wsUrl);
 
-            // Connection timeout
             connectionTimeoutRef.current = setTimeout(() => {
                 if (ws.current?.readyState !== WebSocket.OPEN) {
                     console.error('[WebSocket] Connection timeout');
@@ -210,7 +197,7 @@ export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): Us
             }, WS_CONFIG.CONNECTION_TIMEOUT_MS);
 
             ws.current.onopen = () => {
-                console.log('[WebSocket] ✅ Connected');
+                console.log('[WebSocket]  Connected');
                 clearAllTimers();
                 setIsConnected(true);
                 setIsConnecting(false);
@@ -223,11 +210,14 @@ export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): Us
                 try {
                     const data: WebSocketMessage = JSON.parse(event.data);
 
-                    // Handle pong
                     if (data.type === 'pong') {
                         handlePong(data.timestamp || '');
                         return;
                     }
+
+                    //  Genesis prompt appears as normal message from Head of Council
+                    // Just pass through - no special handling needed
+                    // UI can check metadata.requires_response to highlight it
 
                     onMessage(data);
                 } catch (e) {
@@ -247,32 +237,26 @@ export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): Us
                 setIsConnected(false);
                 setIsConnecting(false);
 
-                // Handle specific close codes
                 switch (event.code) {
-                    case 1000: // Normal closure
+                    case 1000:
                         if (!isManualDisconnect.current) {
                             setError('Connection closed');
                         }
                         break;
-
-                    case 4001: // Authentication failed
+                    case 4001:
                         setError('Authentication failed - please login again');
-                        logout(); // Trigger logout to clear invalid token
-                        return; // Don't reconnect
-
-                    case 1011: // Server error
+                        logout();
+                        return;
+                    case 1011:
                         setError('Server error - please try again later');
                         break;
-
-                    case 1006: // Abnormal closure (network issue)
+                    case 1006:
                         setError('Connection lost');
                         break;
-
                     default:
                         setError(`Connection closed (${event.code})`);
                 }
 
-                // Auto-reconnect with exponential backoff (unless manual disconnect)
                 if (!isManualDisconnect.current && event.code !== 4001) {
                     if (reconnectAttemptsRef.current < WS_CONFIG.MAX_RECONNECT_ATTEMPTS) {
                         reconnectAttemptsRef.current += 1;
@@ -303,7 +287,6 @@ export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): Us
         }
     }, [isAuthenticated, onMessage, clearAllTimers, startHeartbeat, handlePong, logout, stopHeartbeat]);
 
-    // Manual reconnect
     const reconnect = useCallback(() => {
         console.log('[WebSocket] Manual reconnect triggered');
         reconnectAttemptsRef.current = 0;
@@ -312,7 +295,6 @@ export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): Us
         setTimeout(connect, 100);
     }, [connect, disconnect]);
 
-    // Send chat message
     const sendMessage = useCallback((content: string): boolean => {
         if (ws.current?.readyState === WebSocket.OPEN) {
             try {
@@ -331,7 +313,6 @@ export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): Us
         return false;
     }, []);
 
-    // Send ping manually
     const sendPing = useCallback((): boolean => {
         if (ws.current?.readyState === WebSocket.OPEN) {
             try {
@@ -347,7 +328,6 @@ export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): Us
         return false;
     }, []);
 
-    // Auto-connect when authenticated
     useEffect(() => {
         if (isAuthenticated && !isConnected && !isConnecting && !ws.current) {
             connect();
@@ -356,19 +336,16 @@ export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): Us
         return () => {
             disconnect(true);
         };
-    }, [isAuthenticated]); // Only re-run when auth state changes
+    }, [isAuthenticated, connect, disconnect, isConnected, isConnecting]);
 
-    // Listen for token changes from other tabs
     useEffect(() => {
         const handleStorage = (e: StorageEvent) => {
             if (e.key === 'access_token') {
                 if (e.newValue) {
-                    // Token added/changed - reconnect with new token
                     console.log('[WebSocket] Token changed in another tab');
                     disconnect(true);
                     setTimeout(connect, 100);
                 } else {
-                    // Token removed - disconnect
                     console.log('[WebSocket] Logged out in another tab');
                     disconnect(true);
                     setError('Logged out in another tab');
@@ -380,7 +357,6 @@ export function useWebSocketChat(onMessage: (msg: WebSocketMessage) => void): Us
         return () => window.removeEventListener('storage', handleStorage);
     }, [connect, disconnect]);
 
-    // Cleanup on unmount
     useEffect(() => {
         return () => {
             disconnect(true);

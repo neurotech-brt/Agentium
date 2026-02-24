@@ -3,307 +3,448 @@ Vector Store configuration for Agentium.
 ChromaDB-backed RAG infrastructure for collective agent memory.
 """
 
+import json
+import logging
 import os
-from typing import Optional, List, Dict, Any, Generator
 from contextlib import contextmanager
+from typing import Any, Dict, Generator, List, Optional
+
 import chromadb
-from chromadb.config import Settings
-from chromadb.api.types import QueryResult, EmbeddingFunction
-import numpy as np
+from chromadb.api.types import EmbeddingFunction, QueryResult
 from sentence_transformers import SentenceTransformer
 
-# Configuration
-CHROMA_PERSIST_DIR = os.getenv("CHROMA_PERSIST_DIR", "./chroma_data")
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
-CHROMA_HOST = os.getenv("CHROMA_HOST", None)  # For server mode
-CHROMA_PORT = int(os.getenv("CHROMA_PORT", "8000"))
+logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Configuration — read from environment, no hardcoded fallbacks for server
+# ---------------------------------------------------------------------------
+CHROMA_PERSIST_DIR: str = os.getenv("CHROMA_PERSIST_DIR", "./chroma_data")
+EMBEDDING_MODEL: str = os.getenv(
+    "EMBEDDING_MODEL",
+    "sentence-transformers/all-MiniLM-L6-v2",
+)
+CHROMA_HOST: Optional[str] = os.getenv("CHROMA_HOST")  # None → local mode
+CHROMA_PORT: int = int(os.getenv("CHROMA_PORT", "8000"))
+
 
 class AgentiumEmbeddingFunction(EmbeddingFunction):
-    """Custom embedding function using sentence-transformers."""
-    
-    def __init__(self, model_name: str = None):
+    """
+    Custom embedding function using sentence-transformers.
+
+    Lazy-loads the model on first use to avoid initialization overhead
+    during module import.
+    """
+
+    def __init__(self, model_name: Optional[str] = None) -> None:
         self.model_name = model_name or EMBEDDING_MODEL
-        self._model = None
-    
+        self._model: Optional[SentenceTransformer] = None
+
     @property
-    def model(self):
-        """Lazy load model."""
+    def model(self) -> SentenceTransformer:
+        """Lazy-load the sentence-transformer model."""
         if self._model is None:
             self._model = SentenceTransformer(self.model_name)
         return self._model
-    
-    def __call__(self, texts: List[str]) -> List[List[float]]:
-        """Generate embeddings for texts."""
-        embeddings = self.model.encode(texts, convert_to_numpy=True)
+
+    def __call__(self, input: List[str]) -> List[List[float]]:  # noqa: A002
+        """Generate embeddings for a list of texts."""
+        embeddings = self.model.encode(input, convert_to_numpy=True)
         return embeddings.tolist()
+
 
 class VectorStore:
     """
     ChromaDB wrapper for Agentium.
-    Provides tiered collections for different knowledge types.
+
+    Provides tiered collections for different knowledge types with
+    persistent storage and semantic search capabilities.
+
+    When ``CHROMA_HOST`` is set the client connects to the ChromaDB HTTP
+    server (docker-compose service).  Otherwise it falls back to a local
+    ``PersistentClient`` for development / testing.
     """
-    
-    # Collection names match agent hierarchy
-    COLLECTIONS = {
-        "constitution": "supreme_law",           # Constitutional articles
-        "ethos": "agent_ethos",                  # Individual agent ethos
-        "council_memory": "council_knowledge",   # Council deliberations
-        "task_patterns": "execution_patterns",   # Successful execution patterns
-        "audit_semantic": "audit_history",       # Semantic search of audits
-        "sovereign_prefs": "sovereign_memory",   # User preferences/memories
+
+    # ------------------------------------------------------------------
+    # Collection registry
+    # Key  → ChromaDB collection name (no raw strings elsewhere in code)
+    # ------------------------------------------------------------------
+    COLLECTIONS: Dict[str, str] = {
+        "constitution": "supreme_law",
+        "ethos": "agent_ethos",
+        "council_memory": "council_knowledge",
+        # FIX: canonical key used everywhere (was "task_patterns" in some
+        # places and "execution_patterns" in others — unified to one key)
+        "task_patterns": "execution_patterns",
+        "audit_semantic": "audit_history",
+        "sovereign_prefs": "sovereign_memory",
     }
-    
-    def __init__(self):
-        self._client: Optional[chromadb.Client] = None
+
+    def __init__(self) -> None:
+        self._client: Optional[chromadb.ClientAPI] = None
         self._embedding_fn = AgentiumEmbeddingFunction()
         self._collections: Dict[str, chromadb.Collection] = {}
-    
-    def initialize(self) -> chromadb.Client:
-        """Initialize ChromaDB client (persistent mode)."""
-        if self._client is None:
-            # Ensure directory exists
-            os.makedirs(CHROMA_PERSIST_DIR, exist_ok=True)
-            
-            settings = Settings(
-                chroma_db_impl="duckdb+parquet",
-                persist_directory=CHROMA_PERSIST_DIR,
-                anonymized_telemetry=False
+
+    # ------------------------------------------------------------------
+    # Initialisation
+    # ------------------------------------------------------------------
+
+    def initialize(self) -> chromadb.ClientAPI:
+        """
+        Initialize ChromaDB client.
+
+        Connects to the HTTP server when ``CHROMA_HOST`` is configured
+        (production / docker-compose), otherwise uses a local persistent
+        client (development).
+        """
+        if self._client is not None:
+            return self._client
+
+        if CHROMA_HOST:
+            # Production: connect to the dedicated ChromaDB container
+            logger.info(
+                "Connecting to ChromaDB HTTP server at %s:%d",
+                CHROMA_HOST,
+                CHROMA_PORT,
             )
-            
-            self._client = chromadb.Client(settings)
-            
-            # Pre-create or get collections
-            for key, name in self.COLLECTIONS.items():
-                try:
-                    self._collections[key] = self._client.get_or_create_collection(
+            self._client = chromadb.HttpClient(
+                host=CHROMA_HOST,
+                port=CHROMA_PORT,
+            )
+        else:
+            # Development / CI: local persistent storage
+            os.makedirs(CHROMA_PERSIST_DIR, exist_ok=True)
+            logger.info(
+                "Using local ChromaDB persistent client at %s",
+                CHROMA_PERSIST_DIR,
+            )
+            self._client = chromadb.PersistentClient(path=CHROMA_PERSIST_DIR)
+
+        # Pre-create / get all collections eagerly
+        for key, name in self.COLLECTIONS.items():
+            try:
+                self._collections[key] = (
+                    self._client.get_or_create_collection(
                         name=name,
-                        embedding_function=self._embedding_fn
+                        embedding_function=self._embedding_fn,
                     )
-                except Exception as e:
-                    print(f"Warning: Could not create collection {name}: {e}")
-        
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("Could not initialise collection '%s'", name)
+
         return self._client
-    
+
     @property
-    def client(self) -> chromadb.Client:
-        """Get or initialize client."""
+    def client(self) -> chromadb.ClientAPI:
+        """Return (or lazily initialise) the ChromaDB client."""
         if self._client is None:
             self.initialize()
         return self._client
-    
+
+    # ------------------------------------------------------------------
+    # Collection access
+    # ------------------------------------------------------------------
+
     def get_collection(self, collection_key: str) -> chromadb.Collection:
-        """Get a collection by key."""
+        """
+        Return a collection by its logical key.
+
+        Raises ``ValueError`` for unknown keys so callers get an explicit
+        error rather than a confusing ``KeyError``.
+        """
         if collection_key not in self.COLLECTIONS:
-            raise ValueError(f"Unknown collection: {collection_key}")
-        
+            raise ValueError(
+                f"Unknown collection key '{collection_key}'. "
+                f"Valid keys: {list(self.COLLECTIONS)}"
+            )
+
         if collection_key not in self._collections:
             name = self.COLLECTIONS[collection_key]
-            self._collections[collection_key] = self.client.get_or_create_collection(
-                name=name,
-                embedding_function=self._embedding_fn
+            self._collections[collection_key] = (
+                self.client.get_or_create_collection(
+                    name=name,
+                    embedding_function=self._embedding_fn,
+                )
             )
-        
+
         return self._collections[collection_key]
-    
-    def add_constitution_article(self, 
-                                  article_id: str, 
-                                  content: str, 
-                                  metadata: Dict[str, Any]):
-        """Store constitutional article for RAG retrieval."""
+
+    # ------------------------------------------------------------------
+    # Write helpers
+    # ------------------------------------------------------------------
+
+    def add_constitution_article(
+        self,
+        article_id: str,
+        content: str,
+        metadata: Dict[str, Any],
+    ) -> None:
+        """Store a constitutional article for RAG retrieval."""
         collection = self.get_collection("constitution")
-        collection.add(
+        collection.upsert(
             documents=[content],
-            metadatas=[{
-                **metadata,
-                "type": "constitution_article",
-                "article_id": article_id,
-                "document_type": "supreme_law",
-                "immutable": True
-            }],
-            ids=[f"const_{article_id}"]
+            metadatas=[
+                {
+                    **metadata,
+                    "type": "constitution_article",
+                    "article_id": article_id,
+                    "document_type": "supreme_law",
+                    "immutable": True,
+                }
+            ],
+            ids=[f"const_{article_id}"],
         )
-    
-    def add_ethos(self,
-                  agentium_id: str,
-                  ethos_content: str,
-                  agent_type: str,
-                  verified_by: str = None):
-        """Store agent ethos semantics."""
+
+    def add_ethos(
+        self,
+        agentium_id: str,
+        ethos_content: str,
+        agent_type: str,
+        verified_by: Optional[str] = None,
+    ) -> None:
+        """Store agent ethos for semantic retrieval."""
         collection = self.get_collection("ethos")
-        collection.add(
+        collection.upsert(
             documents=[ethos_content],
-            metadatas=[{
-                "agentium_id": agentium_id,
-                "agent_type": agent_type,
-                "verified_by": verified_by,
-                "type": "ethos",
-                "document_type": "behavioral_rules"
-            }],
-            ids=[f"ethos_{agentium_id}"]
+            metadatas=[
+                {
+                    "agentium_id": agentium_id,
+                    "agent_type": agent_type,
+                    "verified_by": verified_by or "",
+                    "type": "ethos",
+                    "document_type": "behavioral_rules",
+                }
+            ],
+            ids=[f"ethos_{agentium_id}"],
         )
-    
-    def add_execution_pattern(self,
-                             pattern_id: str,
-                             description: str,
-                             success_rate: float,
-                             task_type: str,
-                             tools_used: List[str] = None):
-        """Store successful execution patterns for future RAG."""
+
+    def add_execution_pattern(
+        self,
+        pattern_id: str,
+        description: str,
+        success_rate: float,
+        task_type: str,
+        tools_used: Optional[List[str]] = None,
+    ) -> None:
+        """Store a successful execution pattern for future RAG."""
+        # FIX: use canonical key "task_patterns" (collection name is still
+        # "execution_patterns" on the ChromaDB side — the key is internal)
         collection = self.get_collection("task_patterns")
-        collection.add(
+        collection.upsert(
             documents=[description],
-            metadatas=[{
-                "pattern_id": pattern_id,
-                "success_rate": success_rate,
-                "task_type": task_type,
-                "tools_used": json.dumps(tools_used or []),
-                "type": "execution_pattern",
-                "document_type": "learned_behavior"
-            }],
-            ids=[f"pattern_{pattern_id}"]
+            metadatas=[
+                {
+                    "pattern_id": pattern_id,
+                    "success_rate": success_rate,
+                    "task_type": task_type,
+                    "tools_used": json.dumps(tools_used or []),
+                    "type": "execution_pattern",
+                    "document_type": "learned_behavior",
+                }
+            ],
+            ids=[f"pattern_{pattern_id}"],
         )
-    
-    def query_knowledge(self,
-                       query: str,
-                       collection_keys: List[str] = None,
-                       n_results: int = 5,
-                       filter_dict: Dict[str, Any] = None) -> QueryResult:
+
+    # ------------------------------------------------------------------
+    # Query helpers
+    # ------------------------------------------------------------------
+
+    def query_knowledge(
+        self,
+        query: str,
+        collection_keys: Optional[List[str]] = None,
+        n_results: int = 5,
+        filter_dict: Optional[Dict[str, Any]] = None,
+    ) -> QueryResult:
         """
-        Query across knowledge collections.
-        If no collections specified, searches all.
+        Query across one or more knowledge collections.
+
+        Defaults to searching all collections when ``collection_keys`` is
+        not supplied.  Results are deduplicated by ID and sorted by
+        distance (ascending) before being truncated to ``n_results``.
         """
-        collection_keys = collection_keys or list(self.COLLECTIONS.keys())
-        
-        results = []
-        for key in collection_keys:
+        keys = collection_keys or list(self.COLLECTIONS.keys())
+
+        results: List[QueryResult] = []
+        for key in keys:
             try:
                 collection = self.get_collection(key)
                 result = collection.query(
                     query_texts=[query],
                     n_results=n_results,
-                    where=filter_dict
+                    where=filter_dict,
                 )
                 results.append(result)
-            except Exception as e:
-                # Log but don't fail if one collection is down
-                print(f"Query failed for {key}: {e}")
-        
-        # Merge results (simple concatenation for now, could be smarter)
+            except Exception:  # noqa: BLE001
+                logger.exception("Query failed for collection '%s'", key)
+
         return self._merge_results(results, n_results)
-    
-    def query_constitution(self, query: str, n_results: int = 3) -> QueryResult:
+
+    def query_constitution(
+        self,
+        query: str,
+        n_results: int = 3,
+    ) -> QueryResult:
         """Query specifically constitutional content."""
         collection = self.get_collection("constitution")
         return collection.query(
             query_texts=[query],
             n_results=n_results,
-            where={"document_type": "supreme_law"}
+            where={"document_type": "supreme_law"},
         )
-    
-    def query_hierarchical_context(self,
-                                   agent_type: str,
-                                   task_description: str,
-                                   n_results: int = 5) -> Dict[str, QueryResult]:
+
+    def query_hierarchical_context(
+        self,
+        agent_type: str,
+        task_description: str,
+        n_results: int = 5,
+    ) -> Dict[str, QueryResult]:
         """
-        Get hierarchical context: Constitution + relevant Ethos + patterns.
-        
-        Tier 0 (Head): Constitution only
-        Tier 1 (Council): Constitution + their specific ethos  
-        Tier 2 (Lead): Constitution + Council deliberations + their ethos
-        Tier 3 (Task): Task patterns + Lead coordination + basic constraints
+        Retrieve hierarchical RAG context based on agent tier.
+
+        Tier mapping
+        ------------
+        head_of_council : constitution only
+        council_member  : constitution + council deliberations
+        lead_agent      : constitution + task patterns
+        task_agent      : constitution + execution patterns (filtered)
         """
-        context = {}
-        
-        # All tiers get Constitution as grounding
-        context["constitution"] = self.query_constitution(task_description, n_results=2)
-        
-        if agent_type == "head_of_council":
-            # Head needs supreme law only
-            pass
-        elif agent_type == "council_member":
-            # Council needs deliberation history
-            context["council_memory"] = self.get_collection("council_memory").query(
-                query_texts=[task_description],
-                n_results=n_results
-            )
-        elif agent_type == "lead_agent":
-            # Leads need patterns
-            context["task_patterns"] = self.get_collection("task_patterns").query(
-                query_texts=[task_description],
-                n_results=n_results
-            )
-        elif agent_type == "task_agent":
-            # Task agents need execution patterns
-            context["task_patterns"] = self.get_collection("task_patterns").query(
+        context: Dict[str, QueryResult] = {}
+
+        # All tiers are grounded in the Constitution
+        context["constitution"] = self.query_constitution(
+            task_description, n_results=2
+        )
+
+        if agent_type == "council_member":
+            context["council_memory"] = self.get_collection(
+                "council_memory"
+            ).query(
                 query_texts=[task_description],
                 n_results=n_results,
-                where={"type": "execution_pattern"}
             )
-        
+        elif agent_type == "lead_agent":
+            context["task_patterns"] = self.get_collection(
+                "task_patterns"
+            ).query(
+                query_texts=[task_description],
+                n_results=n_results,
+            )
+        elif agent_type == "task_agent":
+            context["task_patterns"] = self.get_collection(
+                "task_patterns"
+            ).query(
+                query_texts=[task_description],
+                n_results=n_results,
+                where={"type": "execution_pattern"},
+            )
+
         return context
-    
-    def _merge_results(self, results: List[QueryResult], n_results: int) -> QueryResult:
-        """Merge multiple query results, deduplicate by ID."""
-        seen_ids = set()
-        merged = {
-            "documents": [[]],
-            "metadatas": [[]],
-            "distances": [[]],
-            "ids": [[]]
-        }
-        
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _merge_results(
+        self,
+        results: List[QueryResult],
+        n_results: int,
+    ) -> QueryResult:
+        """
+        Merge multiple query results.
+
+        Deduplicates by ID and sorts by distance (ascending) so the
+        highest-quality results survive truncation rather than the
+        results that happen to appear first.
+        """
+        seen_ids: set = set()
+        entries: List[Dict[str, Any]] = []
+
         for result in results:
-            if not result['ids']:
+            if not result.get("ids"):
                 continue
-            for i, doc_id in enumerate(result['ids'][0]):
-                if doc_id not in seen_ids:
-                    seen_ids.add(doc_id)
-                    merged["ids"][0].append(doc_id)
-                    merged["documents"][0].append(result["documents"][0][i] if result["documents"] else "")
-                    merged["metadatas"][0].append(result["metadatas"][0][i] if result["metadatas"] else {})
-                    merged["distances"][0].append(result["distances"][0][i] if result["distances"] else 0.0)
-                    
-                    if len(seen_ids) >= n_results:
-                        break
-        
+            for i, doc_id in enumerate(result["ids"][0]):
+                if doc_id in seen_ids:
+                    continue
+                seen_ids.add(doc_id)
+                entries.append(
+                    {
+                        "id": doc_id,
+                        "document": (
+                            result["documents"][0][i]
+                            if result.get("documents")
+                            else ""
+                        ),
+                        "metadata": (
+                            result["metadatas"][0][i]
+                            if result.get("metadatas")
+                            else {}
+                        ),
+                        "distance": (
+                            result["distances"][0][i]
+                            if result.get("distances")
+                            else 0.0
+                        ),
+                    }
+                )
+
+        # Sort ascending by distance so best results are kept after truncation
+        entries.sort(key=lambda e: e["distance"])
+        entries = entries[:n_results]
+
+        merged: QueryResult = {
+            "ids": [[e["id"] for e in entries]],
+            "documents": [[e["document"] for e in entries]],
+            "metadatas": [[e["metadata"] for e in entries]],
+            "distances": [[e["distance"] for e in entries]],
+        }
         return merged
-    
+
+    # ------------------------------------------------------------------
+    # Health
+    # ------------------------------------------------------------------
+
     def health_check(self) -> Dict[str, Any]:
-        """Check vector store health."""
+        """Return vector store health status."""
         try:
             heartbeat = self.client.heartbeat()
             return {
                 "status": "healthy",
+                "mode": "http" if CHROMA_HOST else "local",
+                "host": CHROMA_HOST,
                 "persist_directory": CHROMA_PERSIST_DIR,
                 "collections": list(self._collections.keys()),
-                "heartbeat": heartbeat
+                "heartbeat": heartbeat,
             }
-        except Exception as e:
+        except Exception as exc:  # noqa: BLE001
             return {
                 "status": "unhealthy",
-                "error": str(e),
-                "persist_directory": CHROMA_PERSIST_DIR
+                "error": str(exc),
+                "mode": "http" if CHROMA_HOST else "local",
+                "persist_directory": CHROMA_PERSIST_DIR,
             }
 
 
-# Global singleton instance
-vector_store = VectorStore()
+# ---------------------------------------------------------------------------
+# Module-level singleton — use get_vector_store() everywhere
+# ---------------------------------------------------------------------------
+_vector_store: Optional[VectorStore] = None
 
 
 def get_vector_store() -> VectorStore:
-    """Get initialized vector store instance."""
-    if vector_store._client is None:
-        vector_store.initialize()
-    return vector_store
+    """Return the initialised singleton VectorStore."""
+    global _vector_store  # noqa: PLW0603
+    if _vector_store is None:
+        _vector_store = VectorStore()
+        _vector_store.initialize()
+    return _vector_store
 
 
 @contextmanager
 def vector_db_session() -> Generator[VectorStore, None, None]:
-    """Context manager for vector DB operations."""
+    """Context manager for scoped vector DB operations."""
     store = get_vector_store()
     try:
         yield store
-    except Exception as e:
-        # Log error but don't close (persistent connection)
-        print(f"Vector DB session error: {e}")
+    except Exception:
+        logger.exception("Vector DB session error")
         raise

@@ -34,6 +34,7 @@ from backend.services.channel_manager import ChannelManager, WhatsAppAdapter, Sl
 # IDLE GOVERNANCE IMPORTS
 from backend.services.persistent_council import persistent_council
 from backend.services.idle_governance import idle_governance
+from backend.services.initialization_service import InitializationService
 from backend.services.token_optimizer import token_optimizer, idle_budget
 from backend.models.entities.task import TaskType, TaskPriority, TaskStatus
 from backend.models.entities.agents import AgentStatus
@@ -262,6 +263,26 @@ async def lifespan(app: FastAPI):
         logger.error(f"⚠️ MCP Tool Bridge initialization failed: {e}")
         logger.error("   System will continue — MCP tools can be synced manually via approve endpoint")
 
+    # ─────────────────────────────────────────────────────────────
+    # 9. Bootstrap Vector Knowledge Base (Phase 1)
+    # ─────────────────────────────────────────────────────────────
+    try:
+        db = next(get_db())
+        try:
+            from backend.services.knowledge_service import get_knowledge_service
+            result = get_knowledge_service().initialize_knowledge_base(db)
+            logger.info(
+                "✅ Knowledge base bootstrapped — constitution: %s, "
+                "ethos: %d/%d embedded",
+                result["constitution_embedded"],
+                result["ethos_embedded"],
+                result["ethos_total"],
+            )
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error("❌ Knowledge base bootstrap failed: %s", e)
+
     logger.info("🎉 Agentium startup complete!")
 
     yield  # ── Application runs here ──────────────────────────────
@@ -362,6 +383,17 @@ async def health_check_api():
         "timestamp": datetime.utcnow().isoformat()
     }
 
+
+
+@app.post("/api/v1/genesis/country-name")
+async def submit_country_name(
+    name: str,
+    db: Session = Depends(get_db)
+):
+    """Submit country name during genesis initialization."""
+    service = InitializationService(db)
+    service.set_country_name(name)
+    return {"status": "received", "name": name}
 
 # ── Agent Management ──────────────────────────────────────────────────────────
 

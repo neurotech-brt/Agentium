@@ -73,8 +73,8 @@ Agentium/
 │   │   │   ├── chat_message.py       # Chat messages
 │   │   │   ├── checkpoint.py         # Execution checkpoints
 │   │   │   ├── constitution.py       # Constitution rules
-│   │   │   ├── critics.py            # Critic agents   │   ├──
-│   │ mcp_tool.py           # MCP tools
+│   │   │   ├── critics.py            # Critic agents
+│   │   │   ├── mcp_tool.py            # MCP tools
 │   │   │   ├── model_provider.py     # LLM providers
 │   │   │   ├── monitoring.py         # Monitoring data
 │   │   │   ├── remote_execution.py   # Remote execution
@@ -171,6 +171,7 @@ Agentium/
 │   ├── Dockerfile.remote-executor   # Remote executor
 │   ├── main.py                      # FastAPI app entry
 │   └── requirements.txt            # Python dependencies
+│
 ├── frontend/                        # React TypeScript frontend
 │   ├── public/                     # Static assets
 │   ├── src/
@@ -260,6 +261,7 @@ Agentium/
 │   ├── tsconfig.json
 │   ├── tsconfig.node.json
 │   └── vite.config.ts
+│
 ├── docs/                            # Documentation
 │   ├── selfhost.md                  # Self-hosting guide
 │   ├── todo.md                      # TODO list
@@ -285,6 +287,7 @@ Agentium/
 ## Architecture Overview
 
 ### Backend (Python/FastAPI)
+
 - **api/**: REST API endpoints organized by feature
 - **core/**: Core application logic (auth, config, security)
 - **models/**: Database layer with SQLAlchemy entities
@@ -292,6 +295,7 @@ Agentium/
 - **tools/**: Built-in agent tools
 
 ### Frontend (React/TypeScript)
+
 - **components/**: Reusable UI components
 - **pages/**: Route-level page components
 - **services/**: API communication layer
@@ -299,5 +303,6 @@ Agentium/
 - **hooks/**: Custom React hooks
 
 ### Infrastructure
+
 - **bridges/**: External service integrations (WhatsApp)
 - **docker-compose.yml**: Container orchestration

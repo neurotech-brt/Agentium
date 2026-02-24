@@ -1893,11 +1893,11 @@ Remote Executor (NEW) 🆕 - Docker sandbox for code execution (Done)
 
 ## Version History
 
-**Current Version:** 0.2.0-alpha
+**Current Version:** 0.7.0-alpha
 
 **Changelog:**
 
-### v0.2.0-alpha (Current)
+### v0.7.0-alpha (Current)
 
 - ✅ Knowledge Infrastructure complete (Vector DB + RAG)
 - ✅ Initialization Protocol with democratic country naming

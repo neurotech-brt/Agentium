@@ -36,8 +36,10 @@ import {
     Hash,
     Calendar,
     Timer,
+    Milestone,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { CheckpointTimeline } from '../components/checkpoints/CheckpointTimeline';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1150,7 +1152,7 @@ const CriticsTab: React.FC = () => {
                             operate outside democratic chain · absolute veto authority
                         </span>
                     </h3>
-                    <button
+                    <button aria-label="Refresh stats"
                         onClick={() => loadStats(true)}
                         disabled={refreshing}
                         className="p-1.5 rounded-lg border border-gray-200 dark:border-[#1e2535] bg-white dark:bg-[#161b27] text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-50 dark:hover:bg-[#1e2535] transition-all duration-150 disabled:opacity-50"
@@ -1225,7 +1227,7 @@ const CriticsTab: React.FC = () => {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-type Tab = 'tasks' | 'critics';
+type Tab = 'tasks' | 'critics' | 'checkpoints';
 
 export const TasksPage: React.FC = () => {
     const [tasks, setTasks]               = useState<Task[]>([]);
@@ -1339,7 +1341,8 @@ export const TasksPage: React.FC = () => {
                 <div className="px-6 pt-4 border-b border-gray-100 dark:border-[#1e2535] flex items-center gap-1">
                     {([
                         { id: 'tasks',   label: 'Tasks',   icon: ListTodo    },
-                        { id: 'critics', label: 'Critics', icon: ShieldCheck },
+                        { id: 'critics',     label: 'Critics',     icon: ShieldCheck },
+                        { id: 'checkpoints', label: 'Checkpoints', icon: Milestone   },
                     ] as { id: Tab; label: string; icon: React.ElementType }[]).map(tab => {
                         const isActive = activeTab === tab.id;
                         return (
@@ -1443,6 +1446,13 @@ export const TasksPage: React.FC = () => {
                 {activeTab === 'critics' && (
                     <div className="p-6">
                         <CriticsTab />
+                    </div>
+                )}
+
+                {/* ── Checkpoints tab ────────────────────────────────────── */}
+                {activeTab === 'checkpoints' && (
+                    <div className="p-6">
+                        <CheckpointTimeline />
                     </div>
                 )}
             </div>

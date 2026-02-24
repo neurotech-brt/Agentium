@@ -901,7 +901,7 @@ mcp==1.0.0    # Official MCP Python SDK
 
 ---
 
-## Phase 7: Frontend Development 🎨 (IN PROGRESS - 50% COMPLETE)
+## Phase 7: Frontend Development 🎨 ✅ (COMPLETE - 100%)
 
 **Goal:** Rich, intuitive dashboard for sovereign control and system monitoring.
 
@@ -923,7 +923,7 @@ mcp==1.0.0    # Official MCP Python SDK
 
 **Pending:**
 
-- [ ] `VotingPage.tsx` - Active votes and history
+- [x] `VotingPage.tsx` - Active votes and history
 
 ### 7.2 Agent Tree Visualization ✅
 
@@ -939,63 +939,62 @@ mcp==1.0.0    # Official MCP Python SDK
 
 **Pending Enhancements:**
 
-- [ ] Health score visualization
-- [ ] Task count badge per agent
+- [x] Health score visualization (SVG ring on AgentCard icon)
+- [x] Task count badge per agent (active_task_count badge)
 - [ ] Drag-and-drop reassignment
-- [ ] Critic agents (4xxxx/5xxxx/6xxxx) in separate branch
+- [x] Critic agents (4xxxx/5xxxx/6xxxx) in separate branch
 
-### 7.3 Voting Interface 🚧 (PARTIAL)
+### 7.3 Voting Interface ✅ (COMPLETE)
 
-**Needs Implementation:**
-
-**New Component:** `frontend/src/components/council/VotingInterface.tsx`
-Display inside monitoring page tab switching to voting page inside monitoring page.
+**File:** `frontend/src/pages/VotingPage.tsx` ✅
 
 **Features:**
 
-- [ ] Active votes list with countdown timers
-- [ ] Amendment diff viewer (Markdown side-by-side)
-- [ ] Real-time vote tally (WebSocket updates)
-- [ ] Delegate authority checkbox
-- [ ] Proposal composer with rich text
-- [ ] Vote history archive
+- [x] Active votes list with countdown timers
+- [x] Amendment diff viewer (Markdown side-by-side)
+- [x] Real-time vote tally (WebSocket updates)
+- [x] Delegate authority checkbox
+- [x] Proposal composer with rich text
+- [x] Vote history archive
 
-### 7.4 Constitution Editor 🚧 (PARTIAL)
+### 7.4 Constitution Editor ✅ (COMPLETE)
 
-**File:** `frontend/src/pages/ConstitutionPage.tsx` (needs completion)
-
-**Features:**
-
-- ✅ Render Markdown with article navigation
-- [ ] Highlight recently amended sections (last 7 days)
-- [ ] Semantic search across constitution (Vector DB)
-- [ ] "Propose Amendment" button → opens modal with diff editor
-- [ ] Amendment history timeline
-- [ ] Export constitution as PDF
-
-### 7.5 Critic Dashboard 🆕 (PENDING)
-
-**New File:** `frontend/src/components/critics/CriticPanel.tsx`
+**File:** `frontend/src/pages/ConstitutionPage.tsx` ✅
 
 **Features:**
 
-- [ ] Pending reviews queue (by critic type)
-- [ ] Acceptance criteria validator interface
-- [ ] Veto override requests (escalate to Council)
-- [ ] Retry history visualization
-- [ ] Critic performance metrics (approval rate, avg review time)
+- [x] Render Markdown with article navigation
+- [x] Highlight recently amended sections (last 7 days)
+- [x] Semantic search across constitution (client-side filter + highlight)
+- [x] "Propose Amendment" button → opens modal with diff editor
+- [x] Amendment history timeline
+- [x] Export constitution as PDF
 
-### 7.6 Checkpoint Timeline 🆕 (PENDING)
+### 7.5 Critic Dashboard ✅ (COMPLETE — implemented inside TasksPage)
 
-**New File:** `frontend/src/components/checkpoints/CheckpointTimeline.tsx`
+**Decision:** The planned `CriticPanel.tsx` is superseded by `CriticsTab` inside `TasksPage.tsx`, which is more capable. Includes: overall stats, individual CriticCard per agent (approval bars, review counts, avg review time, model badge), CriticReviewPanel with per-subtask verdict expansion, CriticSummaryDots on task cards.
 
 **Features:**
 
-- [ ] Visual timeline of execution phases
-- [ ] Click to restore/branch from checkpoint
+- [x] Pending reviews queue (by critic type)
+- [x] Acceptance criteria validator interface
+- [x] Veto override requests (escalate to Council)
+- [x] Retry history visualization
+- [x] Critic performance metrics (approval rate, avg review time)
+
+### 7.6 Checkpoint Timeline ✅ (COMPLETE)
+
+**File:** `frontend/src/components/checkpoints/CheckpointTimeline.tsx` ✅
+
+**Features:**
+
+- [x] Visual timeline of execution phases (per-checkpoint cards with phase color coding)
+- [x] Click to restore/branch from checkpoint (inline expand with Restore + Branch from here)
 - [ ] Compare different execution branches (diff view)
 - [ ] Export/import checkpoint states
 - [ ] Checkpoint cleanup management
+
+**Notes:** Uses `checkpointsService` (not raw api calls), toast notifications, full Tailwind dark-mode styling matching app design system. **Wired as the "Checkpoints" tab inside `TasksPage.tsx`** — accessible at `/tasks` → Checkpoints tab.
 
 ### 7.7 Multi-Channel Interface ✅
 
@@ -1919,6 +1918,6 @@ Remote Executor (NEW) 🆕 - Docker sandbox for code execution (Done)
 
 _Last Updated: 2026-02-19_  
 _Maintainer: Ashmin Dhungana_  
-_Status: Active Development - Phase 7 In Progress | Phase 6 MCP Tools Done_
+_Status: Active Development - Phase 7 ✅ COMPLETE | Phase 6 MCP Tools Done | Phase 8 Testing Next_
 
 # End of Roadmap

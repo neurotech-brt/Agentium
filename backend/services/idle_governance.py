@@ -162,6 +162,38 @@ class EnhancedIdleGovernanceEngine:
             'council_members': ['00001', '10001', '10002'],
             'timestamp': datetime.utcnow().isoformat()
         })
+        
+    async def _assign_idle_work(self, db: Session, agent: Agent):
+        """Assign appropriate idle work to agent based on role."""
+        # Skip if this agent already has an active idle task
+        if agent.agentium_id in self.current_idle_tasks:
+            return
+        
+        # Import idle tasks
+        from backend.services.idle_tasks.preference_optimizer import preference_optimizer_task
+        
+        # Determine task type based on agent role
+        if agent.agentium_id == '00001':
+            task_type = random.choice([
+                TaskType.CONSTITUTION_REFINE,
+                TaskType.CONSTITUTION_READ,
+                TaskType.PREDICTIVE_PLANNING,
+                TaskType.ETHOS_OPTIMIZATION,
+                TaskType.PREFERENCE_OPTIMIZATION,  # NEW
+            ])
+        else:
+            # Check if preference optimization is due
+            if preference_optimizer_task.should_run(30):  # 30 min idle
+                task_type = TaskType.PREFERENCE_OPTIMIZATION
+            else:
+                task_type = random.choice([
+                    TaskType.VECTOR_MAINTENANCE,
+                    TaskType.STORAGE_DEDUPE,
+                    TaskType.AUDIT_ARCHIVAL,
+                    TaskType.AGENT_HEALTH_SCAN,
+                    TaskType.CACHE_OPTIMIZATION
+                ])
+        
     
     async def stop(self):
         """Stop the idle governance engine."""

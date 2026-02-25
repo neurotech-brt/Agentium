@@ -63,6 +63,7 @@ from backend.services.api_key_manager import init_api_key_manager, api_key_manag
 from backend.api.routes import api_keys as api_keys_routes
 from backend.api.routes.mcp_tools import router as mcp_tools_router
 from backend.api.routes import tools as tools_routes  # Phase 6.7: updated tools route
+from backend.api.routes import user_preferences as user_preferences_routes
 
 from backend.api.routes import capability_routes
 from backend.api.routes import lifecycle_routes
@@ -365,6 +366,7 @@ app.include_router(remote_executor_routes.router,   prefix="/api/v1")   # Phase 
 app.include_router(voting_routes.router,            prefix="/api/v1")   # Phase 7: Voting & Deliberations
 app.include_router(mcp_tools_router)                                     # Phase 6.7: admin/governance
 app.include_router(tools_routes.router,             prefix="/api/v1")   # Phase 6.7: agent tool access
+app.include_router(user_preferences_routes.router, prefix="/api/v1")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

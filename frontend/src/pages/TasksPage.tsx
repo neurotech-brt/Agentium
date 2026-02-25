@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { Task } from '../types';
+import { Task, UserPreference } from '../types';
 import { tasksService, CreateTaskRequest } from '../services/tasks';
+import { preferencesService, PREFERENCE_CATEGORIES, DATA_TYPE_LABELS, formatPreferenceValue, parsePreferenceValue } from '../services/preferences';
 import { api } from '../services/api';
 import { TaskCard } from '../components/tasks/TaskCard';
 import { CreateTaskModal } from '../components/tasks/CreateTaskModal';
@@ -37,6 +38,15 @@ import {
     Calendar,
     Timer,
     Milestone,
+    Settings,
+    SlidersHorizontal,
+    Trash2,
+    Edit3,
+    Save,
+    X,
+    History,
+    Sparkles,
+    Database,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { CheckpointTimeline } from '../components/checkpoints/CheckpointTimeline';
@@ -1005,6 +1015,748 @@ const MainTaskCard: React.FC<{ task: Task }> = ({ task }) => {
     );
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// User Preferences Components
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const CATEGORY_META: Record<string, {
+    label: string;
+    icon: React.ElementType;
+    color: string;
+    bg: string;
+    border: string;
+}>
+= {
+    general:       { label: 'General',       icon: Settings,      color: 'text-gray-600',       bg: 'bg-gray-50',       border: 'border-gray-200' },
+    ui:            { label: 'UI',            icon: SlidersHorizontal, color: 'text-blue-600',  bg: 'bg-blue-50',       border: 'border-blue-200' },
+    notifications: { label: 'Notifications', icon: Activity,      color: 'text-yellow-600',   bg: 'bg-yellow-50',     border: 'border-yellow-200' },
+    agents:        { label: 'Agents',        icon: Users,         color: 'text-green-600',    bg: 'bg-green-50',      border: 'border-green-200' },
+    tasks:         { label: 'Tasks',         icon: CheckSquare,   color: 'text-purple-600',   bg: 'bg-purple-50',     border: 'border-purple-200' },
+    chat:          { label: 'Chat',          icon: Users,         color: 'text-pink-600',     bg: 'bg-pink-50',       border: 'border-pink-200' },
+    models:        { label: 'Models',        icon: Cpu,           color: 'text-indigo-600',   bg: 'bg-indigo-50',     border: 'border-indigo-200' },
+    tools:         { label: 'Tools',         icon: Zap,           color: 'text-orange-600',   bg: 'bg-orange-50',     border: 'border-orange-200' },
+    privacy:       { label: 'Privacy',       icon: ShieldCheck,   color: 'text-teal-600',     bg: 'bg-teal-50',       border: 'border-teal-200' },
+    custom:        { label: 'Custom',        icon: Edit3,         color: 'text-cyan-600',     bg: 'bg-cyan-50',       border: 'border-cyan-200' },
+};
+
+// ─── Preference Value Editor ──────────────────────────────────────────────────
+
+const PreferenceValueEditor: React.FC<{
+    value: any;
+    dataType: string;
+    onSave: (value: any) => void;
+    onCancel: () => void;
+}> = ({ value, dataType, onSave, onCancel }) => {
+    const [inputValue, setInputValue] = useState(formatPreferenceValue(value, dataType));
+
+    const handleSave = () => {
+        const parsed = parsePreferenceValue(inputValue, dataType);
+        onSave(parsed);
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleSave();
+        } else if (e.key === 'Escape') {
+            onCancel();
+        }
+    };
+
+    if (dataType === 'boolean') {
+        return (
+            <div className="flex items-center gap-2">
+                <button
+                    onClick={() => onSave(true)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        value === true
+                            ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400 border border-green-300 dark:border-green-500/30'
+                            : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                    }`}
+                >
+                    Yes
+                </button>
+                <button
+                    onClick={() => onSave(false)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                        value === false
+                            ? 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400 border border-red-300 dark:border-red-500/30'
+                            : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'
+                    }`}
+                >
+                    No
+                </button>
+                <button
+                    onClick={onCancel}
+                    className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700"
+                >
+                    <X className="w-4 h-4" />
+                </button>
+            </div>
+        );
+    }
+
+    return (
+        <div className="flex items-center gap-2">
+            <input
+                type={dataType === 'integer' || dataType === 'float' ? 'number' : 'text'}
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyDown={handleKeyDown}
+                autoFocus
+                className="flex-1 px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg
+                    bg-white dark:bg-gray-700 text-gray-900 dark:text-white
+                    focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                placeholder={dataType === 'json' || dataType === 'array' ? 'Enter valid JSON...' : 'Enter value...'}
+            />
+            <button
+                onClick={handleSave}
+                className="p-1.5 rounded-lg text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300
+                    hover:bg-green-50 dark:hover:bg-green-500/10 transition-colors"
+                title="Save"
+            >
+                <Save className="w-4 h-4" />
+            </button>
+            <button
+                onClick={onCancel}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-gray-600 dark:hover:text-gray-300
+                    hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                title="Cancel"
+            >
+                <X className="w-4 h-4" />
+            </button>
+        </div>
+    );
+};
+
+// ─── Preference Card ──────────────────────────────────────────────────────────
+
+const PreferenceCard: React.FC<{
+    preference: UserPreference;
+    onUpdate: (key: string, value: any, reason?: string) => void;
+    onDelete: (key: string) => void;
+}> = ({ preference, onUpdate, onDelete }) => {
+    const [isEditing, setIsEditing] = useState(false);
+    const [showHistory, setShowHistory] = useState(false);
+    const [history, setHistory] = useState<any[]>([]);
+    const [loadingHistory, setLoadingHistory] = useState(false);
+    const meta = CATEGORY_META[preference.category] || CATEGORY_META.general;
+
+    const handleSave = (value: any) => {
+        onUpdate(preference.key, value, 'Updated via TasksPage');
+        setIsEditing(false);
+    };
+
+    const loadHistory = async () => {
+        if (!showHistory) {
+            setShowHistory(true);
+            setLoadingHistory(true);
+            try {
+                const data = await preferencesService.getPreferenceHistory(preference.agentium_id, 10);
+                setHistory(data.history);
+            } catch (err) {
+                console.error('Failed to load history:', err);
+            } finally {
+                setLoadingHistory(false);
+            }
+        } else {
+            setShowHistory(false);
+        }
+    };
+
+    return (
+        <div className="bg-white dark:bg-[#1e2535] rounded-lg border border-gray-200 dark:border-[#2a3347] p-4
+            hover:border-gray-300 dark:hover:border-[#3a4560] transition-all duration-150">
+            <div className="flex items-start justify-between gap-4">
+                <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                        <meta.icon className={`w-4 h-4 ${meta.color}`} />
+                        <span className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wide">
+                            {meta.label}
+                        </span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                            preference.editable
+                                ? 'bg-green-100 text-green-700 dark:bg-green-500/20 dark:text-green-400'
+                                : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                        }`}>
+                            {preference.editable ? 'Editable' : 'Read-only'}
+                        </span>
+                        {preference.scope !== 'global' && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400">
+                                {preference.scope}
+                            </span>
+                        )}
+                    </div>
+                    <h4 className="font-medium text-gray-900 dark:text-white mb-1 truncate" title={preference.key}>
+                        {preference.key}
+                    </h4>
+                    {preference.description && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 line-clamp-2">
+                            {preference.description}
+                        </p>
+                    )}
+                </div>
+                <div className="flex items-center gap-1">
+                    <button
+                        onClick={loadHistory}
+                        className={`p-1.5 rounded-lg transition-colors ${
+                            showHistory
+                                ? 'bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400'
+                                : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                        }`}
+                        title="View history"
+                    >
+                        <History className="w-4 h-4" />
+                    </button>
+                    {preference.editable && (
+                        <>
+                            <button
+                                onClick={() => setIsEditing(!isEditing)}
+                                className={`p-1.5 rounded-lg transition-colors ${
+                                    isEditing
+                                        ? 'bg-amber-100 text-amber-600 dark:bg-amber-500/20 dark:text-amber-400'
+                                        : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                                }`}
+                                title="Edit"
+                            >
+                                <Edit3 className="w-4 h-4" />
+                            </button>
+                            <button
+                                onClick={() => onDelete(preference.key)}
+                                className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 dark:hover:text-red-400
+                                    hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors"
+                                title="Delete"
+                            >
+                                <Trash2 className="w-4 h-4" />
+                            </button>
+                        </>
+                    )}
+                </div>
+            </div>
+
+            <div className="mt-3">
+                {isEditing ? (
+                    <PreferenceValueEditor
+                        value={preference.value}
+                        dataType={preference.data_type}
+                        onSave={handleSave}
+                        onCancel={() => setIsEditing(false)}
+                    />
+                ) : (
+                    <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <code className="px-2 py-1 bg-gray-100 dark:bg-gray-800 rounded text-sm font-mono
+                                text-gray-800 dark:text-gray-200">
+                                {formatPreferenceValue(preference.value, preference.data_type)}
+                            </code>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                DATA_TYPE_LABELS[preference.data_type]?.color
+                                    ? `bg-${DATA_TYPE_LABELS[preference.data_type].color}-100 text-${DATA_TYPE_LABELS[preference.data_type].color}-700 dark:bg-${DATA_TYPE_LABELS[preference.data_type].color}-500/20 dark:text-${DATA_TYPE_LABELS[preference.data_type].color}-400`
+                                    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+                            }`}>
+                                {DATA_TYPE_LABELS[preference.data_type]?.label || preference.data_type}
+                            </span>
+                        </div>
+                        {preference.last_modified_by_agent && (
+                            <span className="text-[10px] text-gray-400 dark:text-gray-500">
+                                Modified by {preference.last_modified_by_agent}
+                            </span>
+                        )}
+                    </div>
+                )}
+            </div>
+
+            {showHistory && (
+                <div className="mt-3 pt-3 border-t border-gray-100 dark:border-gray-700">
+                    <h5 className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-1">
+                        <History className="w-3 h-3" />
+                        Recent Changes
+                    </h5>
+                    {loadingHistory ? (
+                        <div className="space-y-2">
+                            {[...Array(2)].map((_, i) => (
+                                <div key={i} className="h-8 bg-gray-100 dark:bg-gray-800 rounded animate-pulse" />
+                            ))}
+                        </div>
+                    ) : history.length === 0 ? (
+                        <p className="text-xs text-gray-400 dark:text-gray-500 italic">No history available</p>
+                    ) : (
+                        <div className="space-y-2 max-h-32 overflow-y-auto">
+                            {history.slice(0, 5).map((entry, idx) => (
+                                <div key={idx} className="flex items-center gap-2 text-xs">
+                                    <span className="text-gray-500 dark:text-gray-400">
+                                        {entry.changed_by || 'User'}
+                                    </span>
+                                    <span className="text-gray-300 dark:text-gray-600">→</span>
+                                    <code className="text-amber-600 dark:text-amber-400 line-through">
+                                        {formatPreferenceValue(entry.previous_value, preference.data_type)}
+                                    </code>
+                                    <span className="text-gray-300 dark:text-gray-600">→</span>
+                                    <code className="text-green-600 dark:text-green-400">
+                                        {formatPreferenceValue(entry.new_value, preference.data_type)}
+                                    </code>
+                                    <span className="text-gray-400 dark:text-gray-500 ml-auto">
+                                        {new Date(entry.timestamp).toLocaleDateString()}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+
+// ─── Preferences Tab ────────────────────────────────────────────────────────────
+
+const PreferencesTab: React.FC = () => {
+    const [preferences, setPreferences] = useState<UserPreference[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [categoryFilter, setCategoryFilter] = useState<string>('');
+    const [showCreateModal, setShowCreateModal] = useState(false);
+    const [showDefaults, setShowDefaults] = useState(false);
+    const [defaults, setDefaults] = useState<Record<string, any>>({});
+    const [optimizing, setOptimizing] = useState(false);
+    const [optimizationResult, setOptimizationResult] = useState<any>(null);
+
+    // Form state for new preference
+    const [newPref, setNewPref] = useState({
+        key: '',
+        value: '',
+        category: 'general',
+        dataType: 'string',
+        scope: 'global',
+        description: '',
+        editableByAgents: true,
+    });
+
+    useEffect(() => { loadPreferences(); }, [categoryFilter]);
+
+    const loadPreferences = async () => {
+        setLoading(true);
+        try {
+            const data = await preferencesService.getPreferences(
+                categoryFilter || undefined,
+                undefined
+            );
+            setPreferences(data.preferences);
+        } catch (err) {
+            console.error('Failed to load preferences:', err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleUpdate = async (key: string, value: any, reason?: string) => {
+        try {
+            await preferencesService.updatePreference(key, { value, reason });
+            toast.success('Preference updated');
+            loadPreferences();
+        } catch (err: any) {
+            toast.error(err.response?.data?.detail || 'Failed to update preference');
+        }
+    };
+
+    const handleDelete = async (key: string) => {
+        if (!confirm(`Are you sure you want to delete "${key}"?`)) return;
+        try {
+            await preferencesService.deletePreference(key);
+            toast.success('Preference deleted');
+            loadPreferences();
+        } catch (err: any) {
+            toast.error(err.response?.data?.detail || 'Failed to delete preference');
+        }
+    };
+
+    const handleCreate = async () => {
+        try {
+            const value = parsePreferenceValue(newPref.value, newPref.dataType);
+            await preferencesService.createPreference({
+                key: newPref.key,
+                value,
+                category: newPref.category,
+                scope: newPref.scope,
+                description: newPref.description,
+                editable_by_agents: newPref.editableByAgents,
+            });
+            toast.success('Preference created');
+            setShowCreateModal(false);
+            setNewPref({
+                key: '',
+                value: '',
+                category: 'general',
+                dataType: 'string',
+                scope: 'global',
+                description: '',
+                editableByAgents: true,
+            });
+            loadPreferences();
+        } catch (err: any) {
+            toast.error(err.response?.data?.detail || 'Failed to create preference');
+        }
+    };
+
+    const handleInitializeDefaults = async () => {
+        try {
+            const data = await preferencesService.initializeDefaults();
+            toast.success(`Initialized ${data.count} default preferences`);
+            loadPreferences();
+        } catch (err: any) {
+            toast.error(err.response?.data?.detail || 'Failed to initialize defaults');
+        }
+    };
+
+    const handleOptimize = async () => {
+        setOptimizing(true);
+        try {
+            const data = await preferencesService.optimizePreferences();
+            setOptimizationResult(data.results);
+            toast.success('Optimization complete');
+            loadPreferences();
+        } catch (err: any) {
+            toast.error(err.response?.data?.detail || 'Failed to optimize');
+        } finally {
+            setOptimizing(false);
+        }
+    };
+
+    const loadDefaults = async () => {
+        if (!showDefaults) {
+            try {
+                const data = await preferencesService.getSystemDefaults();
+                setDefaults(data.defaults);
+            } catch (err) {
+                console.error('Failed to load defaults:', err);
+            }
+        }
+        setShowDefaults(!showDefaults);
+    };
+
+    const filteredPreferences = preferences.filter(p =>
+        categoryFilter ? p.category === categoryFilter : true
+    );
+
+    const groupedByCategory = filteredPreferences.reduce((acc, pref) => {
+        if (!acc[pref.category]) acc[pref.category] = [];
+        acc[pref.category].push(pref);
+        return acc;
+    }, {} as Record<string, UserPreference[]>);
+
+    return (
+        <div className="space-y-6">
+            {/* Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div>
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+                        <Settings className="w-5 h-5 text-blue-500" />
+                        User Preferences
+                    </h2>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                        Manage system and user-specific preferences
+                    </p>
+                </div>
+                <div className="flex items-center gap-2">
+                    <button
+                        onClick={loadDefaults}
+                        className="px-3 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400
+                            bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700
+                            transition-colors flex items-center gap-1.5"
+                    >
+                        <Database className="w-4 h-4" />
+                        {showDefaults ? 'Hide' : 'View'} Defaults
+                    </button>
+                    <button
+                        onClick={handleOptimize}
+                        disabled={optimizing}
+                        className="px-3 py-2 rounded-lg text-sm font-medium text-purple-600 dark:text-purple-400
+                            bg-purple-50 dark:bg-purple-500/10 hover:bg-purple-100 dark:hover:bg-purple-500/20
+                            transition-colors flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                        <Sparkles className={`w-4 h-4 ${optimizing ? 'animate-spin' : ''}`} />
+                        Optimize
+                    </button>
+                    <button
+                        onClick={() => setShowCreateModal(true)}
+                        className="px-3 py-2 rounded-lg text-sm font-medium text-white
+                            bg-blue-600 hover:bg-blue-700 dark:hover:bg-blue-500
+                            transition-colors flex items-center gap-1.5"
+                    >
+                        <Plus className="w-4 h-4" />
+                        New Preference
+                    </button>
+                </div>
+            </div>
+
+            {/* Optimization Result */}
+            {optimizationResult && (
+                <div className="bg-green-50 dark:bg-green-500/10 border border-green-200 dark:border-green-500/20 rounded-lg p-4">
+                    <h3 className="text-sm font-medium text-green-800 dark:text-green-400 mb-2 flex items-center gap-1">
+                        <Sparkles className="w-4 h-4" />
+                        Optimization Results
+                    </h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                        <div className="text-center p-2 bg-white dark:bg-green-500/5 rounded">
+                            <div className="font-semibold text-green-700 dark:text-green-400">
+                                {optimizationResult.duplicates_removed}
+                            </div>
+                            <div className="text-xs text-green-600 dark:text-green-500">Duplicates</div>
+                        </div>
+                        <div className="text-center p-2 bg-white dark:bg-green-500/5 rounded">
+                            <div className="font-semibold text-green-700 dark:text-green-400">
+                                {optimizationResult.unused_cleaned}
+                            </div>
+                            <div className="text-xs text-green-600 dark:text-green-500">Unused</div>
+                        </div>
+                        <div className="text-center p-2 bg-white dark:bg-green-500/5 rounded">
+                            <div className="font-semibold text-green-700 dark:text-green-400">
+                                {optimizationResult.history_compressed}
+                            </div>
+                            <div className="text-xs text-green-600 dark:text-green-500">History</div>
+                        </div>
+                        <div className="text-center p-2 bg-white dark:bg-green-500/5 rounded">
+                            <div className="font-semibold text-green-700 dark:text-green-400">
+                                {optimizationResult.conflicts_resolved}
+                            </div>
+                            <div className="text-xs text-green-600 dark:text-green-500">Conflicts</div>
+                        </div>
+                    </div>
+                    <button
+                        onClick={() => setOptimizationResult(null)}
+                        className="mt-2 text-xs text-green-600 dark:text-green-400 hover:underline"
+                    >
+                        Dismiss
+                    </button>
+                </div>
+            )}
+
+            {/* Defaults Panel */}
+            {showDefaults && (
+                <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-lg p-4">
+                    <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                            System Defaults
+                        </h3>
+                        <button
+                            onClick={handleInitializeDefaults}
+                            className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                        >
+                            Initialize for my account
+                        </button>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 text-xs">
+                        {Object.entries(defaults).slice(0, 12).map(([key, value]) => (
+                            <div key={key} className="flex items-center gap-2 p-2 bg-white dark:bg-gray-700 rounded">
+                                <code className="text-gray-600 dark:text-gray-400 truncate">{key}</code>
+                                <span className="text-gray-400">=</span>
+                                <code className="text-blue-600 dark:text-blue-400 truncate">
+                                    {typeof value === 'object' ? JSON.stringify(value) : String(value)}
+                                </code>
+                            </div>
+                        ))}
+                        {Object.keys(defaults).length > 12 && (
+                            <div className="text-center text-gray-400 dark:text-gray-500 py-2">
+                                +{Object.keys(defaults).length - 12} more
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* Category Filter */}
+            <div className="flex flex-wrap items-center gap-2">
+                <button
+                    onClick={() => setCategoryFilter('')}
+                    className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                        categoryFilter === ''
+                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400'
+                            : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                    }`}
+                >
+                    All ({preferences.length})
+                </button>
+                {Object.keys(groupedByCategory).map(cat => (
+                    <button
+                        key={cat}
+                        onClick={() => setCategoryFilter(cat === categoryFilter ? '' : cat)}
+                        className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors flex items-center gap-1 ${
+                            categoryFilter === cat
+                                ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400'
+                                : 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-700'
+                        }`}
+                    >
+                        {CATEGORY_META[cat]?.icon && (
+                            <span className="w-3 h-3">
+                                {React.createElement(CATEGORY_META[cat].icon, { className: 'w-3 h-3' })}
+                            </span>
+                        )}
+                        {CATEGORY_META[cat]?.label || cat}
+                        <span className="text-xs opacity-70">({groupedByCategory[cat].length})</span>
+                    </button>
+                ))}
+            </div>
+
+            {/* Preferences Grid */}
+            {loading ? (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {[...Array(4)].map((_, i) => (
+                        <div key={i} className="h-32 rounded-lg bg-gray-100 dark:bg-gray-800 animate-pulse" />
+                    ))}
+                </div>
+            ) : filteredPreferences.length === 0 ? (
+                <div className="text-center py-12">
+                    <Settings className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+                    <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-1">
+                        No preferences found
+                    </h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+                        {categoryFilter
+                            ? `No preferences in category "${categoryFilter}"`
+                            : 'Create your first preference to get started'}
+                    </p>
+                    <button
+                        onClick={() => setShowCreateModal(true)}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium"
+                    >
+                        Create Preference
+                    </button>
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    {filteredPreferences.map(pref => (
+                        <PreferenceCard
+                            key={pref.agentium_id}
+                            preference={pref}
+                            onUpdate={handleUpdate}
+                            onDelete={handleDelete}
+                        />
+                    ))}
+                </div>
+            )}
+
+            {/* Create Modal */}
+            {showCreateModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+                    <div className="bg-white dark:bg-[#1e2535] rounded-xl shadow-xl max-w-md w-full p-6">
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                            Create New Preference
+                        </h3>
+                        <div className="space-y-4">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                    Key
+                                </label>
+                                <input
+                                    type="text"
+                                    value={newPref.key}
+                                    onChange={(e) => setNewPref({ ...newPref, key: e.target.value })}
+                                    placeholder="e.g., ui.custom_setting"
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
+                                        bg-white dark:bg-gray-700 text-gray-900 dark:text-white
+                                        focus:ring-2 focus:ring-blue-500 outline-none"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                    Value
+                                </label>
+                                <input
+                                    type="text"
+                                    value={newPref.value}
+                                    onChange={(e) => setNewPref({ ...newPref, value: e.target.value })}
+                                    placeholder="Preference value"
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
+                                        bg-white dark:bg-gray-700 text-gray-900 dark:text-white
+                                        focus:ring-2 focus:ring-blue-500 outline-none"
+                                />
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                        Category
+                                    </label>
+                                    <select
+                                        value={newPref.category}
+                                        onChange={(e) => setNewPref({ ...newPref, category: e.target.value })}
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
+                                            bg-white dark:bg-gray-700 text-gray-900 dark:text-white
+                                            focus:ring-2 focus:ring-blue-500 outline-none"
+                                    >
+                                        {PREFERENCE_CATEGORIES.map(cat => (
+                                            <option key={cat.id} value={cat.id}>{cat.name}</option>
+                                        ))}
+                                    </select>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                        Data Type
+                                    </label>
+                                    <select
+                                        value={newPref.dataType}
+                                        onChange={(e) => setNewPref({ ...newPref, dataType: e.target.value })}
+                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
+                                            bg-white dark:bg-gray-700 text-gray-900 dark:text-white
+                                            focus:ring-2 focus:ring-blue-500 outline-none"
+                                    >
+                                        <option value="string">String</option>
+                                        <option value="integer">Integer</option>
+                                        <option value="float">Float</option>
+                                        <option value="boolean">Boolean</option>
+                                        <option value="json">JSON</option>
+                                        <option value="array">Array</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                    Description
+                                </label>
+                                <textarea
+                                    value={newPref.description}
+                                    onChange={(e) => setNewPref({ ...newPref, description: e.target.value })}
+                                    placeholder="Optional description..."
+                                    rows={2}
+                                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg
+                                        bg-white dark:bg-gray-700 text-gray-900 dark:text-white
+                                        focus:ring-2 focus:ring-blue-500 outline-none resize-none"
+                                />
+                            </div>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="checkbox"
+                                    id="editableByAgents"
+                                    checked={newPref.editableByAgents}
+                                    onChange={(e) => setNewPref({ ...newPref, editableByAgents: e.target.checked })}
+                                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                <label htmlFor="editableByAgents" className="text-sm text-gray-700 dark:text-gray-300">
+                                    Editable by agents
+                                </label>
+                            </div>
+                        </div>
+                        <div className="flex justify-end gap-3 mt-6">
+                            <button
+                                onClick={() => setShowCreateModal(false)}
+                                className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleCreate}
+                                disabled={!newPref.key || !newPref.value}
+                                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium
+                                    disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                Create
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
 // ─── Critic Card (Critics tab) ────────────────────────────────────────────────
 
 const CriticCard: React.FC<{ critic: CriticAgentStats }> = ({ critic }) => {
@@ -1227,7 +1979,7 @@ const CriticsTab: React.FC = () => {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-type Tab = 'tasks' | 'critics' | 'checkpoints';
+type Tab = 'tasks' | 'critics' | 'checkpoints' | 'preferences';
 
 export const TasksPage: React.FC = () => {
     const [tasks, setTasks]               = useState<Task[]>([]);
@@ -1290,7 +2042,7 @@ export const TasksPage: React.FC = () => {
                     <p className="text-gray-500 dark:text-gray-400 text-sm">Monitor and manage agent operations.</p>
                 </div>
                 <div className="flex items-center gap-3">
-                    {activeTab === 'tasks' && (
+                    {(activeTab === 'tasks' || activeTab === 'preferences') && (
                         <>
                             <button
                                 onClick={() => loadTasks(true)}
@@ -1300,13 +2052,15 @@ export const TasksPage: React.FC = () => {
                             >
                                 <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
                             </button>
-                            <button
-                                onClick={() => setShowCreateModal(true)}
-                                className="bg-blue-600 hover:bg-blue-700 dark:hover:bg-blue-500 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors duration-150 shadow-sm text-sm font-medium"
-                            >
-                                <Plus className="w-4 h-4" />
-                                New Task
-                            </button>
+                            {activeTab === 'tasks' && (
+                                <button
+                                    onClick={() => setShowCreateModal(true)}
+                                    className="bg-blue-600 hover:bg-blue-700 dark:hover:bg-blue-500 text-white px-4 py-2 rounded-lg flex items-center gap-2 transition-colors duration-150 shadow-sm text-sm font-medium"
+                                >
+                                    <Plus className="w-4 h-4" />
+                                    New Task
+                                </button>
+                            )}
                         </>
                     )}
                 </div>
@@ -1338,11 +2092,12 @@ export const TasksPage: React.FC = () => {
             <div className="bg-white dark:bg-[#161b27] rounded-xl border border-gray-200 dark:border-[#1e2535] shadow-sm dark:shadow-[0_2px_16px_rgba(0,0,0,0.25)] transition-colors duration-200">
 
                 {/* Tab bar */}
-                <div className="px-6 pt-4 border-b border-gray-100 dark:border-[#1e2535] flex items-center gap-1">
+                <div className="px-6 pt-4 border-b border-gray-100 dark:border-[#1e2535] flex items-center gap-1 flex-wrap">
                     {([
-                        { id: 'tasks',   label: 'Tasks',   icon: ListTodo    },
+                        { id: 'tasks',       label: 'Tasks',       icon: ListTodo    },
                         { id: 'critics',     label: 'Critics',     icon: ShieldCheck },
                         { id: 'checkpoints', label: 'Checkpoints', icon: Milestone   },
+                        { id: 'preferences', label: 'Preferences', icon: Settings    },
                     ] as { id: Tab; label: string; icon: React.ElementType }[]).map(tab => {
                         const isActive = activeTab === tab.id;
                         return (
@@ -1363,6 +2118,11 @@ export const TasksPage: React.FC = () => {
                                 {tab.id === 'critics' && (
                                     <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-violet-100 text-violet-600 dark:bg-violet-500/20 dark:text-violet-400">
                                         3
+                                    </span>
+                                )}
+                                {tab.id === 'preferences' && (
+                                    <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">
+                                        New
                                     </span>
                                 )}
                             </button>
@@ -1453,6 +2213,13 @@ export const TasksPage: React.FC = () => {
                 {activeTab === 'checkpoints' && (
                     <div className="p-6">
                         <CheckpointTimeline />
+                    </div>
+                )}
+
+                {/* ── Preferences tab ───────────────────────────────────── */}
+                {activeTab === 'preferences' && (
+                    <div className="p-6">
+                        <PreferencesTab />
                     </div>
                 )}
             </div>

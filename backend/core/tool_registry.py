@@ -607,6 +607,79 @@ class ToolRegistry:
             parameters={},
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
+        
+        # ══════════════════════════════════════════════════════════════════════
+        # USER PREFERENCE TOOL ─ Agent access to user settings
+        # ══════════════════════════════════════════════════════════════════════
+        
+        from backend.tools.user_preference_tool import user_preference_tool
+        
+        self.register_tool(
+            name="preference_get",
+            description="Get a user preference value. Returns value and editability status.",
+            function=user_preference_tool.get_preference,
+            parameters={
+                "key": {"type": "string", "description": "Preference key (e.g., 'ui.theme', 'agents.timeout')"},
+                "agent_tier": {"type": "string", "description": "Agent tier (0xxxx, 1xxxx, 2xxxx, 3xxxx)"},
+                "agent_id": {"type": "string", "description": "Agentium ID of the calling agent"},
+                "user_id": {"type": "string", "description": "User ID (optional, for user-specific prefs)", "optional": True},
+                "default": {"type": "any", "description": "Default value if preference not found", "optional": True},
+            },
+            authorized_tiers=["0xxxx", "1xxxx", "2xxxx", "3xxxx"],
+        )
+        
+        self.register_tool(
+            name="preference_set",
+            description="Set a user preference value. Requires appropriate agent tier permissions.",
+            function=user_preference_tool.set_preference,
+            parameters={
+                "key": {"type": "string", "description": "Preference key to set"},
+                "value": {"type": "any", "description": "New value (any JSON-serializable type)"},
+                "agent_tier": {"type": "string", "description": "Agent tier (0xxxx, 1xxxx, 2xxxx)"},
+                "agent_id": {"type": "string", "description": "Agentium ID of the calling agent"},
+                "user_id": {"type": "string", "description": "User ID (optional)", "optional": True},
+                "reason": {"type": "string", "description": "Reason for the change", "optional": True},
+            },
+            authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],  # Task agents cannot set prefs
+        )
+        
+        self.register_tool(
+            name="preference_list",
+            description="List all preferences accessible to this agent tier.",
+            function=user_preference_tool.list_preferences,
+            parameters={
+                "agent_tier": {"type": "string", "description": "Agent tier (0xxxx, 1xxxx, 2xxxx, 3xxxx)"},
+                "agent_id": {"type": "string", "description": "Agentium ID of the calling agent"},
+                "user_id": {"type": "string", "description": "User ID (optional)", "optional": True},
+                "category": {"type": "string", "description": "Filter by category", "optional": True},
+                "include_values": {"type": "boolean", "description": "Include values in response", "optional": True},
+            },
+            authorized_tiers=["0xxxx", "1xxxx", "2xxxx", "3xxxx"],
+        )
+        
+        self.register_tool(
+            name="preference_categories",
+            description="Get list of preference categories accessible to this agent tier.",
+            function=user_preference_tool.get_categories,
+            parameters={
+                "agent_tier": {"type": "string", "description": "Agent tier (0xxxx, 1xxxx, 2xxxx, 3xxxx)"},
+            },
+            authorized_tiers=["0xxxx", "1xxxx", "2xxxx", "3xxxx"],
+        )
+        
+        self.register_tool(
+            name="preference_bulk_update",
+            description="Update multiple preferences at once. Each update is validated individually.",
+            function=user_preference_tool.bulk_update,
+            parameters={
+                "preferences": {"type": "object", "description": "Map of keys to values {key: value}"},
+                "agent_tier": {"type": "string", "description": "Agent tier (0xxxx, 1xxxx, 2xxxx)"},
+                "agent_id": {"type": "string", "description": "Agentium ID of the calling agent"},
+                "user_id": {"type": "string", "description": "User ID (optional)", "optional": True},
+                "reason": {"type": "string", "description": "Reason for bulk update", "optional": True},
+            },
+            authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
+        )
 
     # ── Registration ───────────────────────────────────────────────────────────
 

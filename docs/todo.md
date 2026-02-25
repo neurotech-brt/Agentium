@@ -691,7 +691,7 @@ class AcceptanceCriterion:
 
 - ✅ **Planners** (Head/Council): User intent, constraints, high-level goals
 - ✅ **Executors** (Lead/Task): Step-by-step plan, prior step outputs ONLY
-- ✅ **Critics** (4xxxx/5xxxx/6xxxx): Execution results + acceptance criteria ONLY
+- ✅ **Critics** (7xxxx/8xxxx/9xxxx): Execution results + acceptance criteria ONLY
 - ✅ **Siblings**: NO visibility into each other's work (via `visible_to` patterns)
 
 **Enhanced Message Schema:**

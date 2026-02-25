@@ -191,8 +191,40 @@ export interface MonitoringDashboard {
     latest_health_reports: AgentHealthReport[];
 }
 
-export type CheckpointPhase = 
-  | 'plan_approved' 
-  | 'execution_complete' 
-  | 'critique_passed' 
+export type CheckpointPhase =
+  | 'plan_approved'
+  | 'execution_complete'
+  | 'critique_passed'
   | 'manual';
+
+// User Preferences Types
+export interface UserPreference {
+    agentium_id: string;
+    key: string;
+    value: any;
+    category: string;
+    scope: string;
+    data_type: string;
+    editable: boolean;
+    description?: string;
+    last_modified_by_agent?: string;
+    last_agent_modified_at?: string;
+}
+
+export interface PreferenceHistoryEntry {
+    previous_value: any;
+    new_value: any;
+    changed_by?: string;
+    change_reason?: string;
+    timestamp: string;
+}
+
+export interface PreferenceCategory {
+    id: string;
+    name: string;
+    description: string;
+}
+
+export interface SystemDefaults {
+    [key: string]: any;
+}

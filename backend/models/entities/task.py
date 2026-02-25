@@ -83,6 +83,8 @@ class TaskType(str, enum.Enum):
     IDLE_COMPLETED = "idle_completed"
     IDLE_PAUSED = "idle_paused"
 
+    PREFERENCE_OPTIMIZATION = "preference_optimization"
+
 
 class Task(BaseEntity):
     """Central task entity with IDLE GOVERNANCE support and Governance Architecture."""

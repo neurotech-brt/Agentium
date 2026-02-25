@@ -217,7 +217,7 @@ def _ensure_system_settings(db: Session):
         VALUES
             ('daily_token_limit', '100000',
              'Maximum tokens per day across all API providers', NOW()),
-            ('daily_cost_limit',  '5.0',
+            ('daily_cost_limit',  '100.0',
              'Maximum USD cost per day across all API providers', NOW())
         ON CONFLICT (key) DO NOTHING
     """))
@@ -246,6 +246,11 @@ def init_db():
     from backend.models.entities.user import User  # noqa: F401
     from backend.models.entities.user_config import (  # noqa: F401
         UserModelConfig, ModelUsageLog, ProviderType, ConnectionStatus
+    )
+
+    # ── User Preferences ───────────────────────────────────────────────────
+    from backend.models.entities.user_preference import (  # noqa: F401
+        UserPreference, UserPreferenceHistory
     )
 
     # ── Chat ─────────────────────────────────────────────────────────────────

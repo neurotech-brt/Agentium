@@ -18,6 +18,7 @@ Agentium/
 │   │   └── versions/                # Migration scripts
 │   │       ├── 001_schema.py        # Initial schema
 │   │       └── 002_mcp_tools.py     # MCP tools migration
+│   │       └── 003_user_preferences.py # User preferences migration
 │   ├── api/                          # API layer
 │   │   ├── dependencies/
 │   │   │   └── auth.py              # Auth dependencies
@@ -27,6 +28,7 @@ Agentium/
 │   │   │   ├── admin.py             # Admin endpoints
 │   │   │   ├── api_keys.py          # API key management
 │   │   │   ├── auth.py              # Authentication
+│   │   │   ├── user_preferences.py  # User preferences
 │   │   │   ├── capability_routes.py # Capabilities API
 │   │   │   ├── channels.py          # Channel management
 │   │   │   ├── chat.py              # Chat endpoints
@@ -49,6 +51,7 @@ Agentium/
 │   │   ├── schemas/                 # Pydantic schemas
 │   │   │   ├── checkpoint.py
 │   │   │   ├── mcp_schemas.py
+│   │   │   ├── user_preference.py
 │   │   │   ├── remote_executor.py
 │   │   │   ├── task.py
 │   │   │   └── tool_creation.py
@@ -88,6 +91,7 @@ Agentium/
 │   │   │   ├── tool_version.py        # Tool versioning
 │   │   │   ├── user_config.py         # User preferences
 │   │   │   ├── user.py                # User entities
+│   │   │   ├── user_preference.py     # User preferences
 │   │   │   └── voting.py              # Voting records
 │   │   └── schemas/                   # Request/response schemas
 │   │       ├── messages.py
@@ -104,9 +108,12 @@ Agentium/
 │   │   ├── amendment_service.py       # Constitution amendments
 │   │   ├── api_key_manager.py         # API key handling
 │   │   ├── api_manager.py             # API management
+│   │   ├── user_preference_service.py # User preferences
 │   │   ├── audit/                     # Audit logging
 │   │   │   ├── __init__.py
 │   │   │   └── audit_processor.py
+│   │   ├── idle_tasks/
+│   │   │   └── preference_optimizer.py
 │   │   ├── auth.py                    # Authentication service
 │   │   ├── capability_registry.py    # Agent capabilities
 │   │   ├── channel_manager.py         # Channel orchestration
@@ -155,6 +162,7 @@ Agentium/
 │   │   └── tool_versioning.py       # Tool versioning
 │   ├── tools/                       # Built-in tools
 │   │   ├── browser_tool.py          # Browser automation
+│   │   ├── user_preference_tool.py  # User preference operations
 │   │   ├── desktop_tool.py          # Desktop operations
 │   │   ├── file_tool.py             # File operations
 │   │   ├── host_os_tool.py          # Host OS access

@@ -50,10 +50,10 @@ Rigorous identification system:
 - **Head**: `0xxxx` (00001–00999) — The Sovereign's direct representative
 - **Council**: `1xxxx` (10001–19999) — Democratic deliberation layer
 - **Lead**: `2xxxx` (20001–29999) — Department coordination
-- **Task**: `3xxxx` (30001–99999) — Execution workers
-- **Code Critic**: `4xxxx` (40001–49999) — Code validation (syntax, security, logic)
-- **Output Critic**: `5xxxx` (50001–59999) — Output validation (user intent alignment)
-- **Plan Critic**: `6xxxx` (60001–69999) — Plan validation (DAG soundness)
+- **Task**: `3xxxx` (30001–69999) — Execution workers
+- **Code Critic**: `7xxxx` (70001–79999) — Code validation (syntax, security, logic)
+- **Output Critic**: `8xxxx` (80001–89999) — Output validation (user intent alignment)
+- **Plan Critic**: `9xxxx` (90001–99999) — Plan validation (DAG soundness)
 
 > Critics operate **outside** the democratic chain. They have absolute veto authority but no voting rights. Rejected tasks retry within the same team (max 5 retries) before escalating to Council.
 
@@ -133,7 +133,7 @@ Agents auto-spawn when load increases, auto-terminate when tasks complete, and c
 │ 🔍 Execution Validation Layer (Critics — Independent Judiciary)             │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │  ┌──────────────────┐   ┌──────────────────┐   ┌──────────────────┐       │
-│  │ Plan Critic 6xxxx│   │ Code Critic 4xxxx│   │ Output Critic 5x │       │
+│  │ Plan Critic 9xxxx│   │ Code Critic 7xxxx│   │ Output Critic 8x │       │
 │  │ DAG Soundness    │   │ Syntax/Security  │   │ User Intent      │       │
 │  │ VETO → Retry     │   │ VETO → Retry     │   │ VETO → Retry     │       │
 │  │ ESCALATE→Council │   │ ESCALATE→Lead    │   │ ESCALATE→Lead    │       │

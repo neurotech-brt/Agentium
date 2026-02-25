@@ -23,10 +23,11 @@ from backend.services.capability_registry import CapabilityRegistry, Capability
 # ═══════════════════════════════════════════════════════════
 
 ID_RANGES = {
-    "head": {"min": 1, "max": 999, "prefix": "0"},      # 00001-00999
-    "council": {"min": 10001, "max": 19999, "prefix": "1"},  # 10001-19999
-    "lead": {"min": 20001, "max": 29999, "prefix": "2"},     # 20001-29999
-    "task": {"min": 30001, "max": 99999, "prefix": "3"},     # 30001-99999
+    "head": {"min": 1, "max": 999, "prefixes": ["0"]},      # 00001-00999
+    "council": {"min": 10001, "max": 19999, "prefixes": ["1"]},  # 10001-19999
+    "lead": {"min": 20001, "max": 29999, "prefixes": ["2"]},     # 20001-29999
+    "task": {"min": 30001, "max": 69999, "prefixes": ["3", "4", "5", "6"]},     # 30001-69999
+    "critic": {"min": 70001, "max": 99999, "prefixes": ["7", "8", "9"]},  # 70001-99999
 }
 
 
@@ -227,8 +228,8 @@ class ReincarnationService:
             raise ValueError(f"Task Agent {agent_id} not found or inactive")
         
         # Only Task Agents can be promoted to Lead
-        if not agent_id.startswith('3'):
-            raise ValueError(f"Only Task Agents (3xxxx) can be promoted to Lead. Got: {agent_id}")
+        if not any(agent_id.startswith(p) for p in ['3', '4', '5', '6']):
+            raise ValueError(f"Only Task Agents (3xxxx-6xxxx) can be promoted to Lead. Got: {agent_id}")
         
         # Check promoter permission (must be Council or Head)
         promoter_tier = CapabilityRegistry.get_agent_tier(promoted_by.agentium_id)
@@ -520,11 +521,11 @@ class ReincarnationService:
         
         for tier_name, tier_config in ID_RANGES.items():
             # Count agents in this tier
-            prefix = tier_config["prefix"]
+            prefixes = tier_config.get("prefixes", [tier_config.get("prefix")])
             
-            used = db.query(func.count(Agent.id)).filter(
+            used = sum(db.query(func.count(Agent.id)).filter(
                 Agent.agentium_id.like(f"{prefix}%")
-            ).scalar()
+            ).scalar() or 0 for prefix in prefixes)
             
             max_capacity = tier_config["max"] - tier_config["min"] + 1
             available = max_capacity - used
@@ -560,45 +561,33 @@ class ReincarnationService:
         if not tier_config:
             raise ValueError(f"Invalid tier: {tier}")
         
-        prefix = tier_config["prefix"]
-        min_id = tier_config["min"]
-        max_id = tier_config["max"]
+        prefixes = tier_config.get("prefixes", [tier_config.get("prefix")])
         
-        # Get highest existing ID in this tier
-        highest = db.query(func.max(Agent.agentium_id)).filter(
-            Agent.agentium_id.like(f"{prefix}%")
-        ).scalar()
-        
-        if highest:
-            # Extract numeric part and increment
-            try:
-                current_num = int(highest)
-                next_num = current_num + 1
-            except ValueError:
-                # Fallback to min if parsing fails
-                next_num = min_id
-        else:
-            # No existing agents in this tier
-            next_num = min_id
-        
-        # Check if we've exceeded the range
-        if next_num > max_id:
-            raise ValueError(
-                f"ID pool exhausted for {tier} tier. "
-                f"Max: {max_id}, Next: {next_num}. "
-                f"Consider liquidating inactive agents or expanding ID range."
-            )
-        
-        # Format with leading zeros to match tier (5 digits total)
-        new_id = str(next_num).zfill(5)
-        
-        # Double-check uniqueness (race condition protection)
-        exists = db.query(Agent).filter_by(agentium_id=new_id).first()
-        if exists:
-            # Recursively try next ID
-            return ReincarnationService._generate_next_id(tier, db)
-        
-        return new_id
+        for prefix in prefixes:
+            highest = db.query(func.max(Agent.agentium_id)).filter(
+                Agent.agentium_id.like(f"{prefix}%")
+            ).scalar()
+            
+            if highest:
+                try:
+                    current_num = int(highest)
+                    next_num = current_num + 1
+                except ValueError:
+                    next_num = int(f"{prefix}0001")
+            else:
+                next_num = int(f"{prefix}0001")
+            
+            prefix_max = int(f"{prefix}9999")
+            if next_num <= prefix_max:
+                new_id = str(next_num).zfill(5)
+                # Check uniqueness before returning
+                if not db.query(Agent).filter_by(agentium_id=new_id).first():
+                    return new_id
+                    
+        raise ValueError(
+            f"ID pool exhausted for {tier} tier across all assigned prefixes. "
+            f"Consider liquidating inactive agents or expanding ID range."
+        )
     
     # ═══════════════════════════════════════════════════════════
     # REINCARNATION (from original implementation)

@@ -136,7 +136,7 @@ TIER_CAPABILITIES: Dict[str, Set[Capability]] = {
         Capability.REQUEST_CLARIFICATION,
     },
     
-    # TASK AGENTS (3xxxx) - Workers
+    # TASK AGENTS (3xxxx - 6xxxx) - Workers
     "3": {
         Capability.EXECUTE_TASK,
         Capability.REPORT_STATUS,
@@ -146,6 +146,18 @@ TIER_CAPABILITIES: Dict[str, Set[Capability]] = {
         Capability.REQUEST_CLARIFICATION,
     },
 }
+
+# Extend Task Agent capabilities
+for t in ["4", "5", "6"]:
+    TIER_CAPABILITIES[t] = TIER_CAPABILITIES["3"].copy()
+
+# Critic capabilities (7, 8, 9)
+for t in ["7", "8", "9"]:
+    TIER_CAPABILITIES[t] = {
+        Capability.VETO,
+        Capability.REPORT_STATUS,
+        Capability.QUERY_KNOWLEDGE,
+    }
 
 
 class CapabilityRegistry:
@@ -486,7 +498,7 @@ class CapabilityRegistry:
         # Get all active agents
         agents = db.query(Agent).filter_by(is_active=True).all()
         
-        tier_distribution = {'0': 0, '1': 0, '2': 0, '3': 0}
+        tier_distribution = {str(i): 0 for i in range(10)}
         dynamic_grants = 0
         dynamic_revocations = 0
         

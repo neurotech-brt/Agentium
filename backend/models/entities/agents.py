@@ -5,7 +5,7 @@ Includes IDLE GOVERNANCE support for persistent agents.
 """
 
 from datetime import datetime
-from typing import Optional, List, Dict, Any, Type
+from typing import Optional, List, Dict, Any, Type, Union
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Integer, Enum, Boolean, event, select, Index
 from sqlalchemy.orm import relationship, validates, Session
 from backend.models.entities.base import BaseEntity
@@ -17,10 +17,10 @@ class AgentType(str, enum.Enum):
     HEAD_OF_COUNCIL = "head_of_council"      # 0xxxx - Prime Minister
     COUNCIL_MEMBER = "council_member"        # 1xxxx - Parliament
     LEAD_AGENT = "lead_agent"                # 2xxxx - Management
-    TASK_AGENT = "task_agent"                # 3xxxx - Workers
-    CODE_CRITIC = "code_critic"              # 4xxxx - Code validation
-    OUTPUT_CRITIC = "output_critic"          # 5xxxx - Output validation
-    PLAN_CRITIC = "plan_critic"              # 6xxxx - Plan validation
+    TASK_AGENT = "task_agent"                # 3xxxx-6xxxx - Workers (expanded range)
+    CODE_CRITIC = "code_critic"              # 7xxxx - Code validation
+    OUTPUT_CRITIC = "output_critic"          # 8xxxx - Output validation
+    PLAN_CRITIC = "plan_critic"              # 9xxxx - Plan validation
 
 class AgentStatus(str, enum.Enum):
     """Agent lifecycle states."""
@@ -56,7 +56,7 @@ class Agent(BaseEntity):
     
     # Identification
     agent_type = Column(Enum(AgentType), nullable=False)
-    agentium_id = Column(String(10), unique=True, nullable=False)  # 0xxxx, 1xxxx format
+    agentium_id = Column(String(10), unique=True, nullable=False)  # 0xxxx-9xxxx format
     name = Column(String(100), nullable=False)
     description = Column(Text, nullable=True)
     incarnation_number = Column(Integer, default=1) 
@@ -111,13 +111,14 @@ class Agent(BaseEntity):
     
     @validates('agentium_id')
     def validate_agentium_id_format(self, key, agentium_id):
-        """Ensure ID follows the 0xxxx, 1xxxx format."""
+        """Ensure ID follows the 0xxxx-9xxxx format."""
         if not agentium_id:
             return agentium_id
         
         prefix = agentium_id[0]
-        if prefix not in ['0', '1', '2', '3', '4', '5', '6']:
-            raise ValueError("Agentium ID must start with 0-6")
+        # Updated to allow prefixes 0-9
+        if prefix not in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9']:
+            raise ValueError("Agentium ID must start with 0-9")
         
         if len(agentium_id) != 5 or not agentium_id.isdigit():
             raise ValueError("Agentium ID must be exactly 5 digits")
@@ -798,28 +799,39 @@ class Agent(BaseEntity):
             AgentType.HEAD_OF_COUNCIL: '0',
             AgentType.COUNCIL_MEMBER: '1',
             AgentType.LEAD_AGENT: '2',
-            AgentType.TASK_AGENT: '3',
-            AgentType.CODE_CRITIC: '4',
-            AgentType.OUTPUT_CRITIC: '5',
-            AgentType.PLAN_CRITIC: '6',
+            # Task Agent now uses multiple prefixes 3-6
+            AgentType.TASK_AGENT: ['3', '4', '5', '6'],  
+            AgentType.CODE_CRITIC: '7',
+            AgentType.OUTPUT_CRITIC: '8',
+            AgentType.PLAN_CRITIC: '9',
         }
         
-        prefix = prefix_map[agent_type]
+        prefixes = prefix_map[agent_type]
+        # Handle single prefix vs list of prefixes
+        if not isinstance(prefixes, list):
+            prefixes = [prefixes]
         
-        result = session.execute(
-            select(Agent.agentium_id)
-            .where(Agent.agentium_id.like(f"{prefix}%"))
-            .order_by(Agent.agentium_id.desc())
-            .limit(1)
-        ).scalar()
+        # For each possible prefix, find the next available ID
+        for prefix in prefixes:
+            result = session.execute(
+                select(Agent.agentium_id)
+                .where(Agent.agentium_id.like(f"{prefix}%"))
+                .order_by(Agent.agentium_id.desc())
+                .limit(1)
+            ).scalar()
+            
+            if result:
+                last_num = int(result[1:])
+                # Check if we have room in this prefix range (max 9999 per prefix)
+                if last_num < 9999:
+                    new_num = last_num + 1
+                    return f"{prefix}{new_num:04d}"
+            else:
+                # No IDs used for this prefix yet
+                return f"{prefix}0001"
         
-        if result:
-            last_num = int(result[1:])
-            new_num = last_num + 1
-        else:
-            new_num = 1
-        
-        return f"{prefix}{new_num:04d}"
+        # If all prefixes are exhausted (unlikely with 40,000 slots for Task Agents)
+        raise RuntimeError(f"No available IDs for agent type {agent_type}")
     
     def _create_default_ethos(self, agent: 'Agent', session: Session) -> Ethos:
         """

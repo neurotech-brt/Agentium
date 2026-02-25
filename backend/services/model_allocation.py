@@ -194,6 +194,19 @@ class ModelAllocationService:
             },
         }
 
+        # Extend preferences for expanded Task Agents (4, 5, 6)
+        for t in [4, 5, 6]:
+            tier_preferences[t] = tier_preferences[3]
+            
+        # Add preferences for Critic Agents (7, 8, 9)
+        for t in [7, 8, 9]:
+            tier_preferences[t] = {
+                "code": ModelCapability.CODE,
+                "analysis": ModelCapability.ANALYSIS,
+                "creative": ModelCapability.ANALYSIS,
+                "simple": ModelCapability.SIMPLE,
+            }
+
         preferences = tier_preferences.get(agent_tier, tier_preferences[3])
         target_capability = preferences.get(task_type, ModelCapability.SIMPLE)
 
@@ -210,10 +223,10 @@ class ModelAllocationService:
         # Get model for capability
         model = api_manager._get_best_available_model_by_capability(target_capability)
 
-        # Budget check for Task agents (tier 3)
+        # Budget check for Task agents (tiers 3, 4, 5, 6)
         try:
             from backend.services.token_optimizer import idle_budget
-            if agent_tier == 3 and not idle_budget.check_budget(model.cost_per_1k_tokens * 5):
+            if agent_tier in [3, 4, 5, 6] and not idle_budget.check_budget(model.cost_per_1k_tokens * 5):
                 model = api_manager._get_best_local_model()
         except Exception:
             pass  # Budget check is advisory only
@@ -280,7 +293,7 @@ class ModelAllocationService:
 
         report = {
             "total_agents": len(agents),
-            "allocations_by_tier": {0: 0, 1: 0, 2: 0, 3: 0},
+            "allocations_by_tier": {i: 0 for i in range(10)},
             "allocations_by_capability": {
                 cap.value: 0 for cap in ModelCapability
             },

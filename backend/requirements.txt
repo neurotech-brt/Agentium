@@ -2,6 +2,10 @@ croniter==3.0.3
 docker==7.1.0
 mcp>=1.0.0
 
+pyautogui==0.9.54
+python-docx==1.1.2
+openpyxl==3.1.2
+
 # NOTE: PyTorch installed separately in Dockerfile with CPU index
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

@@ -259,7 +259,7 @@ Decision: ALLOW / BLOCK / VOTE_REQUIRED
 **ID Generation Rules:**
 
 ```
-Head:    00001-00999  (max 999 heads - one per Sovereign)
+Head:    00001-09999  (max 9999 heads - one per Sovereign)
 Council: 10001-19999  (max 9,999 councils)
 Lead:    20001-29999  (max 9,999 leads)
 Task:    30001-99999  (max 69,999 tasks)
@@ -1029,6 +1029,8 @@ mcp==1.0.0    # Official MCP Python SDK
 - [ ] Channel-specific settings (rate limits, filters)
 
 ---
+
+(Here)
 
 ## Phase 8: Testing & Reliability 🧪 (ONGOING)
 

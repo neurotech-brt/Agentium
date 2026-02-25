@@ -25,7 +25,7 @@ services:
   # ChromaDB Vector Store
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   chromadb:
-    image: chromadb/chroma:latest
+    image: chromadb/chroma:1.5.1
     container_name: agentium-chroma
     volumes:
       - chroma_data:/data
@@ -34,17 +34,17 @@ services:
     networks:
       - agentium-network
     healthcheck:
-      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/localhost/8000 && echo -e 'GET /api/v2/heartbeat HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3 && cat <&3 | grep -q '200 OK'"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v2/heartbeat"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
-    
+
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # Redis (Celery Task Queue)
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   redis:
-    image: redis:7-alpine
+    image: redis:7.2.1-alpine
     container_name: agentium-redis
     ports:
       - "6379:6379"
@@ -129,6 +129,8 @@ services:
       - HOST_HOME_MOUNT=/host_home
       - WHATSAPP_BRIDGE_URL=ws://whatsapp-bridge:3001
       - WHATSAPP_BRIDGE_TOKEN=${WHATSAPP_BRIDGE_TOKEN:-changeme}
+      - DISPLAY=:99
+      - XVFB_RESOLUTION=1920x1080x24
     restart: unless-stopped
     command: uvicorn backend.main:app --host 0.0.0.0 --port 8000
     depends_on:
@@ -186,6 +188,8 @@ services:
       - HOST_HOME_MOUNT=/host_home
       - WHATSAPP_BRIDGE_URL=ws://whatsapp-bridge:3001
       - WHATSAPP_BRIDGE_TOKEN=${WHATSAPP_BRIDGE_TOKEN:-changeme}
+      - DISPLAY=:99
+      - XVFB_RESOLUTION=1920x1080x24
     depends_on:
       backend:
         condition: service_healthy
@@ -234,6 +238,8 @@ services:
       - HOST_FS_MOUNT=/host
       - WHATSAPP_BRIDGE_URL=ws://whatsapp-bridge:3001
       - WHATSAPP_BRIDGE_TOKEN=${WHATSAPP_BRIDGE_TOKEN:-changeme}
+      - DISPLAY=:99
+      - XVFB_RESOLUTION=1920x1080x24
     depends_on:
       backend:
         condition: service_healthy

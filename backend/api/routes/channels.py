@@ -233,6 +233,45 @@ def _get_setup_instructions(channel_type: ChannelType, webhook_url: str) -> Dict
     return instructions.get(channel_type, {"webhook_url": webhook_url})
 
 
+@router.get("/channels/metrics")
+async def get_all_channels_metrics(
+    current_user: dict = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """Get metrics for all channels (for dashboard widget)."""
+    channels = db.query(ExternalChannel).all()
+    
+    results = []
+    for channel in channels:
+        metrics = db.query(ChannelMetrics).filter_by(channel_id=channel.id).first()
+        if not metrics:
+            metrics = ChannelMetrics(channel_id=channel.id)
+            db.add(metrics)
+            db.commit()
+        
+        results.append({
+            "channel_id": channel.id,
+            "channel_name": channel.name,
+            "channel_type": channel.channel_type.value,
+            "status": channel.status.value,
+            "metrics": metrics.to_dict(),
+            "health_status": _calculate_health_status(metrics)
+        })
+    
+    # Commit once after all creations
+    db.commit()
+    
+    return {
+        "channels": results,
+        "summary": {
+            "total": len(results),
+            "healthy": sum(1 for r in results if r["health_status"] == "healthy"),
+            "warning": sum(1 for r in results if r["health_status"] == "warning"),
+            "critical": sum(1 for r in results if r["health_status"] == "critical"),
+            "circuit_open": sum(1 for r in results if r["metrics"]["circuit_breaker_state"] == "open")
+        }
+    }
+
 @router.get("/channels/{channel_id}")
 async def get_channel(
     channel_id: str,
@@ -884,47 +923,6 @@ async def get_channel_metrics(
         "metrics": metrics.to_dict(),
         "health_status": _calculate_health_status(metrics)
     }
-
-
-@router.get("/channels/metrics")
-async def get_all_channels_metrics(
-    current_user: dict = Depends(get_current_active_user),
-    db: Session = Depends(get_db)
-):
-    """Get metrics for all channels (for dashboard widget)."""
-    channels = db.query(ExternalChannel).all()
-    
-    results = []
-    for channel in channels:
-        metrics = db.query(ChannelMetrics).filter_by(channel_id=channel.id).first()
-        if not metrics:
-            metrics = ChannelMetrics(channel_id=channel.id)
-            db.add(metrics)
-            db.commit()
-        
-        results.append({
-            "channel_id": channel.id,
-            "channel_name": channel.name,
-            "channel_type": channel.channel_type.value,
-            "status": channel.status.value,
-            "metrics": metrics.to_dict(),
-            "health_status": _calculate_health_status(metrics)
-        })
-    
-    # Commit once after all creations
-    db.commit()
-    
-    return {
-        "channels": results,
-        "summary": {
-            "total": len(results),
-            "healthy": sum(1 for r in results if r["health_status"] == "healthy"),
-            "warning": sum(1 for r in results if r["health_status"] == "warning"),
-            "critical": sum(1 for r in results if r["health_status"] == "critical"),
-            "circuit_open": sum(1 for r in results if r["metrics"]["circuit_breaker_state"] == "open")
-        }
-    }
-
 
 def _calculate_health_status(metrics: ChannelMetrics) -> str:
     """Calculate overall health status based on metrics."""

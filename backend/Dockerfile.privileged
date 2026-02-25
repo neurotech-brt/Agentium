@@ -29,6 +29,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-dev \
     libffi-dev \
     libssl-dev \
+    # Xvfb and X11 libraries for pyautogui headless support
+    xvfb \
+    x11-utils \
+    xauth \
+    libx11-6 \
+    libxext6 \
+    libxrandr2 \
+    libxi6 \
+    libxtst6 \
+    libxss1 \
+    # tkinter required by mouseinfo (pyautogui dependency)
+    python3-tk \
+    tk-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Create agentium user with root capabilities
@@ -61,13 +74,22 @@ ENV PYTHONPATH=/app \
     HOST_ROOT_ACCESS=true \
     HOST_DOCKER_SOCKET=/var/run/docker.sock \
     HOST_FS_MOUNT=/host \
-    HOST_HOME_MOUNT=/host_home
+    HOST_HOME_MOUNT=/host_home \
+    DISPLAY=:99 \
+    XVFB_SCREEN=0 \
+    XVFB_RESOLUTION=1920x1080x24
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=5 \
     CMD python -c "import http.client; conn = http.client.HTTPConnection('localhost', 8000); conn.request('GET', '/api/health'); exit(0 if conn.getresponse().status == 200 else 1)" || exit 1
 
-# "sh" at the end is $0 — fixes exec "$@" so CMD args are passed correctly
-ENTRYPOINT ["sh", "-c", "python scripts/init_db.py && exec \"$@\"", "sh"]
+COPY scripts/entrypoint.sh /entrypoint.sh
+
+# Switch to root just to chmod, then back to agentium
+USER root
+RUN chmod +x /entrypoint.sh
+USER agentium
+
+ENTRYPOINT ["/entrypoint.sh"]
 CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]

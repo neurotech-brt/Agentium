@@ -91,7 +91,7 @@ class Task(BaseEntity):
     
     __tablename__ = 'tasks'
     
-    title = Column(String(200), nullable=False)
+    title = Column(String(200), nullable=True)  # nullable to support idle tasks created without title
     description = Column(Text, nullable=False)
     task_type = Column(Enum(TaskType), default=TaskType.EXECUTION, nullable=False)
     priority = Column(Enum(TaskPriority), default=TaskPriority.NORMAL, nullable=False)
@@ -145,6 +145,12 @@ class Task(BaseEntity):
     last_error = Column(Text, nullable=True)
     retry_count = Column(Integer, default=0)
     max_retries = Column(Integer, default=5)  # UPDATED: from 3 to 5
+
+    # Idempotency key for duplicate prevention (used by idle task creation)
+    idempotency_key = Column(String(200), unique=True, nullable=True, index=True)
+
+    # Supervisor agent ID (used by idle governance)
+    supervisor_id = Column(String(20), nullable=True)
 
     # ── Phase 6.3: Pre-Declared Acceptance Criteria ──────────────────────────
     # Stored as a JSON array of AcceptanceCriterion dicts.

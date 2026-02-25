@@ -176,7 +176,8 @@ class ExternalMessage(BaseEntity):
         })
         return base
 
-    class CircuitBreakerState(str, enum.Enum):
+class CircuitBreakerState(str, enum.Enum):
+    """Circuit breaker states for channel resilience."""
     CLOSED = "closed"
     HALF_OPEN = "half_open"
     OPEN = "open"

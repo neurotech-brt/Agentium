@@ -1,4 +1,4 @@
-import { HealthIndicator } from '@/components/common/HealthIndicator';
+import { HealthIndicator } from '@/components/HealthIndicator';
 import type { ChannelMetrics, ChannelHealthStatus } from '@/types';
 
 interface ChannelMetricsCardProps {

@@ -287,6 +287,7 @@ class EnhancedIdleGovernanceEngine:
             # Log the detection
             from backend.models.entities.audit import AuditLog, AuditLevel, AuditCategory
             AuditLog.log(
+                db=db,
                 level=AuditLevel.INFO,
                 category=AuditCategory.GOVERNANCE,
                 actor_type="system",
@@ -587,11 +588,13 @@ class EnhancedIdleGovernanceEngine:
                 return
             
             idle_task = Task(
+                title=f"[Idle] {task_type.value}",
                 description=f"[Idle] {task_type.value} by {agent.agentium_id}",
-                type=task_type,
+                task_type=task_type,
                 status=TaskStatus.IN_PROGRESS,
                 priority=TaskPriority.LOW,
                 supervisor_id=agent.agentium_id,
+                created_by=agent.agentium_id,
                 assigned_task_agent_ids=[agent.agentium_id],
                 is_idle_task=True,
                 idempotency_key=idempotency_key,

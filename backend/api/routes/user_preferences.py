@@ -67,14 +67,14 @@ async def list_my_preferences(
     """List all preferences for the current user."""
     service = UserPreferenceService(db)
     prefs = service.get_all_preferences(
-        user_id=current_user["id"],
+        user_id=current_user["user_id"],
         category=category,
         scope=scope,
         include_system=True
     )
 
     return {
-        "user_id": current_user["id"],
+        "user_id": current_user["user_id"],
         "count": len(prefs),
         "preferences": [p.to_dict() for p in prefs]
     }
@@ -89,7 +89,7 @@ async def get_my_preference(
 ):
     """Get a specific preference value."""
     service = UserPreferenceService(db)
-    value = service.get_value(key, user_id=current_user["id"], default=default)
+    value = service.get_value(key, user_id=current_user["user_id"], default=default)
 
     if value is None and default is None:
         raise HTTPException(status_code=404, detail=f"Preference '{key}' not found")
@@ -113,7 +113,7 @@ async def create_preference(
     pref = service.set_preference(
         key=request.key,
         value=request.value,
-        user_id=current_user["id"],
+        user_id=current_user["user_id"],
         category=request.category,
         scope=request.scope,
         scope_target_id=request.scope_target_id,
@@ -138,14 +138,14 @@ async def update_preference(
     service = UserPreferenceService(db)
 
     # Check if exists
-    existing = service.get_preference(key, user_id=current_user["id"])
+    existing = service.get_preference(key, user_id=current_user["user_id"])
     if not existing:
         raise HTTPException(status_code=404, detail=f"Preference '{key}' not found")
 
     pref = service.set_preference(
         key=key,
         value=request.value,
-        user_id=current_user["id"],
+        user_id=current_user["user_id"],
         change_reason=request.reason
     )
 
@@ -164,7 +164,7 @@ async def delete_preference(
     """Soft-delete a preference."""
     service = UserPreferenceService(db)
 
-    success = service.delete_preference(key, user_id=current_user["id"])
+    success = service.delete_preference(key, user_id=current_user["user_id"])
     if not success:
         raise HTTPException(status_code=404, detail=f"Preference '{key}' not found")
 
@@ -190,7 +190,7 @@ async def bulk_update_preferences(
             service.set_preference(
                 key=key,
                 value=value,
-                user_id=current_user["id"],
+                user_id=current_user["user_id"],
                 change_reason=request.reason
             )
             results["success"].append(key)
@@ -235,7 +235,7 @@ async def initialize_defaults(
     """Initialize default preferences for current user."""
     service = UserPreferenceService(db)
 
-    prefs = service.initialize_user_defaults(current_user["id"])
+    prefs = service.initialize_user_defaults(current_user["user_id"])
 
     return {
         "status": "initialized",

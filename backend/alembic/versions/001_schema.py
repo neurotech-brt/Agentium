@@ -1,13 +1,25 @@
-"""Agentium Complete Schema Migration (consolidated)
-
-This is the single canonical migration that replaces all previous migrations
-(001 through 004).  It creates the complete database schema in one go,
-including remote-execution tables and unified-inbox alignment columns.
+"""Agentium Complete Schema — Consolidated Migration (replaces 001–004)
 
 Revision ID: 001_schema
 Revises:
-Create Date: 2026-02-22
+Create Date: 2026-02-26
+
+Fixes applied vs previous 001–004:
+  - tasktype enum created upfront (was missing → idle governance 500s)
+  - taskpriority enum created upfront (was missing → idle governance 500s)
+  - Both enums include UPPERCASE variants (app sends uppercase; enums are case-sensitive)
+  - tasks.task_type column is tasktype enum from creation (not VARCHAR patched later)
+  - tasks.priority column is taskpriority enum from creation (not INTEGER patched later)
+  - tasks.created_by is VARCHAR(10) from creation (correct size for agentium_ids)
+  - tasks.idempotency_key and tasks.supervisor_id included from creation
+  - taskstatus enum ESCALATED variant included (was only in UPPERCASE block)
+  - user_preferences.is_editable_by_agents is BOOLEAN (not VARCHAR 'Y'/'N')
+  - user_preferences seed rows have user_id = NULL clearly intentional (system defaults)
+  - Removed duplicate index on user_preferences.agentium_id
+  - external_channels WhatsApp seed uses IF NOT EXISTS guard to be idempotent
+  - downgrade() drops all enum types with CASCADE
 """
+
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy import inspect, text
@@ -25,20 +37,61 @@ def upgrade():
     existing_tables = set(inspector.get_table_names())
 
     # =========================================================================
-    # ENUM TYPES
+    # ENUM TYPES — all created upfront so every table can reference them
     # =========================================================================
+
+    # taskstatus — both lower and UPPER variants (app sends UPPER)
     op.execute("""
         DO $$
         BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'taskstatus') THEN
                 CREATE TYPE taskstatus AS ENUM (
                     'pending', 'deliberating', 'approved', 'rejected', 'delegating',
-                    'assigned', 'in_progress', 'review', 'completed', 'failed', 'cancelled',
+                    'assigned', 'in_progress', 'review', 'completed', 'failed',
+                    'cancelled', 'escalated',
                     'idle_pending', 'idle_running', 'idle_paused', 'idle_completed',
                     'PENDING', 'DELIBERATING', 'APPROVED', 'REJECTED', 'DELEGATING',
                     'ASSIGNED', 'IN_PROGRESS', 'REVIEW', 'COMPLETED', 'FAILED',
-                    'CANCELLED', 'IDLE_PENDING', 'IDLE_RUNNING', 'IDLE_PAUSED',
-                    'IDLE_COMPLETED', 'ESCALATED'
+                    'CANCELLED', 'ESCALATED',
+                    'IDLE_PENDING', 'IDLE_RUNNING', 'IDLE_PAUSED', 'IDLE_COMPLETED'
+                );
+            END IF;
+        END $$;
+    """)
+
+    # tasktype — both lower and UPPER variants (idle governance sends UPPER)
+    op.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'tasktype') THEN
+                CREATE TYPE tasktype AS ENUM (
+                    'constitutional', 'system', 'one_time', 'recurring',
+                    'execution', 'research', 'automation', 'analysis', 'communication',
+                    'constitution_read',       'CONSTITUTION_READ',
+                    'constitution_refine',     'CONSTITUTION_REFINE',
+                    'predictive_planning',     'PREDICTIVE_PLANNING',
+                    'preference_optimization', 'PREFERENCE_OPTIMIZATION',
+                    'vector_maintenance',      'VECTOR_MAINTENANCE',
+                    'storage_dedupe',          'STORAGE_DEDUPE',
+                    'audit_archival',          'AUDIT_ARCHIVAL',
+                    'agent_health_scan',       'AGENT_HEALTH_SCAN',
+                    'ethos_optimization',      'ETHOS_OPTIMIZATION',
+                    'cache_optimization',      'CACHE_OPTIMIZATION',
+                    'idle_completed',          'IDLE_COMPLETED',
+                    'idle_paused',             'IDLE_PAUSED'
+                );
+            END IF;
+        END $$;
+    """)
+
+    # taskpriority — both lower and UPPER variants (app sends UPPER)
+    op.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'taskpriority') THEN
+                CREATE TYPE taskpriority AS ENUM (
+                    'sovereign', 'critical', 'high', 'normal', 'low', 'idle',
+                    'SOVEREIGN', 'CRITICAL', 'HIGH', 'NORMAL', 'LOW', 'IDLE'
                 );
             END IF;
         END $$;
@@ -279,78 +332,100 @@ def upgrade():
         op.create_index('idx_constitution_effective', 'constitutions', ['effective_date'])
 
     # =========================================================================
-    # 7. TASKS
+    # 7. TASKS  — uses correct enum types from the start; no patching needed
     # =========================================================================
     if 'tasks' not in existing_tables:
-        enum_exists = conn.execute(text(
-            "SELECT 1 FROM pg_type WHERE typname = 'taskstatus'"
-        )).fetchone()
-
-        if enum_exists:
-            op.create_table(
-                'tasks',
-                sa.Column('id', sa.String(36), primary_key=True),
-                sa.Column('agentium_id', sa.String(20), unique=True, nullable=True),
-                sa.Column('title', sa.String(200), nullable=False),
-                sa.Column('description', sa.Text(), nullable=False),
-                sa.Column('status', postgresql.ENUM(
-                    'pending', 'deliberating', 'approved', 'rejected', 'delegating',
-                    'assigned', 'in_progress', 'review', 'completed', 'failed', 'cancelled',
-                    'idle_pending', 'idle_running', 'idle_paused', 'idle_completed',
-                    'PENDING', 'DELIBERATING', 'APPROVED', 'REJECTED', 'DELEGATING',
-                    'ASSIGNED', 'IN_PROGRESS', 'REVIEW', 'COMPLETED', 'FAILED',
-                    'CANCELLED', 'IDLE_PENDING', 'IDLE_RUNNING', 'IDLE_PAUSED',
-                    'IDLE_COMPLETED', 'ESCALATED',
-                    name='taskstatus', create_type=False),
-                    server_default='pending', nullable=False),
-                sa.Column('priority', sa.Integer(), server_default='1'),
-                sa.Column('assigned_to_agent_id', sa.String(36), sa.ForeignKey('agents.id'), nullable=True),
-                sa.Column('created_by', sa.String(36), nullable=False),
-                sa.Column('started_at', sa.DateTime(), nullable=True),
-                sa.Column('completed_at', sa.DateTime(), nullable=True),
-                sa.Column('result_summary', sa.Text(), nullable=True),
-                sa.Column('acceptance_criteria', sa.JSON(), nullable=True),
-                sa.Column('veto_authority', sa.String(20), nullable=True),
-                sa.Column('task_type', sa.String(50), server_default='execution'),
-                sa.Column('constitutional_basis', sa.Text(), nullable=True),
-                sa.Column('hierarchical_id', sa.String(100), nullable=True),
-                sa.Column('recurrence_pattern', sa.String(100), nullable=True),
-                sa.Column('parent_task_id', sa.String(36), sa.ForeignKey('tasks.id'), nullable=True),
-                sa.Column('execution_plan_id', sa.String(36), nullable=True),
-                sa.Column('is_idle_task', sa.Boolean(), server_default='false'),
-                sa.Column('idle_task_category', sa.String(50), nullable=True),
-                sa.Column('estimated_tokens', sa.Integer(), server_default='0'),
-                sa.Column('tokens_used', sa.Integer(), server_default='0'),
-                sa.Column('status_history', sa.JSON(), server_default='[]'),
-                sa.Column('head_of_council_id', sa.String(36), sa.ForeignKey('agents.id'), nullable=True),
-                sa.Column('assigned_council_ids', sa.JSON(), server_default='[]'),
-                sa.Column('lead_agent_id', sa.String(36), sa.ForeignKey('agents.id'), nullable=True),
-                sa.Column('assigned_task_agent_ids', sa.JSON(), server_default='[]'),
-                sa.Column('requires_deliberation', sa.Boolean(), server_default='true'),
-                sa.Column('deliberation_id', sa.String(36), nullable=True),
-                sa.Column('approved_by_council', sa.Boolean(), server_default='false'),
-                sa.Column('approved_by_head', sa.Boolean(), server_default='false'),
-                sa.Column('execution_plan', sa.Text(), nullable=True),
-                sa.Column('execution_context', sa.Text(), nullable=True),
-                sa.Column('tools_allowed', sa.JSON(), server_default='[]'),
-                sa.Column('sandbox_mode', sa.Boolean(), server_default='true'),
-                sa.Column('result_data', sa.JSON(), nullable=True),
-                sa.Column('result_files', sa.JSON(), nullable=True),
-                sa.Column('completion_percentage', sa.Integer(), server_default='0'),
-                sa.Column('due_date', sa.DateTime(), nullable=True),
-                sa.Column('time_estimated', sa.Integer(), server_default='0'),
-                sa.Column('time_actual', sa.Integer(), server_default='0'),
-                sa.Column('error_count', sa.Integer(), server_default='0'),
-                sa.Column('last_error', sa.Text(), nullable=True),
-                sa.Column('retry_count', sa.Integer(), server_default='0'),
-                sa.Column('max_retries', sa.Integer(), server_default='5'),
-                sa.Column('is_active', sa.Boolean(), server_default='true'),
-                sa.Column('created_at', sa.DateTime(), server_default=sa.func.now()),
-                sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now()),
-                sa.Column('deleted_at', sa.DateTime(), nullable=True),
-            )
-        else:
-            print("WARNING: taskstatus enum does not exist, skipping tasks table creation")
+        op.create_table(
+            'tasks',
+            sa.Column('id', sa.String(36), primary_key=True),
+            sa.Column('agentium_id', sa.String(20), unique=True, nullable=True),
+            sa.Column('title', sa.String(200), nullable=False),
+            sa.Column('description', sa.Text(), nullable=False),
+            # FIX: taskstatus enum (was correct in 001, preserved)
+            sa.Column('status', postgresql.ENUM(
+                'pending', 'deliberating', 'approved', 'rejected', 'delegating',
+                'assigned', 'in_progress', 'review', 'completed', 'failed',
+                'cancelled', 'escalated',
+                'idle_pending', 'idle_running', 'idle_paused', 'idle_completed',
+                'PENDING', 'DELIBERATING', 'APPROVED', 'REJECTED', 'DELEGATING',
+                'ASSIGNED', 'IN_PROGRESS', 'REVIEW', 'COMPLETED', 'FAILED',
+                'CANCELLED', 'ESCALATED',
+                'IDLE_PENDING', 'IDLE_RUNNING', 'IDLE_PAUSED', 'IDLE_COMPLETED',
+                name='taskstatus', create_type=False),
+                server_default='pending', nullable=False),
+            # FIX: taskpriority enum from creation (was INTEGER in 001, VARCHAR-patched in 004)
+            sa.Column('priority', postgresql.ENUM(
+                'sovereign', 'critical', 'high', 'normal', 'low', 'idle',
+                'SOVEREIGN', 'CRITICAL', 'HIGH', 'NORMAL', 'LOW', 'IDLE',
+                name='taskpriority', create_type=False),
+                server_default='normal', nullable=False),
+            # FIX: tasktype enum from creation (was VARCHAR in 001, enum-patched in 004)
+            sa.Column('task_type', postgresql.ENUM(
+                'constitutional', 'system', 'one_time', 'recurring',
+                'execution', 'research', 'automation', 'analysis', 'communication',
+                'constitution_read',       'CONSTITUTION_READ',
+                'constitution_refine',     'CONSTITUTION_REFINE',
+                'predictive_planning',     'PREDICTIVE_PLANNING',
+                'preference_optimization', 'PREFERENCE_OPTIMIZATION',
+                'vector_maintenance',      'VECTOR_MAINTENANCE',
+                'storage_dedupe',          'STORAGE_DEDUPE',
+                'audit_archival',          'AUDIT_ARCHIVAL',
+                'agent_health_scan',       'AGENT_HEALTH_SCAN',
+                'ethos_optimization',      'ETHOS_OPTIMIZATION',
+                'cache_optimization',      'CACHE_OPTIMIZATION',
+                'idle_completed',          'IDLE_COMPLETED',
+                'idle_paused',             'IDLE_PAUSED',
+                name='tasktype', create_type=False),
+                server_default='execution', nullable=False),
+            # FIX: VARCHAR(10) from creation (was VARCHAR(36) in 001, truncated in 004)
+            sa.Column('created_by', sa.String(10), nullable=False),
+            sa.Column('assigned_to_agent_id', sa.String(36), sa.ForeignKey('agents.id'), nullable=True),
+            sa.Column('started_at', sa.DateTime(), nullable=True),
+            sa.Column('completed_at', sa.DateTime(), nullable=True),
+            sa.Column('result_summary', sa.Text(), nullable=True),
+            sa.Column('acceptance_criteria', sa.JSON(), nullable=True),
+            sa.Column('veto_authority', sa.String(20), nullable=True),
+            sa.Column('constitutional_basis', sa.Text(), nullable=True),
+            sa.Column('hierarchical_id', sa.String(100), nullable=True),
+            sa.Column('recurrence_pattern', sa.String(100), nullable=True),
+            sa.Column('parent_task_id', sa.String(36), sa.ForeignKey('tasks.id'), nullable=True),
+            sa.Column('execution_plan_id', sa.String(36), nullable=True),
+            sa.Column('is_idle_task', sa.Boolean(), server_default='false'),
+            sa.Column('idle_task_category', sa.String(50), nullable=True),
+            sa.Column('estimated_tokens', sa.Integer(), server_default='0'),
+            sa.Column('tokens_used', sa.Integer(), server_default='0'),
+            sa.Column('status_history', sa.JSON(), server_default='[]'),
+            sa.Column('head_of_council_id', sa.String(36), sa.ForeignKey('agents.id'), nullable=True),
+            sa.Column('assigned_council_ids', sa.JSON(), server_default='[]'),
+            sa.Column('lead_agent_id', sa.String(36), sa.ForeignKey('agents.id'), nullable=True),
+            sa.Column('assigned_task_agent_ids', sa.JSON(), server_default='[]'),
+            sa.Column('requires_deliberation', sa.Boolean(), server_default='true'),
+            sa.Column('deliberation_id', sa.String(36), nullable=True),
+            sa.Column('approved_by_council', sa.Boolean(), server_default='false'),
+            sa.Column('approved_by_head', sa.Boolean(), server_default='false'),
+            sa.Column('execution_plan', sa.Text(), nullable=True),
+            sa.Column('execution_context', sa.Text(), nullable=True),
+            sa.Column('tools_allowed', sa.JSON(), server_default='[]'),
+            sa.Column('sandbox_mode', sa.Boolean(), server_default='true'),
+            sa.Column('result_data', sa.JSON(), nullable=True),
+            sa.Column('result_files', sa.JSON(), nullable=True),
+            sa.Column('completion_percentage', sa.Integer(), server_default='0'),
+            sa.Column('due_date', sa.DateTime(), nullable=True),
+            sa.Column('time_estimated', sa.Integer(), server_default='0'),
+            sa.Column('time_actual', sa.Integer(), server_default='0'),
+            sa.Column('error_count', sa.Integer(), server_default='0'),
+            sa.Column('last_error', sa.Text(), nullable=True),
+            sa.Column('retry_count', sa.Integer(), server_default='0'),
+            sa.Column('max_retries', sa.Integer(), server_default='5'),
+            # FIX: included from creation (was added in 004)
+            sa.Column('idempotency_key', sa.String(200), unique=True, nullable=True),
+            sa.Column('supervisor_id', sa.String(20), nullable=True),
+            sa.Column('is_active', sa.Boolean(), server_default='true'),
+            sa.Column('created_at', sa.DateTime(), server_default=sa.func.now()),
+            sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now()),
+            sa.Column('deleted_at', sa.DateTime(), nullable=True),
+        )
+        op.create_index('ix_tasks_idempotency_key', 'tasks', ['idempotency_key'], unique=True)
 
     # =========================================================================
     # 8. SUBTASKS
@@ -361,6 +436,7 @@ def upgrade():
             sa.Column('id', sa.String(36), primary_key=True),
             sa.Column('task_id', sa.String(36), sa.ForeignKey('tasks.id')),
             sa.Column('agentium_id', sa.String(20), unique=True, nullable=False),
+            sa.Column('title', sa.String(200), nullable=True),
             sa.Column('description', sa.Text(), nullable=False),
             sa.Column('status', sa.String(20), server_default='pending'),
             sa.Column('assigned_to_agent_id', sa.String(36), sa.ForeignKey('agents.id'), nullable=True),
@@ -402,13 +478,12 @@ def upgrade():
             sa.Column('deleted_at', sa.DateTime(), nullable=True),
         )
 
-    # Add FK from tasks to deliberations if both exist
-    if 'tasks' in existing_tables and 'task_deliberations' in existing_tables:
-        try:
-            op.create_foreign_key('tasks_deliberation_id_fkey', 'tasks', 'task_deliberations',
-                                  ['deliberation_id'], ['id'])
-        except Exception:
-            pass
+    # Add FK from tasks to deliberations (both tables now exist)
+    try:
+        op.create_foreign_key('tasks_deliberation_id_fkey', 'tasks', 'task_deliberations',
+                              ['deliberation_id'], ['id'])
+    except Exception:
+        pass  # already exists on re-run
 
     # =========================================================================
     # 10. TASK EVENTS & AUDIT LOGS
@@ -594,7 +669,6 @@ def upgrade():
 
     # =========================================================================
     # 16. EXTERNAL CHANNELS & MESSAGES
-    #     Includes 002_schema WhatsApp provider default + 004 user_id column
     # =========================================================================
     if 'external_channels' not in existing_tables:
         op.create_table(
@@ -614,7 +688,6 @@ def upgrade():
             sa.Column('last_message_at', sa.DateTime(), nullable=True),
             sa.Column('last_tested_at', sa.DateTime(), nullable=True),
             sa.Column('error_message', sa.Text(), nullable=True),
-            # 004: per-user isolation
             sa.Column('user_id', sa.String(36), sa.ForeignKey('users.id'), nullable=True),
             sa.Column('is_active', sa.Boolean(), server_default='true'),
             sa.Column('created_at', sa.DateTime(), server_default=sa.func.now()),
@@ -622,7 +695,7 @@ def upgrade():
             sa.Column('deleted_at', sa.DateTime(), nullable=True),
         )
 
-    # 002_schema: seed WhatsApp channels with cloud_api provider default
+    # Seed WhatsApp provider default (idempotent)
     op.execute("""
         UPDATE external_channels
         SET config = (
@@ -634,10 +707,6 @@ def upgrade():
         )::json
         WHERE channel_type = 'whatsapp'
           AND (config IS NULL OR config->>'provider' IS NULL)
-    """)
-    op.execute("""
-        COMMENT ON COLUMN external_channels.config IS
-        'Channel configuration JSON. For WhatsApp: includes provider (cloud_api|web_bridge), credentials, and connection settings'
     """)
 
     if 'external_messages' not in existing_tables:
@@ -681,7 +750,7 @@ def upgrade():
         op.execute("""
             INSERT INTO system_settings (key, value, description, updated_at) VALUES
                 ('daily_token_limit', '100000', 'Maximum tokens per day across all API providers', NOW()),
-                ('daily_cost_limit', '5.0', 'Maximum USD cost per day across all API providers', NOW())
+                ('daily_cost_limit',  '5.0',    'Maximum USD cost per day across all API providers',  NOW())
             ON CONFLICT (key) DO NOTHING
         """)
 
@@ -716,7 +785,6 @@ def upgrade():
 
     # =========================================================================
     # 19. CONVERSATIONS & CHAT MESSAGES
-    #     Includes 004 unified-inbox alignment columns
     # =========================================================================
     if 'conversations' not in existing_tables:
         op.create_table(
@@ -730,7 +798,6 @@ def upgrade():
             sa.Column('last_message_at', sa.DateTime(), server_default=sa.func.now()),
             sa.Column('is_deleted', sa.Boolean(), server_default='false'),
             sa.Column('is_archived', sa.Boolean(), server_default='false'),
-            # 004: active-state flag
             sa.Column('is_active', sa.Boolean(), server_default='true', nullable=False),
             sa.Column('deleted_at', sa.DateTime(), nullable=True),
         )
@@ -748,7 +815,6 @@ def upgrade():
             sa.Column('attachments', sa.JSON(), nullable=True),
             sa.Column('message_metadata', sa.JSON(), nullable=True),
             sa.Column('agent_id', sa.String(50), nullable=True),
-            # 004: unified-inbox fields
             sa.Column('sender_channel', sa.String(50), nullable=True),
             sa.Column('message_type', sa.String(50), server_default='text', nullable=True),
             sa.Column('media_url', sa.Text(), nullable=True),
@@ -953,9 +1019,9 @@ def upgrade():
             sa.Column('updated_at', sa.DateTime(), server_default=sa.func.now()),
             sa.Column('deleted_at', sa.DateTime(), nullable=True),
         )
-        op.create_index('idx_tool_staging_name', 'tool_staging', ['tool_name'])
+        op.create_index('idx_tool_staging_name',     'tool_staging', ['tool_name'])
         op.create_index('idx_tool_staging_proposer', 'tool_staging', ['proposed_by_agentium_id'])
-        op.create_index('idx_tool_staging_status', 'tool_staging', ['status'])
+        op.create_index('idx_tool_staging_status',   'tool_staging', ['status'])
 
     if 'tool_versions' not in existing_tables:
         op.create_table(
@@ -1061,8 +1127,8 @@ def upgrade():
             sa.Column('deleted_at', sa.DateTime(), nullable=True),
         )
         op.create_index('idx_scheduled_next_run', 'scheduled_tasks', ['next_execution_at'])
-        op.create_index('idx_scheduled_owner', 'scheduled_tasks', ['owner_agentium_id'])
-        op.create_index('idx_scheduled_status', 'scheduled_tasks', ['status'])
+        op.create_index('idx_scheduled_owner',    'scheduled_tasks', ['owner_agentium_id'])
+        op.create_index('idx_scheduled_status',   'scheduled_tasks', ['status'])
 
     if 'scheduled_task_executions' not in existing_tables:
         op.create_table(
@@ -1106,36 +1172,36 @@ def upgrade():
             sa.Column('deleted_at', sa.DateTime(), nullable=True),
         )
         op.create_index('idx_exec_ckpt_session', 'execution_checkpoints', ['session_id'])
-        op.create_index('idx_exec_ckpt_task', 'execution_checkpoints', ['task_id'])
+        op.create_index('idx_exec_ckpt_task',    'execution_checkpoints', ['task_id'])
 
     # =========================================================================
-    # 25. REMOTE EXECUTIONS & SANDBOXES  (from 003_add_remote_execution)
+    # 25. REMOTE EXECUTIONS & SANDBOXES
     # =========================================================================
     if 'remote_executions' not in existing_tables:
         op.create_table(
             'remote_executions',
-            sa.Column('id', sa.String(length=36), nullable=False),
-            sa.Column('agentium_id', sa.String(length=10), nullable=False),
+            sa.Column('id', sa.String(36), nullable=False),
+            sa.Column('agentium_id', sa.String(10), nullable=False),
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.Column('deleted_at', sa.DateTime(), nullable=True),
             sa.Column('is_active', sa.Boolean(), nullable=False, server_default='true'),
-            sa.Column('execution_id', sa.String(length=50), nullable=False),
-            sa.Column('agent_id', sa.String(length=20), nullable=False),
-            sa.Column('task_id', sa.String(length=36), nullable=True),
+            sa.Column('execution_id', sa.String(50), nullable=False),
+            sa.Column('agent_id', sa.String(20), nullable=False),
+            sa.Column('task_id', sa.String(36), nullable=True),
             sa.Column('code', sa.Text(), nullable=False),
-            sa.Column('language', sa.String(length=20), nullable=True),
+            sa.Column('language', sa.String(20), nullable=True),
             sa.Column('dependencies', postgresql.JSON(astext_type=sa.Text()), nullable=True),
             sa.Column('input_data_schema', postgresql.JSON(astext_type=sa.Text()), nullable=True),
             sa.Column('expected_output_schema', postgresql.JSON(astext_type=sa.Text()), nullable=True),
-            sa.Column('status', sa.String(length=20), nullable=True),
+            sa.Column('status', sa.String(20), nullable=True),
             sa.Column('summary', postgresql.JSON(astext_type=sa.Text()), nullable=True),
             sa.Column('error_message', sa.Text(), nullable=True),
             sa.Column('cpu_time_seconds', sa.Float(), nullable=True),
             sa.Column('memory_peak_mb', sa.Float(), nullable=True),
             sa.Column('execution_time_ms', sa.Integer(), nullable=True),
-            sa.Column('sandbox_id', sa.String(length=50), nullable=True),
-            sa.Column('sandbox_container_id', sa.String(length=100), nullable=True),
+            sa.Column('sandbox_id', sa.String(50), nullable=True),
+            sa.Column('sandbox_container_id', sa.String(100), nullable=True),
             sa.Column('started_at', sa.DateTime(), nullable=True),
             sa.Column('completed_at', sa.DateTime(), nullable=True),
             sa.ForeignKeyConstraint(['agent_id'], ['agents.agentium_id']),
@@ -1144,65 +1210,191 @@ def upgrade():
             sa.UniqueConstraint('execution_id'),
         )
         op.create_index('ix_remote_executions_execution_id', 'remote_executions', ['execution_id'])
-        op.create_index('ix_remote_executions_agent_id', 'remote_executions', ['agent_id'])
-        op.create_index('ix_remote_executions_status', 'remote_executions', ['status'])
-        op.create_index('ix_remote_executions_created_at', 'remote_executions', ['created_at'])
+        op.create_index('ix_remote_executions_agent_id',     'remote_executions', ['agent_id'])
+        op.create_index('ix_remote_executions_status',       'remote_executions', ['status'])
+        op.create_index('ix_remote_executions_created_at',   'remote_executions', ['created_at'])
 
     if 'sandboxes' not in existing_tables:
         op.create_table(
             'sandboxes',
-            sa.Column('id', sa.String(length=36), nullable=False),
-            sa.Column('agentium_id', sa.String(length=10), nullable=False),
+            sa.Column('id', sa.String(36), nullable=False),
+            sa.Column('agentium_id', sa.String(10), nullable=False),
             sa.Column('created_at', sa.DateTime(), nullable=False),
             sa.Column('updated_at', sa.DateTime(), nullable=False),
             sa.Column('deleted_at', sa.DateTime(), nullable=True),
             sa.Column('is_active', sa.Boolean(), nullable=False, server_default='true'),
-            sa.Column('sandbox_id', sa.String(length=50), nullable=False),
-            sa.Column('container_id', sa.String(length=100), nullable=True),
-            sa.Column('status', sa.String(length=20), nullable=True),
+            sa.Column('sandbox_id', sa.String(50), nullable=False),
+            sa.Column('container_id', sa.String(100), nullable=True),
+            sa.Column('status', sa.String(20), nullable=True),
             sa.Column('cpu_limit', sa.Float(), nullable=True),
             sa.Column('memory_limit_mb', sa.Integer(), nullable=True),
             sa.Column('timeout_seconds', sa.Integer(), nullable=True),
-            sa.Column('network_mode', sa.String(length=20), nullable=True),
+            sa.Column('network_mode', sa.String(20), nullable=True),
             sa.Column('allowed_hosts', postgresql.JSON(astext_type=sa.Text()), nullable=True),
             sa.Column('volume_mounts', postgresql.JSON(astext_type=sa.Text()), nullable=True),
             sa.Column('max_disk_mb', sa.Integer(), nullable=True),
-            sa.Column('current_execution_id', sa.String(length=50), nullable=True),
-            sa.Column('created_by_agent_id', sa.String(length=5), nullable=False),
+            sa.Column('current_execution_id', sa.String(50), nullable=True),
+            sa.Column('created_by_agent_id', sa.String(5), nullable=False),
             sa.Column('last_used_at', sa.DateTime(), nullable=True),
             sa.Column('destroyed_at', sa.DateTime(), nullable=True),
-            sa.Column('destroy_reason', sa.String(length=100), nullable=True),
+            sa.Column('destroy_reason', sa.String(100), nullable=True),
             sa.PrimaryKeyConstraint('id'),
             sa.UniqueConstraint('sandbox_id'),
         )
         op.create_index('ix_sandboxes_sandbox_id', 'sandboxes', ['sandbox_id'])
-        op.create_index('ix_sandboxes_agent_id', 'sandboxes', ['created_by_agent_id'])
-        op.create_index('ix_sandboxes_status', 'sandboxes', ['status'])
+        op.create_index('ix_sandboxes_agent_id',   'sandboxes', ['created_by_agent_id'])
+        op.create_index('ix_sandboxes_status',     'sandboxes', ['status'])
 
-    print("✅ Complete schema migration (001–004 consolidated) finished successfully")
+    # =========================================================================
+    # 26. MCP TOOLS  (from 002_mcp_tools)
+    # =========================================================================
+    if 'mcp_tools' not in existing_tables:
+        op.create_table(
+            'mcp_tools',
+            sa.Column('id', sa.String(36), primary_key=True),
+            sa.Column('agentium_id', sa.String(20), unique=True, nullable=True),
+            sa.Column('is_active', sa.Boolean(), nullable=False, server_default='true'),
+            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=sa.func.now()),
+            sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=sa.func.now()),
+            sa.Column('deleted_at', sa.DateTime(), nullable=True),
+            sa.Column('name', sa.String(128), nullable=False),
+            sa.Column('description', sa.Text(), nullable=False),
+            sa.Column('server_url', sa.String(512), nullable=False),
+            sa.Column('tier', sa.String(32), nullable=False, server_default='restricted'),
+            sa.Column('constitutional_article', sa.String(64), nullable=True),
+            sa.Column('status', sa.String(32), nullable=False, server_default='pending'),
+            sa.Column('approved_by_council', sa.Boolean(), nullable=False, server_default='false'),
+            sa.Column('approval_vote_id', sa.String(64), nullable=True),
+            sa.Column('approved_at', sa.DateTime(), nullable=True),
+            sa.Column('approved_by', sa.String(64), nullable=True),
+            sa.Column('revoked_at', sa.DateTime(), nullable=True),
+            sa.Column('revoked_by', sa.String(64), nullable=True),
+            sa.Column('revocation_reason', sa.Text(), nullable=True),
+            sa.Column('capabilities', sa.JSON(), nullable=False, server_default='[]'),
+            sa.Column('health_status', sa.String(32), nullable=False, server_default='unknown'),
+            sa.Column('last_health_check_at', sa.DateTime(), nullable=True),
+            sa.Column('failure_count', sa.Integer(), nullable=False, server_default='0'),
+            sa.Column('consecutive_failures', sa.Integer(), nullable=False, server_default='0'),
+            sa.Column('usage_count', sa.Integer(), nullable=False, server_default='0'),
+            sa.Column('last_used_at', sa.DateTime(), nullable=True),
+            sa.Column('audit_log', sa.JSON(), nullable=False, server_default='[]'),
+            sa.Column('proposed_by', sa.String(64), nullable=True),
+            sa.Column('proposed_at', sa.DateTime(), nullable=True),
+        )
+        op.create_index('ix_mcp_tools_agentium_id', 'mcp_tools', ['agentium_id'], unique=True)
+        op.create_index('ix_mcp_tools_name',        'mcp_tools', ['name'],        unique=True)
+        op.create_index('ix_mcp_tools_server_url',  'mcp_tools', ['server_url'],  unique=False)
+        op.create_index('ix_mcp_tools_status',      'mcp_tools', ['status'],      unique=False)
+        op.create_index('ix_mcp_tools_tier',        'mcp_tools', ['tier'],        unique=False)
+
+    # =========================================================================
+    # 27. USER PREFERENCES  (from 003_user_preferences)
+    #     FIX: is_editable_by_agents is Boolean (not VARCHAR 'Y'/'N')
+    #     FIX: single index on agentium_id (not double-indexed)
+    # =========================================================================
+    if 'user_preferences' not in existing_tables:
+        op.create_table(
+            'user_preferences',
+            sa.Column('id', sa.String(36), primary_key=True),
+            # FIX: unique=True only — removed redundant index=True
+            sa.Column('agentium_id', sa.String(20), unique=True, nullable=False),
+            sa.Column('is_active', sa.Boolean(), nullable=False, server_default='true'),
+            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=sa.func.now()),
+            sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=sa.func.now()),
+            sa.Column('deleted_at', sa.DateTime(), nullable=True),
+            sa.Column('user_id', sa.String(36), sa.ForeignKey('users.id'), nullable=True, index=True),
+            sa.Column('category', sa.String(50), nullable=False, server_default='general', index=True),
+            sa.Column('key', sa.String(255), nullable=False, index=True),
+            sa.Column('value_json', sa.Text(), nullable=False),
+            sa.Column('data_type', sa.String(20), nullable=False, server_default='string'),
+            sa.Column('scope', sa.String(20), nullable=False, server_default='global', index=True),
+            sa.Column('scope_target_id', sa.String(20), nullable=True, index=True),
+            sa.Column('description', sa.Text(), nullable=True),
+            # FIX: Boolean instead of VARCHAR(1) 'Y'/'N' — consistent with Python/ORM
+            sa.Column('is_editable_by_agents', sa.Boolean(), server_default='true', nullable=False),
+            sa.Column('last_modified_by_agent', sa.String(10), nullable=True),
+            sa.Column('last_agent_modified_at', sa.DateTime(), nullable=True),
+        )
+        op.create_index('idx_user_pref_user_cat',       'user_preferences', ['user_id', 'category'])
+        op.create_index('idx_user_pref_key_scope',      'user_preferences', ['key', 'scope', 'scope_target_id'])
+        op.create_index('idx_user_pref_agent_editable', 'user_preferences', ['is_editable_by_agents', 'category'])
+
+        # Seed system-wide defaults (user_id = NULL intentionally — visible to all users)
+        op.execute("""
+            INSERT INTO user_preferences
+                (id, agentium_id, category, key, value_json, data_type, scope,
+                 description, is_editable_by_agents, created_at, updated_at)
+            VALUES
+                (gen_random_uuid(), 'PREF0001', 'general',       'system.name',                '"Agentium"',                   'string',  'system', 'System name displayed in UI',                    false, NOW(), NOW()),
+                (gen_random_uuid(), 'PREF0002', 'ui',            'ui.theme',                   '"dark"',                       'string',  'global', 'UI theme (dark/light/auto)',                      true,  NOW(), NOW()),
+                (gen_random_uuid(), 'PREF0003', 'ui',            'ui.language',                '"en"',                         'string',  'global', 'UI language code',                               true,  NOW(), NOW()),
+                (gen_random_uuid(), 'PREF0004', 'chat',          'chat.history_limit',         '50',                           'integer', 'global', 'Maximum messages in chat history',               true,  NOW(), NOW()),
+                (gen_random_uuid(), 'PREF0005', 'chat',          'chat.auto_save',             'true',                         'boolean', 'global', 'Auto-save conversations',                        true,  NOW(), NOW()),
+                (gen_random_uuid(), 'PREF0006', 'agents',        'agents.default_timeout',     '300',                          'integer', 'global', 'Default task timeout in seconds',                true,  NOW(), NOW()),
+                (gen_random_uuid(), 'PREF0007', 'agents',        'agents.max_concurrent_tasks','5',                            'integer', 'global', 'Maximum concurrent tasks per agent',             true,  NOW(), NOW()),
+                (gen_random_uuid(), 'PREF0008', 'tasks',         'tasks.auto_archive_days',    '30',                           'integer', 'global', 'Days after which completed tasks are archived',  true,  NOW(), NOW()),
+                (gen_random_uuid(), 'PREF0009', 'notifications', 'notifications.enabled',      'true',                         'boolean', 'global', 'Enable notifications',                           true,  NOW(), NOW()),
+                (gen_random_uuid(), 'PREF0010', 'notifications', 'notifications.channels',     '["websocket", "email"]',       'json',    'global', 'Active notification channels',                   true,  NOW(), NOW()),
+                (gen_random_uuid(), 'PREF0011', 'models',        'models.default_temperature', '0.7',                          'float',   'global', 'Default temperature for LLM calls',              true,  NOW(), NOW()),
+                (gen_random_uuid(), 'PREF0012', 'privacy',       'privacy.data_retention_days','90',                           'integer', 'global', 'Data retention period in days',                  false, NOW(), NOW()),
+                (gen_random_uuid(), 'PREF0013', 'tools',         'tools.max_execution_time',   '60',                           'integer', 'global', 'Maximum tool execution time in seconds',          true,  NOW(), NOW()),
+                (gen_random_uuid(), 'PREF0014', 'tools',         'tools.sandbox_enabled',      'true',                         'boolean', 'global', 'Enable sandbox for tool execution',              false, NOW(), NOW())
+            ON CONFLICT (agentium_id) DO NOTHING
+        """)
+
+    if 'user_preference_history' not in existing_tables:
+        op.create_table(
+            'user_preference_history',
+            sa.Column('id', sa.String(36), primary_key=True),
+            # FIX: unique=True only — removed redundant index=True
+            sa.Column('agentium_id', sa.String(20), unique=True, nullable=False),
+            sa.Column('is_active', sa.Boolean(), nullable=False, server_default='true'),
+            sa.Column('created_at', sa.DateTime(), nullable=False, server_default=sa.func.now()),
+            sa.Column('updated_at', sa.DateTime(), nullable=False, server_default=sa.func.now()),
+            sa.Column('deleted_at', sa.DateTime(), nullable=True),
+            sa.Column('preference_id', sa.String(36), sa.ForeignKey('user_preferences.id'), nullable=False, index=True),
+            sa.Column('previous_value_json', sa.Text(), nullable=False),
+            sa.Column('new_value_json', sa.Text(), nullable=False),
+            sa.Column('changed_by_agentium_id', sa.String(10), nullable=True),
+            sa.Column('changed_by_user_id', sa.String(36), nullable=True),
+            sa.Column('change_reason', sa.Text(), nullable=True),
+            sa.Column('change_category', sa.String(50), server_default='manual', nullable=False),
+        )
+
+    print("✅ Consolidated schema migration (001–004) finished successfully")
 
 
 def downgrade():
     tables_to_drop = [
+        'user_preference_history', 'user_preferences',
+        'mcp_tools',
         'sandboxes', 'remote_executions',
-        'execution_checkpoints', 'scheduled_task_executions', 'scheduled_tasks',
+        'execution_checkpoints',
+        'scheduled_task_executions', 'scheduled_tasks',
         'tool_marketplace_listings', 'tool_usage_logs', 'tool_versions', 'tool_staging',
-        'critique_reviews', 'monitoring_alerts', 'performance_metrics',
-        'task_verifications', 'violation_reports', 'agent_health_reports',
-        'chat_messages', 'conversations', 'model_usage_logs',
-        'external_messages', 'external_channels',
-        'channels', 'audit_logs', 'individual_votes', 'voting_records',
-        'amendment_votings', 'task_audit_logs', 'task_events', 'task_deliberations',
-        'subtasks', 'tasks', 'constitutions',
+        'critique_reviews',
+        'monitoring_alerts', 'performance_metrics', 'task_verifications',
+        'violation_reports', 'agent_health_reports',
+        'chat_messages', 'conversations',
+        'model_usage_logs', 'system_settings',
+        'external_messages', 'external_channels', 'channels',
+        'audit_logs',
+        'individual_votes', 'voting_records',
+        'amendment_votings',
+        'task_audit_logs', 'task_events', 'task_deliberations',
+        'subtasks', 'tasks',
+        'constitutions',
         'critic_agents', 'task_agents', 'lead_agents', 'council_members', 'head_of_council',
-        'agents', 'ethos', 'user_model_configs', 'users', 'system_settings',
+        'agents', 'ethos', 'user_model_configs', 'users',
     ]
     for table in tables_to_drop:
         try:
             op.drop_table(table)
         except Exception as e:
             print(f"Note: could not drop {table}: {e}")
-    try:
-        op.execute("DROP TYPE IF EXISTS taskstatus")
-    except Exception as e:
-        print(f"Note: could not drop taskstatus enum: {e}")
+
+    for enum_type in ('taskstatus', 'tasktype', 'taskpriority'):
+        try:
+            op.execute(f"DROP TYPE IF EXISTS {enum_type} CASCADE")
+        except Exception as e:
+            print(f"Note: could not drop enum {enum_type}: {e}")

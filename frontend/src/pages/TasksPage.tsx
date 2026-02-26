@@ -1313,6 +1313,7 @@ const PreferenceCard: React.FC<{
 const PreferencesTab: React.FC = () => {
     const [preferences, setPreferences] = useState<UserPreference[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
     const [categoryFilter, setCategoryFilter] = useState<string>('');
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [showDefaults, setShowDefaults] = useState(false);
@@ -1331,22 +1332,25 @@ const PreferencesTab: React.FC = () => {
         editableByAgents: true,
     });
 
-    useEffect(() => { loadPreferences(); }, [categoryFilter]);
-
-    const loadPreferences = async () => {
+    const loadPreferences = useCallback(async () => {
         setLoading(true);
+        setLoadError(null);
         try {
             const data = await preferencesService.getPreferences(
                 categoryFilter || undefined,
                 undefined
             );
             setPreferences(data.preferences);
-        } catch (err) {
+        } catch (err: any) {
+            const msg = err?.response?.data?.detail || 'Failed to load preferences';
             console.error('Failed to load preferences:', err);
+            setLoadError(msg);
         } finally {
             setLoading(false);
         }
-    };
+    }, [categoryFilter]);
+
+    useEffect(() => { loadPreferences(); }, [loadPreferences]);
 
     const handleUpdate = async (key: string, value: any, reason?: string) => {
         try {
@@ -1597,6 +1601,15 @@ const PreferencesTab: React.FC = () => {
             </div>
 
             {/* Preferences Grid */}
+            {/* Error state */}
+            {loadError && !loading && (
+                <div className="bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl p-6 text-center text-red-600 dark:text-red-400">
+                    <AlertTriangle className="w-10 h-10 mx-auto mb-3 opacity-80" />
+                    <h3 className="text-base font-semibold mb-1">Failed to load preferences</h3>
+                    <p className="text-sm mb-4">{loadError}</p>
+                    <button onClick={loadPreferences} className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-sm font-medium inline-flex items-center gap-2"><RefreshCw className="w-4 h-4" />Retry</button>
+                </div>
+            )}
             {loading ? (
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                     {[...Array(4)].map((_, i) => (

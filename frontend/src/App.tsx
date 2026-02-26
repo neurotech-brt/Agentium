@@ -25,6 +25,7 @@ import { useState } from 'react';
 import { MonitoringPage } from '@/pages/MonitoringPage';
 import { VotingPage } from '@/pages/VotingPage';
 import { MessageLogPage } from '@/pages/MessageLogPage';
+import { ABTestingPage } from '@/pages/ABTestingPage';
 
 // Full-screen spinner shown while checkAuth() is in-flight on page load
 function AppLoader() {
@@ -43,7 +44,7 @@ function AppLoader() {
 // Auth layout — keeps background and header persistent across login/signup
 function AuthLayout() {
   const location = useLocation();
-  const outlet = useOutlet(); // snapshot of current route content — doesn't update mid-animation
+  const outlet = useOutlet();
   const isSignup = location.pathname === '/signup';
   const [isDark, setIsDark] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -55,7 +56,6 @@ function AuthLayout() {
   const toggleTheme = () => {
     const newDark = !isDark;
     setIsDark(newDark);
-
     if (newDark) {
       document.documentElement.classList.add('dark');
       localStorage.setItem('theme', 'dark');
@@ -77,66 +77,18 @@ function AuthLayout() {
             group relative p-2 rounded-xl
             transition-all duration-300 ease-out
             overflow-hidden
-
-            /* LIGHT MODE BASE */
             bg-blue-600 text-white shadow-sm
-
-            /* LIGHT MODE HOVER → PREVIEW DARK */
             hover:bg-zinc-900 hover:text-zinc-100 hover:shadow-lg
-
-            /* DARK MODE BASE */
             dark:bg-blue-600 dark:text-zinc-900 dark:shadow-none
-
-            /* DARK MODE HOVER → PREVIEW LIGHT */
             dark:hover:bg-white dark:hover:text-zinc-800 dark:hover:shadow-lg
-
             focus:outline-none focus:ring-2 focus:ring-blue-500/40
             "
             aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
             title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
           >
-
-            {/* Light icon */}
-            <Shield
-              className="
-              w-8 h-8
-              transition-all duration-500 ease-[cubic-bezier(.22,1,.36,1)]
-
-              rotate-0 scale-100 opacity-100
-
-              group-hover:rotate-0 group-hover:scale-0 group-hover:opacity-0
-
-              dark:rotate-0 dark:scale-0 dark:opacity-0
-              dark:group-hover:rotate-0 dark:group-hover:scale-100 dark:group-hover:opacity-100
-              "
-            />
-
-            {/* Dark icon */}
-            <Shield
-              className="
-              w-8 h-8 absolute inset-0 m-auto
-              transition-all duration-500 ease-[cubic-bezier(.22,1,.36,1)]
-
-              rotate-0 scale-0 opacity-0
-              group-hover:rotate-0 group-hover:scale-100 group-hover:opacity-100
-
-              dark:rotate-0 dark:scale-100 dark:opacity-100
-              dark:group-hover:rotate-0 dark:group-hover:scale-0 dark:group-hover:opacity-0
-              "
-            />
-
-            {/* ambient glow layer */}
-            <span
-              className="
-              pointer-events-none absolute inset-0 rounded-xl opacity-0 transition-opacity duration-300
-
-              /* glow when previewing dark */
-              group-hover:opacity-100 group-hover:bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.15),transparent_70%)]
-
-              /* glow when previewing light */
-              dark:group-hover:bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.15),transparent_70%)]
-              "
-            />
+            <Shield className="w-8 h-8 transition-all duration-500 ease-[cubic-bezier(.22,1,.36,1)] rotate-0 scale-100 opacity-100 group-hover:rotate-0 group-hover:scale-0 group-hover:opacity-0 dark:rotate-0 dark:scale-0 dark:opacity-0 dark:group-hover:rotate-0 dark:group-hover:scale-100 dark:group-hover:opacity-100" />
+            <Shield className="w-8 h-8 absolute inset-0 m-auto transition-all duration-500 ease-[cubic-bezier(.22,1,.36,1)] rotate-0 scale-0 opacity-0 group-hover:rotate-0 group-hover:scale-100 group-hover:opacity-100 dark:rotate-0 dark:scale-100 dark:opacity-100 dark:group-hover:rotate-0 dark:group-hover:scale-0 dark:group-hover:opacity-0" />
+            <span className="pointer-events-none absolute inset-0 rounded-xl opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-hover:bg-[radial-gradient(circle_at_center,rgba(255,255,255,0.15),transparent_70%)] dark:group-hover:bg-[radial-gradient(circle_at_center,rgba(0,0,0,0.15),transparent_70%)]" />
           </button>
         </div>
         <h1 className="text-3xl font-bold text-white mb-2">Agentium</h1>
@@ -171,7 +123,6 @@ export default function App() {
     return () => stopPolling();
   }, [startPolling, stopPolling]);
 
-  // Block the entire app until checkAuth() has finished at least once.
   if (!isInitialized) {
     return <AppLoader />;
   }
@@ -189,7 +140,6 @@ export default function App() {
         }}
       />
 
-      {/* WRAP EVERYTHING WITH GLOBAL WEBSOCKET PROVIDER */}
       <GlobalWebSocketProvider>
         <Routes>
           {/* Auth Routes */}
@@ -204,8 +154,7 @@ export default function App() {
             />
           </Route>
 
-          {/* Protected Routes — MainLayout is never swapped out for a loader,
-              so the sidebar stays mounted and pages never double-render */}
+          {/* Protected Routes */}
           <Route
             path="/"
             element={
@@ -222,6 +171,8 @@ export default function App() {
             <Route path="models" element={<ModelsPage />} />
             <Route path="channels" element={<ChannelsPage />} />
             <Route path="message-log" element={<MessageLogPage />} />
+            {/* ── A/B Testing ── */}
+            <Route path="ab-testing" element={<ABTestingPage />} />
             <Route
               path="sovereign"
               element={

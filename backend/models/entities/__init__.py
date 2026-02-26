@@ -50,6 +50,11 @@ from backend.models.entities.user_config import (
     ModelUsageLog
 )
 
+from .ab_testing import (
+    Experiment, ExperimentRun, ExperimentResult,
+    ModelPerformanceCache, ExperimentStatus, RunStatus, TaskComplexity
+)
+
 from backend.models.entities.base import Base, BaseEntity
 
 from backend.models.entities.constitution import (

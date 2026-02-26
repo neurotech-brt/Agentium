@@ -71,6 +71,7 @@ from backend.api.routes import critics as critics_routes          # Phase 6.2: C
 from backend.api.routes import checkpoints as checkpoints_routes  # Phase 6.5: Time-Travel Recovery
 from backend.api.routes import remote_executor as remote_executor_routes  # Phase 6.6: Remote Execution
 from backend.api.routes import voting as voting_routes            # Phase 7: Voting & Deliberations
+from backend.api.routes.ab_testing import router as ab_testing_router
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -367,6 +368,7 @@ app.include_router(voting_routes.router,            prefix="/api/v1")   # Phase 
 app.include_router(mcp_tools_router)                                     # Phase 6.7: admin/governance
 app.include_router(tools_routes.router,             prefix="/api/v1")   # Phase 6.7: agent tool access
 app.include_router(user_preferences_routes.router, prefix="/api/v1")
+app.include_router(ab_testing_router, prefix="/api/v1")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

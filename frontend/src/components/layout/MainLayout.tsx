@@ -16,6 +16,7 @@ import {
     Shield,
     Gavel,
     Inbox,
+    FlaskConical,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -32,7 +33,6 @@ export function MainLayout() {
     const isSovereign = user?.isSovereign || user?.is_admin || false;
 
     const handleLogout = () => {
-        // Dispatch logout event for WebSocket cleanup
         window.dispatchEvent(new Event('logout'));
         logout();
         navigate('/login');
@@ -41,7 +41,6 @@ export function MainLayout() {
     const toggleTheme = () => {
         const newDark = !isDark;
         setIsDark(newDark);
-
         if (newDark) {
             document.documentElement.classList.add('dark');
             localStorage.setItem('theme', 'dark');
@@ -75,6 +74,7 @@ export function MainLayout() {
         { path: '/models', label: 'Models', icon: Cpu },
         { path: '/channels', label: 'Channels', icon: Radio },
         { path: '/message-log', label: 'Message Log', icon: Inbox },
+        { path: '/ab-testing', label: 'A/B Testing', icon: FlaskConical },
         { path: '/settings', label: 'Settings', icon: Settings },
         ...(isSovereign
             ? [{ path: '/sovereign', label: 'Sovereign Control', icon: Shield, variant: 'danger' as const }]
@@ -87,24 +87,15 @@ export function MainLayout() {
                 {/* Header */}
                 <div className="p-6 border-b border-gray-200 dark:border-[#1e2535] flex-shrink-0">
                     <div className="flex items-center gap-2">
-                        {/* Logo as Theme Toggle */}
                         <button
                             onClick={toggleTheme}
                             className="group relative p-2 rounded-xl transition-all duration-300 hover:bg-gray-100 dark:hover:bg-white/10 focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                             aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
                             title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
                         >
-                            {/* Light Mode Logo - Blue */}
-                            <Shield
-                                className="w-8 h-8 text-blue-600 transition-all duration-300 rotate-0 scale-100 dark:rotate-90 dark:scale-0 dark:opacity-0"
-                            />
-
-                            {/* Dark Mode Logo - White/Light with glow */}
-                            <Shield
-                                className="w-8 h-8 absolute inset-0 m-auto text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.5)] transition-all duration-300 rotate-90 scale-0 opacity-0 dark:rotate-0 dark:scale-100 dark:opacity-100"
-                            />
+                            <Shield className="w-8 h-8 text-blue-600 transition-all duration-300 rotate-0 scale-100 dark:rotate-90 dark:scale-0 dark:opacity-0" />
+                            <Shield className="w-8 h-8 absolute inset-0 m-auto text-white drop-shadow-[0_0_8px_rgba(255,255,255,0.5)] transition-all duration-300 rotate-90 scale-0 opacity-0 dark:rotate-0 dark:scale-100 dark:opacity-100" />
                         </button>
-
                         <div>
                             <h1 className="text-xl font-bold text-gray-900 dark:text-white">Agentium</h1>
                             <p className="text-xs text-gray-500 dark:text-blue-400/70">AI Governance</p>

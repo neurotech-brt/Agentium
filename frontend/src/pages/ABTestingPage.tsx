@@ -5,13 +5,14 @@ import {
   FlaskConical, Plus, X, Play, BarChart3, Clock, DollarSign,
   Trophy, ChevronRight, RefreshCw, Trash2, StopCircle,
   TrendingUp, Zap, CheckCircle2, AlertCircle, Loader2,
-  Target, Layers, Activity
+  Target, Layers, Activity, Shield
 } from 'lucide-react';
 import {
   RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
   Radar, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Legend
 } from 'recharts';
+import { useAuthStore } from '@/store/authStore';
 import { api } from '@/services/api';
 import { abTestingApi, ExperimentSummary, ExperimentDetail, ModelComparison } from '@/services/abTesting';
 
@@ -632,11 +633,31 @@ function ExperimentCard({
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export function ABTestingPage() {
+  const { user } = useAuthStore();
   const [showCreate, setShowCreate] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('');
 
   const queryClient = useQueryClient();
+
+  // ── Access Control ─────────────────────────────────────────────────────────
+  const isAdmin = user?.isSovereign || user?.is_admin || false;
+  
+  if (!isAdmin) {
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-[#0f1117] flex items-center justify-center p-6">
+        <div className="text-center">
+          <div className="w-20 h-20 bg-red-100 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-sm dark:shadow-[0_2px_16px_rgba(0,0,0,0.25)]">
+            <Shield className="w-9 h-9 text-red-600 dark:text-red-400" />
+          </div>
+          <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">Access Denied</h2>
+          <p className="text-slate-500 dark:text-slate-400 text-sm">
+            Only admin users can access A/B Testing.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const { data: experimentsData, isLoading, refetch } = useQuery({
     queryKey: ['experiments', statusFilter],

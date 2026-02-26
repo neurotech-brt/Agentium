@@ -30,7 +30,8 @@ export function MainLayout() {
         }
         return false;
     });
-    const isSovereign = user?.isSovereign || user?.is_admin || false;
+    // Updated: Check both isSovereign and is_admin
+    const isAdmin = user?.isSovereign || user?.is_admin || false;
 
     const handleLogout = () => {
         window.dispatchEvent(new Event('logout'));
@@ -56,6 +57,7 @@ export function MainLayout() {
         icon: React.ComponentType<{ className?: string }>;
         badge?: number;
         variant?: 'default' | 'danger';
+        adminOnly?: boolean; // Added: flag for admin-only routes
     };
 
     const navItems: NavItem[] = [
@@ -74,12 +76,20 @@ export function MainLayout() {
         { path: '/models', label: 'Models', icon: Cpu },
         { path: '/channels', label: 'Channels', icon: Radio },
         { path: '/message-log', label: 'Message Log', icon: Inbox },
-        { path: '/ab-testing', label: 'A/B Testing', icon: FlaskConical },
+        // Added adminOnly flag for A/B Testing
+        { path: '/ab-testing', label: 'A/B Testing', icon: FlaskConical, adminOnly: true },
         { path: '/settings', label: 'Settings', icon: Settings },
-        ...(isSovereign
+        // Updated: Use isAdmin instead of isSovereign
+        ...(isAdmin
             ? [{ path: '/sovereign', label: 'Sovereign Control', icon: Shield, variant: 'danger' as const }]
             : []),
     ];
+
+    // Filter nav items based on admin status
+    const visibleNavItems = navItems.filter(item => {
+        // Show item if it's not admin-only, or if user is admin
+        return !item.adminOnly || isAdmin;
+    });
 
     return (
         <div className="h-screen bg-gray-50 dark:bg-[#0f1117] flex">
@@ -105,7 +115,7 @@ export function MainLayout() {
 
                 {/* Navigation */}
                 <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
-                    {navItems.map((item) => (
+                    {visibleNavItems.map((item) => ( // Updated: Use visibleNavItems instead of navItems
                         <div key={item.path}>
                             {item.variant === 'danger' && (
                                 <div className="my-2 border-t border-gray-200 dark:border-[#1e2535]" />

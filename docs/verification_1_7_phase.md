@@ -8,42 +8,6 @@
 
 # ⚠️ Medium Priority (Backend Exists, Frontend Missing)
 
----
-
-## 5️⃣ Checkpoint Branch Diff View
-
-**Phase 6 + Phase 7**
-
-**Backend:** ✅ `compare_branches()` implemented  
-**Frontend:** ❌ Visualization missing
-
-### Missing:
-
-- Side-by-side branch comparison UI
-- Result differences highlighting
-- Agent state diff visualization
-- Artifact comparison
-- Change summary view
-
----
-
-# 🧩 UX / Productivity Enhancements
-
-## 6️⃣ Drag-and-Drop Agent Reassignment
-
-**Phase 7**
-
-**Status:** ❌ Not implemented
-
-### Missing:
-
-- Drag-and-drop in `AgentTree`
-- Real-time hierarchy updates
-- Capability validation on reassignment
-- Optimistic UI updates
-
----
-
 ## 7️⃣ Checkpoint Export / Import
 
 **Phase 7**

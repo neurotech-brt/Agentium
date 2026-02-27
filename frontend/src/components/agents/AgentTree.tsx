@@ -1,12 +1,12 @@
 /**
- * AgentTree — Phase 7.2
+ * AgentTree — Phase 7.2 + Phase 7 DnD
  *
- * Changes vs original:
- *  - Critic agents (agentium_id starting with 4, 5, or 6 → 4xxxx/5xxxx/6xxxx)
- *    are separated from the main governance tree and rendered in a "Critic Branch"
- *    section below with its own collapsible header.
- *  - AgentCard now shows health score ring + active task count badge (see AgentCard.tsx).
- *  - Rest of the tree logic is unchanged.
+ * Changes vs previous:
+ *  - DragDropProps interface threaded through every tree level
+ *  - DraggableCard wrapper: HTML5 drag source + drop target per card
+ *  - Drop target ring highlight while dragging
+ *  - Dragged card fades/scales to indicate it's being moved
+ *  - Critic branch is NOT a drag source or drop target
  */
 
 import React, { useState } from 'react';
@@ -14,38 +14,118 @@ import { Agent } from '../../types';
 import { AgentCard } from './AgentCard';
 import { ChevronRight, ChevronDown, ShieldAlert } from 'lucide-react';
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/** Returns true for critic-tier agents (4xxxx / 5xxxx / 6xxxx ID prefix). */
 function isCriticAgent(agent: Agent): boolean {
     const id = agent.agentium_id ?? agent.id ?? '';
-    // Critic IDs start with 4, 5, or 6
     return /^[456]/.test(String(id));
+}
+
+// ─── DnD prop bundle ──────────────────────────────────────────────────────────
+
+export interface DragDropProps {
+    draggingAgentId: string | null;
+    dropTargetId:    string | null;
+    onDragStart: (agent: Agent) => void;
+    onDragEnd:   () => void;
+    onDragEnter: (targetId: string) => void;
+    onDragLeave: (targetId: string) => void;
+    onDrop:      (newParentId: string) => void;
 }
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
-interface AgentTreeProps {
-    agent: Agent;
-    agentsMap: Map<string, Agent>;
-    onSpawn: (agent: Agent) => void;
-    onTerminate: (agent: Agent) => void;
-    level?: number;
-    /** When true, critic agents are NOT filtered out of children (used for the critic sub-tree render). */
+interface AgentTreeProps extends DragDropProps {
+    agent:          Agent;
+    agentsMap:      Map<string, Agent>;
+    onSpawn:        (agent: Agent) => void;
+    onTerminate:    (agent: Agent) => void;
+    level?:         number;
     includeCritics?: boolean;
 }
+
+// ─── Draggable/droppable card wrapper ─────────────────────────────────────────
+
+const DraggableCard: React.FC<DragDropProps & {
+    agent:       Agent;
+    onSpawn:     (agent: Agent) => void;
+    onTerminate: (agent: Agent) => void;
+}> = ({
+    agent, onSpawn, onTerminate,
+    draggingAgentId, dropTargetId,
+    onDragStart, onDragEnd, onDragEnter, onDragLeave, onDrop,
+}) => {
+    const isDraggable       = agent.agent_type !== 'head_of_council';
+    const isDragging        = draggingAgentId === agent.agentium_id;
+    const isDropTarget      = dropTargetId    === agent.agentium_id;
+    const somethingDragging = !!draggingAgentId;
+
+    return (
+        <div
+            draggable={isDraggable}
+
+            onDragStart={e => {
+                if (!isDraggable) { e.preventDefault(); return; }
+                e.dataTransfer.effectAllowed = 'move';
+                // Tiny delay so the ghost image is drawn before the opacity change kicks in
+                requestAnimationFrame(() => onDragStart(agent));
+            }}
+            onDragEnd={onDragEnd}
+
+            onDragOver={e => {
+                if (somethingDragging && draggingAgentId !== agent.agentium_id) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                }
+            }}
+            onDragEnter={e => {
+                e.preventDefault();
+                if (somethingDragging && draggingAgentId !== agent.agentium_id) {
+                    onDragEnter(agent.agentium_id);
+                }
+            }}
+            onDragLeave={() => {
+                onDragLeave(agent.agentium_id);
+            }}
+            onDrop={e => {
+                e.preventDefault();
+                if (somethingDragging && draggingAgentId !== agent.agentium_id) {
+                    onDrop(agent.agentium_id);
+                }
+            }}
+
+            className={[
+                'relative transition-all duration-150 rounded-xl',
+                isDraggable ? 'cursor-grab active:cursor-grabbing' : '',
+                isDragging  ? 'opacity-40 scale-95 pointer-events-none' : '',
+                isDropTarget && !isDragging
+                    ? 'ring-2 ring-blue-500 ring-offset-2 dark:ring-offset-slate-900 scale-[1.02] shadow-lg'
+                    : '',
+            ].join(' ')}
+        >
+            <AgentCard agent={agent} onSpawn={onSpawn} onTerminate={onTerminate} />
+
+            {/* Drop-zone overlay label */}
+            {isDropTarget && !isDragging && (
+                <div className="absolute inset-0 rounded-xl bg-blue-500/10 flex items-center justify-center pointer-events-none">
+                    <span className="text-xs font-semibold text-blue-600 dark:text-blue-300 bg-white dark:bg-[#161b27] px-2 py-0.5 rounded-full shadow">
+                        Drop here
+                    </span>
+                </div>
+            )}
+        </div>
+    );
+};
 
 // ─── Recursive tree node ──────────────────────────────────────────────────────
 
 export const AgentTree: React.FC<AgentTreeProps> = ({
-    agent,
-    agentsMap,
-    onSpawn,
-    onTerminate,
-    level = 0,
-    includeCritics = false,
+    agent, agentsMap, onSpawn, onTerminate,
+    level = 0, includeCritics = false,
+    draggingAgentId, dropTargetId,
+    onDragStart, onDragEnd, onDragEnter, onDragLeave, onDrop,
 }) => {
-    const [isExpanded, setIsExpanded] = useState(true);
+    const [isExpanded,     setIsExpanded]     = useState(true);
     const [criticExpanded, setCriticExpanded] = useState(true);
 
     if (!agent) return null;
@@ -55,63 +135,56 @@ export const AgentTree: React.FC<AgentTreeProps> = ({
         .map(id => agentsMap.get(id))
         .filter((a): a is Agent => a !== undefined);
 
-    // At the root level (level === 0 and includeCritics is false), split
-    // critic agents into their own branch so they don't pollute the main tree.
     const isRoot = level === 0 && !includeCritics;
 
-    const mainChildren = isRoot
-        ? allChildren.filter(a => !isCriticAgent(a))
-        : allChildren;
-
-    // Gather ALL critic agents from the whole agentsMap for the critic branch
-    // (they may not be subordinates of head_of_council directly).
-    const criticAgents: Agent[] = isRoot
-        ? [...agentsMap.values()].filter(isCriticAgent)
-        : [];
+    const mainChildren = isRoot ? allChildren.filter(a => !isCriticAgent(a)) : allChildren;
+    const criticAgents = isRoot ? [...agentsMap.values()].filter(isCriticAgent) : [];
 
     const hasMainChildren = mainChildren.length > 0;
-    const hasCritics = criticAgents.length > 0;
+    const hasCritics      = criticAgents.length > 0;
+
+    // Bundle to pass down recursively
+    const dndProps: DragDropProps = {
+        draggingAgentId, dropTargetId,
+        onDragStart, onDragEnd, onDragEnter, onDragLeave, onDrop,
+    };
 
     return (
         <div className="relative">
-            {/* Vertical connector */}
+            {/* Vertical spine */}
             {level > 0 && (
-                <div
-                    className="absolute border-l-2 border-slate-400 dark:border-slate-500"
-                    style={{ left: '-24px', height: '100%', top: 0 }}
-                />
+                <div className="absolute border-l-2 border-slate-400 dark:border-slate-500" style={{ left: '-24px', height: '100%', top: 0 }} />
             )}
 
             <div className="flex items-start gap-2 mb-4 relative">
                 {/* Horizontal connector */}
                 {level > 0 && (
-                    <div
-                        className="absolute w-6 border-t-2 border-slate-400 dark:border-slate-500"
-                        style={{ left: '-24px', top: '24px' }}
-                    />
+                    <div className="absolute w-6 border-t-2 border-slate-400 dark:border-slate-500" style={{ left: '-24px', top: '24px' }} />
                 )}
 
+                {/* Expand chevron */}
                 {hasMainChildren ? (
                     <button
                         onClick={() => setIsExpanded(!isExpanded)}
-                        className="mt-3 p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700
-                            text-slate-600 dark:text-slate-300 transition-colors duration-150 flex-shrink-0"
+                        className="mt-3 p-1 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-300 transition-colors duration-150 flex-shrink-0"
                     >
-                        {isExpanded
-                            ? <ChevronDown className="w-4 h-4" />
-                            : <ChevronRight className="w-4 h-4" />
-                        }
+                        {isExpanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                     </button>
                 ) : (
                     <div className="w-6 flex-shrink-0" />
                 )}
 
-                <AgentCard agent={agent} onSpawn={onSpawn} onTerminate={onTerminate} />
+                <DraggableCard
+                    agent={agent}
+                    onSpawn={onSpawn}
+                    onTerminate={onTerminate}
+                    {...dndProps}
+                />
             </div>
 
-            {/* Main children */}
+            {/* Children */}
             {isExpanded && hasMainChildren && (
-                <div className="ml-12 pl-6 space-y-0 border-l-2 border-slate-400 dark:border-slate-500">
+                <div className="ml-12 pl-6 border-l-2 border-slate-400 dark:border-slate-500">
                     <div className="border-l border-slate-300 dark:border-slate-600 -ml-6 pl-6 pt-2">
                         {mainChildren.map(child => (
                             <AgentTree
@@ -122,59 +195,37 @@ export const AgentTree: React.FC<AgentTreeProps> = ({
                                 onTerminate={onTerminate}
                                 level={level + 1}
                                 includeCritics={false}
+                                {...dndProps}
                             />
                         ))}
                     </div>
                 </div>
             )}
 
-            {/* ── Critic Branch (root only) ─────────────────────────────────── */}
+            {/* ── Critic branch (root only) ─────────────────────────────────── */}
             {isRoot && hasCritics && (
                 <div className="mt-8">
-                    {/* Section header */}
-                    <button
-                        onClick={() => setCriticExpanded(x => !x)}
-                        className="flex items-center gap-2 mb-4 group"
-                    >
-                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg
-                            bg-rose-50 dark:bg-rose-500/10
-                            border border-rose-200 dark:border-rose-500/20
-                            text-rose-700 dark:text-rose-300
-                            hover:bg-rose-100 dark:hover:bg-rose-500/20
-                            transition-colors duration-150">
+                    <button onClick={() => setCriticExpanded(x => !x)} className="flex items-center gap-2 mb-4">
+                        <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-500/20 transition-colors">
                             <ShieldAlert className="w-4 h-4" />
                             <span className="text-sm font-semibold">Critic Agents</span>
                             <span className="text-xs font-mono opacity-70">({criticAgents.length})</span>
-                            {criticExpanded
-                                ? <ChevronDown className="w-3.5 h-3.5" />
-                                : <ChevronRight className="w-3.5 h-3.5" />
-                            }
+                            {criticExpanded ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
                         </div>
                         <div className="flex-1 h-px bg-rose-200 dark:bg-rose-500/20" />
                     </button>
 
-                    {/* Critic cards grid */}
                     {criticExpanded && (
-                        <div className="
-                            relative rounded-xl border border-rose-200 dark:border-rose-500/20
-                            bg-rose-50/40 dark:bg-rose-500/5 p-4
-                        ">
-                            {/* Subtle dot pattern */}
+                        <div className="relative rounded-xl border border-rose-200 dark:border-rose-500/20 bg-rose-50/40 dark:bg-rose-500/5 p-4">
                             <div
-                                className="absolute inset-0 rounded-xl
-                                    bg-[radial-gradient(circle,_#fca5a5_1px,_transparent_1px)]
-                                    dark:bg-[radial-gradient(circle,_#7f1d1d30_1px,_transparent_1px)]
-                                    bg-[length:20px_20px] opacity-40 pointer-events-none"
+                                className="absolute inset-0 rounded-xl bg-[radial-gradient(circle,_#fca5a5_1px,_transparent_1px)] dark:bg-[radial-gradient(circle,_#7f1d1d30_1px,_transparent_1px)] bg-[length:20px_20px] opacity-40 pointer-events-none"
                                 aria-hidden="true"
                             />
                             <div className="relative z-10 flex flex-wrap gap-4">
                                 {criticAgents.map(critic => (
                                     <div key={critic.id || critic.agentium_id} className="flex-shrink-0">
-                                        <AgentCard
-                                            agent={critic}
-                                            onSpawn={onSpawn}
-                                            onTerminate={onTerminate}
-                                        />
+                                        {/* Critics intentionally not drag sources or drop targets */}
+                                        <AgentCard agent={critic} onSpawn={onSpawn} onTerminate={onTerminate} />
                                     </div>
                                 ))}
                             </div>

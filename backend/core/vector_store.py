@@ -77,6 +77,11 @@ class VectorStore:
         "task_patterns": "execution_patterns",
         "audit_semantic": "audit_history",
         "sovereign_prefs": "sovereign_memory",
+        # Skill collections (used by SkillManager)
+        "agent_skills": "agent_skills",
+        "best_practices": "best_practices",
+        "constitutional_skills": "constitutional_skills",
+        "tool_skills": "tool_skills",
     }
 
     def __init__(self) -> None:
@@ -437,6 +442,10 @@ def get_vector_store() -> VectorStore:
         _vector_store = VectorStore()
         _vector_store.initialize()
     return _vector_store
+
+
+# Public alias for backward compatibility (used by message_bus)
+vector_store = get_vector_store()
 
 
 @contextmanager

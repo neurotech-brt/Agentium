@@ -83,6 +83,7 @@ class ConstitutionalDecision:
 # ---------------------------------------------------------------------------
 
 TIER_CAPABILITIES: Dict[str, List[str]] = {
+    # Numeric keys (used internally)
     "0": [  # Head of Council
         "veto", "amendment", "liquidate_any", "admin_vector_db",
         "broadcast", "spawn_any", "override_vote", "modify_constitution",
@@ -98,6 +99,26 @@ TIER_CAPABILITIES: Dict[str, List[str]] = {
         "submit_knowledge", "report_status",
     ],
     "3": [  # Task Agents
+        "execute_task", "report_status", "escalate_blocker",
+        "query_knowledge",
+    ],
+    # Named keys (for test compatibility)
+    "head": [  # Head of Council
+        "veto", "amendment", "liquidate_any", "admin_vector_db",
+        "broadcast", "spawn_any", "override_vote", "modify_constitution",
+        "execute_command", "read_file", "write_file", "browser_control",
+        "spawn_agent",
+    ],
+    "council": [  # Council Members
+        "propose_amendment", "allocate_resources", "audit",
+        "moderate_knowledge", "spawn_lead", "vote", "escalate",
+        "read_file",
+    ],
+    "lead": [  # Lead Agents
+        "spawn_task_agent", "delegate_work", "request_resources",
+        "submit_knowledge", "report_status",
+    ],
+    "task": [  # Task Agents
         "execute_task", "report_status", "escalate_blocker",
         "query_knowledge",
     ],

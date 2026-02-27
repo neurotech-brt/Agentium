@@ -1,0 +1,132 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.14, pytest-8.3.4, pluggy-1.6.0 -- /usr/local/bin/python
+cachedir: .pytest_cache
+rootdir: /app
+plugins: Faker-33.3.0, asyncio-0.25.0, anyio-4.12.1, cov-6.0.0
+asyncio: mode=Mode.STRICT, asyncio_default_fixture_loop_scope=None
+collecting ... collected 17 items
+
+backend/tests/phase8/test_voting_stress.py::TestQuorumValidation::test_quorum_1_member PASSED [  5%]
+backend/tests/phase8/test_voting_stress.py::TestQuorumValidation::test_quorum_2_members PASSED [ 11%]
+backend/tests/phase8/test_voting_stress.py::TestQuorumValidation::test_quorum_3_members PASSED [ 17%]
+backend/tests/phase8/test_voting_stress.py::TestQuorumValidation::test_quorum_5_members PASSED [ 23%]
+backend/tests/phase8/test_voting_stress.py::TestQuorumValidation::test_quorum_10_members PASSED [ 29%]
+backend/tests/phase8/test_voting_stress.py::TestQuorumValidation::test_quorum_100_members PASSED [ 35%]
+backend/tests/phase8/test_voting_stress.py::TestSupermajorityThreshold::test_supermajority_pass PASSED [ 41%]
+backend/tests/phase8/test_voting_stress.py::TestSupermajorityThreshold::test_supermajority_fail PASSED [ 47%]
+backend/tests/phase8/test_voting_stress.py::TestSupermajorityThreshold::test_supermajority_exact_boundary PASSED [ 52%]
+backend/tests/phase8/test_voting_stress.py::TestSupermajorityThreshold::test_supermajority_one_below PASSED [ 58%]
+backend/tests/phase8/test_voting_stress.py::TestAbstentionHandling::test_abstentions_reduce_participation PASSED [ 64%]
+backend/tests/phase8/test_voting_stress.py::TestAbstentionHandling::test_all_abstain PASSED [ 70%]
+backend/tests/phase8/test_voting_stress.py::TestDelegationChains::test_delegation_a_to_b_to_c PASSED [ 76%]
+backend/tests/phase8/test_voting_stress.py::TestDelegationChains::test_delegation_loop_prevention PASSED [ 82%]
+backend/tests/phase8/test_voting_stress.py::TestDelegationChains::test_three_way_loop_prevention PASSED [ 88%]
+backend/tests/phase8/test_voting_stress.py::TestVoteTimeout::test_expired_amendment_auto_fail FAILED [ 94%]
+backend/tests/phase8/test_voting_stress.py::TestVoteTimeout::test_active_amendment_not_expired FAILED [100%]
+
+=================================== FAILURES ===================================
+_______________ TestVoteTimeout.test_expired_amendment_auto_fail _______________
+/usr/local/lib/python3.11/site-packages/sqlalchemy/orm/clsregistry.py:516: in _resolve_name
+    rval = d[token]
+/usr/local/lib/python3.11/site-packages/sqlalchemy/util/_collections.py:345: in __missing__
+    self[key] = val = self.creator(key)
+/usr/local/lib/python3.11/site-packages/sqlalchemy/orm/clsregistry.py:484: in _access_cls
+    return self.fallback[key]
+E   KeyError: 'User'
+
+The above exception was the direct cause of the following exception:
+backend/tests/phase8/test_voting_stress.py:226: in test_expired_amendment_auto_fail
+    amendment = AmendmentVoting(
+<string>:4: in __init__
+    ???
+/usr/local/lib/python3.11/site-packages/sqlalchemy/orm/state.py:591: in _initialize_instance
+    manager.dispatch.init(self, args, kwargs)
+/usr/local/lib/python3.11/site-packages/sqlalchemy/event/attr.py:515: in __call__
+    fn(*args, **kw)
+/usr/local/lib/python3.11/site-packages/sqlalchemy/orm/mapper.py:4419: in _event_on_init
+    instrumenting_mapper._check_configure()
+/usr/local/lib/python3.11/site-packages/sqlalchemy/orm/mapper.py:2410: in _check_configure
+    _configure_registries({self.registry}, cascade=True)
+/usr/local/lib/python3.11/site-packages/sqlalchemy/orm/mapper.py:4227: in _configure_registries
+    _do_configure_registries(registries, cascade)
+/usr/local/lib/python3.11/site-packages/sqlalchemy/orm/mapper.py:4268: in _do_configure_registries
+    mapper._post_configure_properties()
+/usr/local/lib/python3.11/site-packages/sqlalchemy/orm/mapper.py:2427: in _post_configure_properties
+    prop.init()
+/usr/local/lib/python3.11/site-packages/sqlalchemy/orm/interfaces.py:595: in init
+    self.do_init()
+/usr/local/lib/python3.11/site-packages/sqlalchemy/orm/relationships.py:1655: in do_init
+    self._setup_entity()
+/usr/local/lib/python3.11/site-packages/sqlalchemy/orm/relationships.py:1865: in _setup_entity
+    self._clsregistry_resolve_name(argument)(),
+/usr/local/lib/python3.11/site-packages/sqlalchemy/orm/clsregistry.py:520: in _resolve_name
+    self._raise_for_name(name, err)
+/usr/local/lib/python3.11/site-packages/sqlalchemy/orm/clsregistry.py:501: in _raise_for_name
+    raise exc.InvalidRequestError(
+E   sqlalchemy.exc.InvalidRequestError: When initializing mapper Mapper[ChatMessage(chat_messages)], expression 'User' failed to locate a name ('User'). If this is a class name, consider adding this relationship() to the <class 'backend.models.entities.chat_message.ChatMessage'> class after both dependent classes have been defined.
+______________ TestVoteTimeout.test_active_amendment_not_expired _______________
+backend/tests/phase8/test_voting_stress.py:252: in test_active_amendment_not_expired
+    amendment = AmendmentVoting(
+<string>:4: in __init__
+    ???
+/usr/local/lib/python3.11/site-packages/sqlalchemy/orm/state.py:591: in _initialize_instance
+    manager.dispatch.init(self, args, kwargs)
+/usr/local/lib/python3.11/site-packages/sqlalchemy/event/attr.py:515: in __call__
+    fn(*args, **kw)
+/usr/local/lib/python3.11/site-packages/sqlalchemy/orm/mapper.py:4419: in _event_on_init
+    instrumenting_mapper._check_configure()
+/usr/local/lib/python3.11/site-packages/sqlalchemy/orm/mapper.py:2410: in _check_configure
+    _configure_registries({self.registry}, cascade=True)
+/usr/local/lib/python3.11/site-packages/sqlalchemy/orm/mapper.py:4227: in _configure_registries
+    _do_configure_registries(registries, cascade)
+/usr/local/lib/python3.11/site-packages/sqlalchemy/orm/mapper.py:4264: in _do_configure_registries
+    raise e
+E   sqlalchemy.exc.InvalidRequestError: One or more mappers failed to initialize - can't proceed with initialization of other mappers. Triggering mapper: 'Mapper[ChatMessage(chat_messages)]'. Original exception was: When initializing mapper Mapper[ChatMessage(chat_messages)], expression 'User' failed to locate a name ('User'). If this is a class name, consider adding this relationship() to the <class 'backend.models.entities.chat_message.ChatMessage'> class after both dependent classes have been defined.
+=============================== warnings summary ===============================
+../usr/local/lib/python3.11/site-packages/pydantic/fields.py:1076
+../usr/local/lib/python3.11/site-packages/pydantic/fields.py:1076
+../usr/local/lib/python3.11/site-packages/pydantic/fields.py:1076
+../usr/local/lib/python3.11/site-packages/pydantic/fields.py:1076
+../usr/local/lib/python3.11/site-packages/pydantic/fields.py:1076
+  /usr/local/lib/python3.11/site-packages/pydantic/fields.py:1076: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'enum'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+    warn(
+
+../usr/local/lib/python3.11/site-packages/pydantic/fields.py:1045
+../usr/local/lib/python3.11/site-packages/pydantic/fields.py:1045
+../usr/local/lib/python3.11/site-packages/pydantic/fields.py:1045
+  /usr/local/lib/python3.11/site-packages/pydantic/fields.py:1045: PydanticDeprecatedSince20: `min_items` is deprecated and will be removed, use `min_length` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+    warn('`min_items` is deprecated and will be removed, use `min_length` instead', DeprecationWarning)
+
+../usr/local/lib/python3.11/site-packages/pydantic/fields.py:1051
+  /usr/local/lib/python3.11/site-packages/pydantic/fields.py:1051: PydanticDeprecatedSince20: `max_items` is deprecated and will be removed, use `max_length` instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+    warn('`max_items` is deprecated and will be removed, use `max_length` instead', DeprecationWarning)
+
+backend/models/entities/skill.py:73
+  /app/backend/models/entities/skill.py:73: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+    @validator('tags')
+
+backend/models/entities/skill.py:77
+  /app/backend/models/entities/skill.py:77: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+    @validator('skill_name')
+
+backend/models/schemas/messages.py:89
+  /app/backend/models/schemas/messages.py:89: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+    @validator("hop_count")
+
+backend/models/schemas/messages.py:95
+  /app/backend/models/schemas/messages.py:95: PydanticDeprecatedSince20: Pydantic V1 style `@validator` validators are deprecated. You should migrate to Pydantic V2 style `@field_validator` validators, see the migration guide for more details. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+    @validator("sender_id", "recipient_id")
+
+../usr/local/lib/python3.11/site-packages/pydantic/_internal/_config.py:323
+  /usr/local/lib/python3.11/site-packages/pydantic/_internal/_config.py:323: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+    warnings.warn(DEPRECATION_MESSAGE, DeprecationWarning)
+
+../usr/local/lib/python3.11/site-packages/pydantic/_internal/_generate_schema.py:293
+  /usr/local/lib/python3.11/site-packages/pydantic/_internal/_generate_schema.py:293: PydanticDeprecatedSince20: `json_encoders` is deprecated. See https://docs.pydantic.dev/2.11/concepts/serialization/#custom-serializers for alternatives. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.11/migration/
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED backend/tests/phase8/test_voting_stress.py::TestVoteTimeout::test_expired_amendment_auto_fail
+FAILED backend/tests/phase8/test_voting_stress.py::TestVoteTimeout::test_active_amendment_not_expired
+================== 2 failed, 15 passed, 15 warnings in 2.77s ===================

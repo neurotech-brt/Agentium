@@ -155,7 +155,7 @@ class ContextRayTracer:
             "intent", "vote_proposal", "vote_cast",
             "constitution_query", "escalation", "notification",
             "liquidation", "knowledge_share", "heartbeat",
-            "plan", "idle_task",
+            "plan", "idle_task", "delegation",
         },
         ROLE_EXECUTOR: {
             "delegation", "plan", "execution",
@@ -164,7 +164,7 @@ class ContextRayTracer:
         },
         ROLE_CRITIC: {
             "execution", "critique", "critique_result",
-            "notification", "heartbeat",
+            "notification", "heartbeat", "delegation",
         },
     }
 

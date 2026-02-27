@@ -710,8 +710,7 @@ class EnhancedIdleGovernanceEngine:
                     self._last_pref_opt_run[agent.agentium_id] = datetime.utcnow()
                     
                 elif task.task_type == TaskType.VECTOR_MAINTENANCE:
-                    from backend.services.knowledge_service import knowledge_service
-                    await knowledge_service.run_maintenance(db)
+                    await self.run_maintenance(db)
                     
                 elif task.task_type == TaskType.AUDIT_ARCHIVAL:
                     from backend.models.entities.audit import AuditLog
@@ -924,6 +923,37 @@ class EnhancedIdleGovernanceEngine:
                 }
             }
 
+    async def run_maintenance(self, db: Session) -> Dict[str, Any]:
+        """
+        Run vector store maintenance tasks for idle governance.
+        """
+        logger.info("🔧 Running vector store maintenance (VECTOR_MAINTENANCE idle task)")
+        
+        results = {
+            "maintenance_tasks": [],
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+        try:
+            # List all collections
+            collections = ["constitution", "ethos", "task_patterns", "critic_case_law", "sovereign_prefs"]
+            
+            for collection_name in collections:
+                try:
+                    collection = self.vector_store.get_collection(collection_name)
+                    count = collection.count()
+                    results["maintenance_tasks"].append(f"{collection_name}: {count} entries")
+                    logger.info(f"   📊 {collection_name}: {count} entries")
+                except Exception as e:
+                    logger.warning(f"Could not check {collection_name}: {e}")
+            
+            logger.info(f"✅ Vector store maintenance complete: checked {len(collections)} collections")
+            
+        except Exception as e:
+            logger.error(f"❌ Error during vector store maintenance: {e}")
+            results["error"] = str(e)
+        
+        return results
 
 # Singleton instance
 idle_governance = EnhancedIdleGovernanceEngine()

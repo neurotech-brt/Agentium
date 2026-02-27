@@ -16,6 +16,7 @@ import { Link } from 'react-router-dom';
 import BudgetControl from '@/components/BudgetControl';
 import { api } from '@/services/api';
 import { ChannelHealthWidget } from '@/components/dashboard/ChannelHealthWidget';
+import { ProviderAnalytics } from '@/components/dashboard/ProviderAnalytics';
 
 interface Stats {
     totalAgents: number;
@@ -87,32 +88,32 @@ export function Dashboard() {
 
     const colorClasses = {
         blue: {
-            bg:       'bg-blue-100 dark:bg-blue-500/10',
-            text:     'text-blue-600 dark:text-blue-400',
-            border:   'dark:border-blue-500/15',
+            bg:     'bg-blue-100 dark:bg-blue-500/10',
+            text:   'text-blue-600 dark:text-blue-400',
+            border: 'dark:border-blue-500/15',
         },
         green: {
-            bg:       'bg-green-100 dark:bg-green-500/10',
-            text:     'text-green-600 dark:text-green-400',
-            border:   'dark:border-green-500/15',
+            bg:     'bg-green-100 dark:bg-green-500/10',
+            text:   'text-green-600 dark:text-green-400',
+            border: 'dark:border-green-500/15',
         },
         yellow: {
-            bg:       'bg-yellow-100 dark:bg-yellow-500/10',
-            text:     'text-yellow-600 dark:text-yellow-400',
-            border:   'dark:border-yellow-500/15',
+            bg:     'bg-yellow-100 dark:bg-yellow-500/10',
+            text:   'text-yellow-600 dark:text-yellow-400',
+            border: 'dark:border-yellow-500/15',
         },
         purple: {
-            bg:       'bg-purple-100 dark:bg-purple-500/10',
-            text:     'text-purple-600 dark:text-purple-400',
-            border:   'dark:border-purple-500/15',
+            bg:     'bg-purple-100 dark:bg-purple-500/10',
+            text:   'text-purple-600 dark:text-purple-400',
+            border: 'dark:border-purple-500/15',
         },
     };
 
     const statCards = [
-        { title: 'Total Agents',    value: stats.totalAgents,    icon: Users,        color: 'blue',   link: '/agents' },
-        { title: 'Active Agents',   value: stats.activeAgents,   icon: Activity,     color: 'green',  link: '/agents' },
-        { title: 'Pending Tasks',   value: stats.pendingTasks,   icon: AlertTriangle,color: 'yellow', link: '/tasks'  },
-        { title: 'Completed Tasks', value: stats.completedTasks, icon: CheckCircle,  color: 'purple', link: '/tasks'  },
+        { title: 'Total Agents',    value: stats.totalAgents,    icon: Users,         color: 'blue',   link: '/agents' },
+        { title: 'Active Agents',   value: stats.activeAgents,   icon: Activity,      color: 'green',  link: '/agents' },
+        { title: 'Pending Tasks',   value: stats.pendingTasks,   icon: AlertTriangle, color: 'yellow', link: '/tasks'  },
+        { title: 'Completed Tasks', value: stats.completedTasks, icon: CheckCircle,   color: 'purple', link: '/tasks'  },
     ];
 
     return (
@@ -173,15 +174,27 @@ export function Dashboard() {
                 })}
             </div>
 
+            {/* ── Provider Analytics ─────────────────────────────────────── */}
+            {/* Placed here so users see AI spend performance immediately     */}
+            {/* after top-level counts — before budget controls, since the    */}
+            {/* analytics inform whether budget adjustments are needed.        */}
+            <div className="mb-8">
+                <ProviderAnalytics />
+            </div>
+
             {/* ── Budget Control Panel ───────────────────────────────────── */}
             <div className="mb-8">
                 <BudgetControl />
             </div>
+
+            {/* ── API Key Health ─────────────────────────────────────────── */}
             <div className="mb-8">
-            <APIKeyHealth />
+                <APIKeyHealth />
             </div>
+
+            {/* ── Channel Health ─────────────────────────────────────────── */}
             <div className="mb-8">
-            <ChannelHealthWidget />
+                <ChannelHealthWidget />
             </div>
 
             {/* ── Bottom Panels ──────────────────────────────────────────── */}

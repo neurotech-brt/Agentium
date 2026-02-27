@@ -72,6 +72,7 @@ from backend.api.routes import checkpoints as checkpoints_routes  # Phase 6.5: T
 from backend.api.routes import remote_executor as remote_executor_routes  # Phase 6.6: Remote Execution
 from backend.api.routes import voting as voting_routes            # Phase 7: Voting & Deliberations
 from backend.api.routes.ab_testing import router as ab_testing_router
+from backend.api.routes import provider_analytics as provider_analytics_routes
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -369,6 +370,7 @@ app.include_router(mcp_tools_router)                                     # Phase
 app.include_router(tools_routes.router,             prefix="/api/v1")   # Phase 6.7: agent tool access
 app.include_router(user_preferences_routes.router, prefix="/api/v1")
 app.include_router(ab_testing_router, prefix="/api/v1")
+app.include_router(provider_analytics_routes.router, prefix="/api/v1")
 
 
 # ══════════════════════════════════════════════════════════════════════════════

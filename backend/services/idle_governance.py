@@ -7,6 +7,7 @@ import asyncio
 import random
 import time
 import json
+import uuid
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
@@ -138,6 +139,18 @@ class EnhancedIdleGovernanceEngine:
         
         # Configuration
         self.IDLE_THRESHOLD_DAYS = 7  # Agents idle for >7 days are candidates for termination
+
+        # ── FIX 3 & 4: Per-agent cooldown tracking ──────────────────────────────
+        # Tracks the last time each agent completed an idle task (any type).
+        # Prevents re-assignment until cooldown expires.
+        self._agent_last_completed: Dict[str, datetime] = {}   # key: agent_id
+        self.IDLE_TASK_COOLDOWN_SECONDS = 60  # minimum gap between idle tasks per agent
+
+        # Tracks the last time preference_optimization ran per agent.
+        # Used to pass real elapsed minutes to should_run() instead of hardcoded 30.
+        self._last_pref_opt_run: Dict[str, datetime] = {}      # key: agent_id
+        self.PREF_OPT_COOLDOWN_MINUTES = 30
+        # ────────────────────────────────────────────────────────────────────────
     
     async def start(self, db: Session):
         """Start the eternal idle governance loop with scheduled tasks."""
@@ -154,6 +167,8 @@ class EnhancedIdleGovernanceEngine:
         logger.info(f"     - Idle detection: every {self.IDLE_DETECTION_INTERVAL / 3600} hours")
         logger.info(f"     - Auto-liquidation: every {self.AUTO_LIQUIDATE_INTERVAL / 3600} hours")
         logger.info(f"     - Resource rebalancing: every {self.REBALANCING_INTERVAL / 3600} hours")
+        logger.info(f"     - Per-agent cooldown: {self.IDLE_TASK_COOLDOWN_SECONDS}s between tasks")
+        logger.info(f"     - Preference-opt cooldown: {self.PREF_OPT_COOLDOWN_MINUTES}min per agent")
         
         # Start the main loop
         self.idle_loop_task = asyncio.create_task(self._idle_loop())
@@ -533,28 +548,66 @@ class EnhancedIdleGovernanceEngine:
         ).all()
     
     def _get_available_persistent_agents(self, db: Session) -> List[Agent]:
-        """Get persistent agents ready for idle work."""
+        """
+        Get persistent agents ready for idle work.
+
+        FIX 1: Only return ACTIVE agents — agents already in IDLE_WORKING status
+        have a task in progress and must NOT be assigned another one.
+        """
         return db.query(Agent).filter(
             Agent.is_persistent == True,
             Agent.is_active == True,
-            Agent.status.in_([AgentStatus.ACTIVE, AgentStatus.IDLE_WORKING])
+            Agent.status == AgentStatus.ACTIVE  # FIXED: was .in_([ACTIVE, IDLE_WORKING])
         ).order_by(Agent.last_idle_action_at).all()
     
     async def _assign_idle_work(self, db: Session, agent: Agent):
         """
         Assign appropriate idle work to agent based on role.
-        Consolidated method — includes preference optimization for all tiers.
-        Fixed: Uses UUID for task agentium_id to prevent duplicates.
-        Fixed: Uses Python-side duplicate check to avoid SQL JSON operator issues.
+        One idle task per agent enforced at both in-memory and DB level.
+
+        FIX 1: _get_available_persistent_agents now only returns ACTIVE agents.
+        FIX 2: DB hard-check ensures no IN_PROGRESS idle task exists for this agent.
+        FIX 3: Real elapsed minutes passed to should_run() instead of hardcoded 30.
+        FIX 4: Per-agent cooldown checked before assignment.
         """
-        # Skip if this agent already has an active idle task
+        # ── Guard 1: in-memory tracking ─────────────────────────────────────────
         if agent.agentium_id in self.current_idle_tasks:
             return
-        
-        # Import idle tasks
+
+        # ── Guard 2 (FIX 4): cooldown since last completion ─────────────────────
+        last_completed = self._agent_last_completed.get(agent.agentium_id)
+        if last_completed:
+            elapsed_since_completion = (datetime.utcnow() - last_completed).total_seconds()
+            if elapsed_since_completion < self.IDLE_TASK_COOLDOWN_SECONDS:
+                logger.debug(
+                    f"Agent {agent.agentium_id} on cooldown "
+                    f"({elapsed_since_completion:.0f}s / {self.IDLE_TASK_COOLDOWN_SECONDS}s)"
+                )
+                return
+
+        # ── Guard 3 (FIX 2): DB-level hard check ────────────────────────────────
+        # If ANY IN_PROGRESS idle task is assigned to this agent in the DB,
+        # re-sync in-memory state and bail out.
+        existing_active = db.query(Task).filter(
+            Task.is_idle_task == True,
+            Task.is_active == True,
+            Task.status == TaskStatus.IN_PROGRESS,
+        ).all()
+
+        for existing in existing_active:
+            if existing.assigned_task_agent_ids and agent.agentium_id in existing.assigned_task_agent_ids:
+                logger.debug(
+                    f"Agent {agent.agentium_id} already has active idle task "
+                    f"({existing.agentium_id}) in DB — skipping"
+                )
+                # Re-sync in-memory dict so next loop tick doesn't re-check DB
+                self.current_idle_tasks[agent.agentium_id] = str(existing.id)
+                return
+
+        # ── Import idle tasks ────────────────────────────────────────────────────
         from backend.services.idle_tasks.preference_optimizer import preference_optimizer_task
-        
-        # Determine task type based on agent role
+
+        # ── Determine task type based on agent role ──────────────────────────────
         if agent.agentium_id == '00001':
             task_type = random.choice([
                 TaskType.CONSTITUTION_REFINE,
@@ -564,8 +617,17 @@ class EnhancedIdleGovernanceEngine:
                 TaskType.PREFERENCE_OPTIMIZATION,
             ])
         else:
-            # Check if preference optimization is due
-            if preference_optimizer_task.should_run(30):  # 30 min idle
+            # FIX 3: Calculate real elapsed minutes since last preference_optimization
+            # instead of always passing the hardcoded value 30 (which always returned True).
+            last_pref_run = self._last_pref_opt_run.get(agent.agentium_id)
+            if last_pref_run:
+                elapsed_pref_minutes = int(
+                    (datetime.utcnow() - last_pref_run).total_seconds() / 60
+                )
+            else:
+                elapsed_pref_minutes = 9999  # never run → always eligible on first pass
+
+            if preference_optimizer_task.should_run(elapsed_pref_minutes):
                 task_type = TaskType.PREFERENCE_OPTIMIZATION
             else:
                 task_type = random.choice([
@@ -575,38 +637,17 @@ class EnhancedIdleGovernanceEngine:
                     TaskType.AGENT_HEALTH_SCAN,
                     TaskType.CACHE_OPTIMIZATION
                 ])
-        
-        # Create the idle task in the database
+
+        # ── Create the idle task in the database ─────────────────────────────────
         try:
-            # More granular idempotency key with minutes and seconds to reduce collisions
-            import uuid
             unique_suffix = uuid.uuid4().hex[:12]
             idempotency_key = f"idle_{agent.agentium_id}_{task_type.value}_{unique_suffix}"
-            
-            # Check for ANY recent identical idle task for this agent (within last hour)
-            from datetime import timedelta
-            one_hour_ago = datetime.utcnow() - timedelta(hours=1)
-            
-            # FIX: Use Python-side check to avoid SQL JSON operator complexity
-            # Fetch recent tasks of this type and check if agent is already assigned
-            recent_tasks = db.query(Task).filter(
-                Task.task_type == task_type,
-                Task.is_idle_task == True,
-                Task.is_active == True,
-                Task.created_at > one_hour_ago
-            ).limit(10).all()
-            
-            # Check if any of these tasks is assigned to this agent
-            for task in recent_tasks:
-                if task.assigned_task_agent_ids and agent.agentium_id in task.assigned_task_agent_ids:
-                    logger.debug(f"Skipping duplicate idle task for {agent.agentium_id}: {task_type.value}")
-                    return
-            
-            # Generate unique agentium_id for task using UUID to prevent T00001, T00002 collisions
+
+            # Generate unique agentium_id for task using UUID
             task_agentium_id = f"T{uuid.uuid4().hex[:8].upper()}"
-            
+
             idle_task = Task(
-                agentium_id=task_agentium_id,  # Explicitly set unique ID
+                agentium_id=task_agentium_id,
                 title=f"[Idle] {task_type.value}",
                 description=f"[Idle] {task_type.value} by {agent.agentium_id}",
                 task_type=task_type,
@@ -621,24 +662,30 @@ class EnhancedIdleGovernanceEngine:
             )
             db.add(idle_task)
             db.flush()
-            
+
+            # Update in-memory tracking and agent state
             self.current_idle_tasks[agent.agentium_id] = str(idle_task.id)
             agent.status = AgentStatus.IDLE_WORKING
             agent.current_task_id = str(idle_task.id)
             agent.last_idle_action_at = datetime.utcnow()
-            
-            logger.info(f"🌙 Idle work assigned: {agent.agentium_id} → {task_type.value} (Task ID: {task_agentium_id})")
-            
+
+            logger.info(
+                f"🌙 Idle work assigned: {agent.agentium_id} → "
+                f"{task_type.value} (Task ID: {task_agentium_id})"
+            )
+
         except Exception as e:
-            db.rollback()  # Critical: Rollback on error to prevent partial commits
+            db.rollback()
             logger.warning(f"⚠️ Failed to assign idle work to {agent.agentium_id}: {e}")
-            # Clean up any partial state
             self.current_idle_tasks.pop(agent.agentium_id, None)
     
     async def _execute_idle_work(self, db: Session, agents: List[Agent]):
         """
         Execute assigned idle work for each agent with an active idle task.
         Dispatches to the appropriate handler based on task type.
+
+        FIX 3: Records last preference_optimization run time per agent.
+        FIX 4: Records last task completion time per agent to enforce cooldown.
         """
         from backend.services.idle_tasks.preference_optimizer import preference_optimizer_task
         
@@ -656,19 +703,17 @@ class EnhancedIdleGovernanceEngine:
             try:
                 tokens_saved = 0
                 
-                # FIX: Use task.task_type instead of task.type
-                # FIX: Don't await - execute() returns a dict, not a coroutine
                 if task.task_type == TaskType.PREFERENCE_OPTIMIZATION:
-                    result = preference_optimizer_task.execute()  # REMOVED: await
+                    result = preference_optimizer_task.execute()
                     tokens_saved = result.get('tokens_saved', 0) if isinstance(result, dict) else 0
+                    # FIX 3: Record when this agent last ran preference_optimization
+                    self._last_pref_opt_run[agent.agentium_id] = datetime.utcnow()
                     
                 elif task.task_type == TaskType.VECTOR_MAINTENANCE:
-                    # Trigger vector DB maintenance via knowledge service
                     from backend.services.knowledge_service import knowledge_service
                     await knowledge_service.run_maintenance(db)
                     
                 elif task.task_type == TaskType.AUDIT_ARCHIVAL:
-                    # Archive old audit logs
                     from backend.models.entities.audit import AuditLog
                     cutoff = datetime.utcnow() - timedelta(days=90)
                     archived = db.query(AuditLog).filter(
@@ -677,18 +722,15 @@ class EnhancedIdleGovernanceEngine:
                     logger.info(f"📦 Audit archival scan: {archived} records eligible")
                     
                 elif task.task_type == TaskType.AGENT_HEALTH_SCAN:
-                    # Check agent health across the system
                     all_agents = db.query(Agent).filter_by(is_active=True).all()
                     unhealthy = [a for a in all_agents if a.status == AgentStatus.SUSPENDED]
                     if unhealthy:
                         logger.info(f"🏥 Health scan: {len(unhealthy)} suspended agents found")
                         
                 elif task.task_type in (TaskType.CONSTITUTION_REFINE, TaskType.CONSTITUTION_READ):
-                    # Trigger constitutional re-alignment
                     agent.read_and_align_constitution(db)
                     
                 elif task.task_type == TaskType.ETHOS_OPTIMIZATION:
-                    # Compress and optimize agent's ethos
                     agent.compress_ethos(db)
                     
                 elif task.task_type == TaskType.CACHE_OPTIMIZATION:
@@ -707,10 +749,12 @@ class EnhancedIdleGovernanceEngine:
                 agent.status = AgentStatus.ACTIVE
                 agent.current_task_id = None
                 
+                # FIX 4: Record completion time — cooldown clock starts now
+                self._agent_last_completed[agent.agentium_id] = datetime.utcnow()
+
                 # Record metrics
                 self.metrics.record_idle_task_completion(tokens_saved)
                 
-                # FIX: Use task.task_type instead of task.type
                 logger.info(f"✅ Idle work completed: {agent.agentium_id} → {task.task_type.value}")
                 
             except Exception as e:
@@ -719,6 +763,8 @@ class EnhancedIdleGovernanceEngine:
                 self.current_idle_tasks.pop(agent.agentium_id, None)
                 agent.status = AgentStatus.ACTIVE
                 agent.current_task_id = None
+                # FIX 4: Record completion time even on error so we don't immediately retry
+                self._agent_last_completed[agent.agentium_id] = datetime.utcnow()
         
         # Commit all changes
         try:
@@ -745,7 +791,7 @@ class EnhancedIdleGovernanceEngine:
             pass
     
     # ═══════════════════════════════════════════════════════════
-    # AUTO-SCALING GOVERNANCE (NEW - Add to EnhancedIdleGovernanceEngine)
+    # AUTO-SCALING GOVERNANCE
     # ═══════════════════════════════════════════════════════════
     
     async def auto_scale_check(self, db: Session) -> Dict[str, Any]:
@@ -780,7 +826,6 @@ class EnhancedIdleGovernanceEngine:
             head = db.query(HeadOfCouncil).filter_by(agentium_id="00001").first()
             
             if head:
-                # Log scaling decision in audit trail
                 from backend.models.entities.audit import AuditLog, AuditLevel, AuditCategory
                 
                 audit = AuditLog.log(
@@ -793,14 +838,12 @@ class EnhancedIdleGovernanceEngine:
                     after_state={
                         "pending_count": pending_count,
                         "threshold": threshold,
-                        "recommended_agents": 3,  # Spawn 3 new 3xxxx agents
+                        "recommended_agents": 3,
                         "triggered_by": "queue_depth"
                     }
                 )
                 db.add(audit)
                 
-                # In production: Request Council micro-vote and spawn agents
-                # For now, log the recommendation
                 logger.info(f"   Council micro-vote recommended: Spawn 3 additional Task Agents (3xxxx)")
                 
                 result.update({
@@ -838,6 +881,17 @@ class EnhancedIdleGovernanceEngine:
             
             # Get capacity info
             capacity = reincarnation_service.get_available_capacity(db)
+
+            # Build cooldown status per agent for observability
+            now = datetime.utcnow()
+            cooldown_status = {}
+            for agent_id, last_done in self._agent_last_completed.items():
+                elapsed = (now - last_done).total_seconds()
+                remaining = max(0, self.IDLE_TASK_COOLDOWN_SECONDS - elapsed)
+                cooldown_status[agent_id] = {
+                    "on_cooldown": remaining > 0,
+                    "seconds_remaining": round(remaining, 1)
+                }
             
             return {
                 'is_running': self.is_running,
@@ -847,10 +901,10 @@ class EnhancedIdleGovernanceEngine:
                 'agent_statistics': agent_stats,
                 'token_budget_status': idle_budget.get_status(),
                 'token_optimizer_status': token_optimizer.get_status(),
-                
-                # NEW: Enhanced metrics
                 'metrics': self.metrics.to_dict(),
                 'capacity_status': capacity,
+                # Cooldown visibility for debugging
+                'agent_cooldown_status': cooldown_status,
                 'scheduled_tasks': {
                     'idle_detection': {
                         'interval_hours': self.IDLE_DETECTION_INTERVAL / 3600,

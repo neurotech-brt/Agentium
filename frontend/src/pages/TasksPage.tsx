@@ -5,6 +5,7 @@ import { preferencesService, PREFERENCE_CATEGORIES, DATA_TYPE_LABELS, formatPref
 import { api } from '../services/api';
 import { TaskCard } from '../components/tasks/TaskCard';
 import { CreateTaskModal } from '../components/tasks/CreateTaskModal';
+import { CheckpointImportModal } from '../components/checkpoints/CheckpointImportModal';
 import {
     Plus,
     Filter,
@@ -48,6 +49,7 @@ import {
     Sparkles,
     Database,
     GitCompareArrows,
+    Upload,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { CheckpointTimeline } from '../components/checkpoints/CheckpointTimeline';
@@ -127,6 +129,7 @@ interface SubtaskWithReviews extends Subtask {
     reviewsLoaded: boolean;
     reviewsLoading: boolean;
 }
+
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -234,6 +237,7 @@ const SUBTASK_STATUS_CONFIG: Record<string, {
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
 
 const fmtMs = (ms: number) =>
     ms < 1000 ? `${Math.round(ms)}ms` : `${(ms / 1000).toFixed(1)}s`;
@@ -2004,7 +2008,7 @@ export const TasksPage: React.FC = () => {
     const [filterStatus, setFilterStatus] = useState<string>('');
     const [activeTab, setActiveTab]       = useState<Tab>('tasks');
     const [checkpointSubTab, setCheckpointSubTab] = useState<'timeline' | 'diff'>('timeline');
-
+    const [showImportModal, setShowImportModal] = useState(false); 
     useEffect(() => { loadTasks(); }, [filterStatus]);
 
     const loadTasks = async (silent = false) => {
@@ -2253,7 +2257,24 @@ export const TasksPage: React.FC = () => {
                                 Branch Diff
                             </button>
                         </div>
-
+                        <div className="flex items-center justify-between mb-6">
+                            <div className="flex items-center gap-1 bg-gray-100 dark:bg-[#0f1117] rounded-lg p-1">
+                                {/* existing timeline/diff buttons */}
+                            </div>
+                            
+                            {/* Add Import Button */}
+                            <button
+                                onClick={() => setShowImportModal(true)}
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium
+                                    bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300
+                                    border border-emerald-200 dark:border-emerald-500/25
+                                    hover:bg-emerald-100 dark:hover:bg-emerald-500/25
+                                    transition-colors duration-150"
+                            >
+                                <Upload className="w-3.5 h-3.5" />
+                                Import Checkpoint
+                            </button>
+                        </div>
                         {checkpointSubTab === 'timeline' && <CheckpointTimeline />}
                         {checkpointSubTab === 'diff'     && <BranchDiffView />}
                     </div>
@@ -2271,6 +2292,17 @@ export const TasksPage: React.FC = () => {
                 <CreateTaskModal
                     onConfirm={handleCreateTask}
                     onClose={() => setShowCreateModal(false)}
+                />
+            )}
+            {showImportModal && (
+                <CheckpointImportModal
+                    isOpen={showImportModal}
+                    onClose={() => setShowImportModal(false)}
+                    onImportSuccess={(result) => {
+                        if (checkpointSubTab === 'timeline') {
+                            window.location.reload();
+                        }
+                    }}
                 />
             )}
         </div>

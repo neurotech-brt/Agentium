@@ -122,12 +122,31 @@ class Constitution(BaseEntity):
         return version_number
     
     def get_articles_dict(self) -> Dict[str, Any]:
-        """Parse articles JSON to dictionary."""
+        """Parse articles JSON to dictionary with normalized article structure."""
         import json
         try:
-            return json.loads(self.articles) if self.articles else {}
+            articles = json.loads(self.articles) if self.articles else {}
         except json.JSONDecodeError:
             return {}
+        
+        # Normalize: ensure all article values are {title, content} dicts, not strings
+        normalized = {}
+        for key, val in articles.items():
+            if isinstance(val, str):
+                # Convert string content to proper structure
+                pretty_title = key.replace("_", " ").title()
+                normalized[key] = {"title": pretty_title, "content": val}
+            elif isinstance(val, dict):
+                # Already a dict, ensure it has required keys
+                normalized[key] = {
+                    "title": val.get("title", key.replace("_", " ").title()),
+                    "content": val.get("content", "")
+                }
+            else:
+                # Unknown type, create empty structure
+                normalized[key] = {"title": key.replace("_", " ").title(), "content": str(val) if val else ""}
+        
+        return normalized
     
     def get_prohibited_actions_list(self) -> List[str]:
         """Parse prohibited actions to list."""

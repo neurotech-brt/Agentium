@@ -79,6 +79,42 @@ export interface BranchCompareResult {
 }
 
 // ============================================================================
+// Phase 7: Import/Export Types
+// ============================================================================
+
+export interface CheckpointExportData {
+    checkpoint: Checkpoint;
+    exported_at: string;
+    version: string;
+    checksum: string;
+}
+
+export interface ValidationResult {
+    valid: boolean;
+    errors: string[];
+    warnings: string[];
+    checksum_valid: boolean;
+    schema_version: string;
+}
+
+export interface ImportOptions {
+    targetBranch?: string;
+    skipValidation?: boolean;
+    conflictResolution?: 'skip' | 'replace' | 'rename' | 'merge';
+}
+
+export interface ImportResult {
+    success: boolean;
+    checkpoint?: Checkpoint;
+    conflicts?: Array<{
+        type: 'id_collision' | 'branch_conflict' | 'parent_missing' | 'version_mismatch';
+        message: string;
+        resolution: string;
+    }>;
+    validation?: ValidationResult;
+}
+
+// ============================================================================
 // Checkpoints Service
 // ============================================================================
 
@@ -147,6 +183,81 @@ export const checkpointsService = {
         const response = await api.get<BranchCompareResult>(
             `/api/v1/checkpoints/compare?${params.toString()}`
         );
+        return response.data;
+    },
+
+    // ============================================================================
+    // Phase 7: Import/Export Operations
+    // ============================================================================
+
+    /**
+     * Export checkpoint as JSON file.
+     */
+    exportCheckpoint: async (checkpointId: string): Promise<Blob> => {
+        const response = await api.get(`/api/v1/checkpoints/${checkpointId}/export`, {
+            responseType: 'blob',
+        });
+        return response.data;
+    },
+
+    /**
+     * Validate checkpoint data before import.
+     */
+    validateCheckpoint: async (file: File): Promise<ValidationResult> => {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        const response = await api.post<ValidationResult>('/api/v1/checkpoints/validate', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        return response.data;
+    },
+
+    /**
+     * Import checkpoint from JSON file.
+     */
+    importCheckpoint: async (file: File, options?: ImportOptions): Promise<ImportResult> => {
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        if (options?.targetBranch) {
+            formData.append('target_branch', options.targetBranch);
+        }
+        if (options?.skipValidation) {
+            formData.append('skip_validation', 'true');
+        }
+        if (options?.conflictResolution) {
+            formData.append('conflict_resolution', options.conflictResolution);
+        }
+        
+        const response = await api.post<ImportResult>('/api/v1/checkpoints/import', formData, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        return response.data;
+    },
+
+    /**
+     * Get integrity status for a checkpoint.
+     */
+    getCheckpointIntegrity: async (checkpointId: string): Promise<{
+        valid: boolean;
+        checksum: string;
+        last_verified: string;
+        issues: string[];
+    }> => {
+        const response = await api.get(`/api/v1/checkpoints/${checkpointId}/integrity`);
+        return response.data;
+    },
+
+    /**
+     * Verify checkpoint integrity.
+     */
+    verifyCheckpoint: async (checkpointId: string): Promise<{
+        valid: boolean;
+        checksum_match: boolean;
+        issues: string[];
+    }> => {
+        const response = await api.post(`/api/v1/checkpoints/${checkpointId}/verify`);
         return response.data;
     },
 };

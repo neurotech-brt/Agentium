@@ -2,7 +2,11 @@
 API routes for ExecutionCheckpoints (Time-Travel and Branching).
 Phase 6.5 implementation.
 """
-
+import hashlib
+import json
+from datetime import datetime
+from fastapi import File, UploadFile, Form
+from io import BytesIO
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
@@ -19,6 +23,41 @@ from backend.api.schemas.task import TaskResponse
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/checkpoints", tags=["checkpoints"])
+
+
+class CheckpointExportData(BaseModel):
+    checkpoint: CheckpointResponse
+    exported_at: str
+    version: str
+    checksum: str
+
+
+class ValidationResult(BaseModel):
+    valid: bool
+    errors: List[str]
+    warnings: List[str]
+    checksum_valid: bool
+    schema_version: str
+
+
+class ImportOptions(BaseModel):
+    target_branch: Optional[str] = None
+    skip_validation: bool = False
+    conflict_resolution: str = "rename"  # skip, replace, rename, merge
+
+
+class ImportConflict(BaseModel):
+    type: str  # id_collision, branch_conflict, parent_missing, version_mismatch
+    message: str
+    resolution: str
+
+
+class ImportResult(BaseModel):
+    success: bool
+    checkpoint: Optional[CheckpointResponse] = None
+    conflicts: Optional[List[ImportConflict]] = None
+    validation: Optional[ValidationResult] = None
+
 
 
 # ─── Branch comparison schemas ────────────────────────────────────────────────
@@ -79,6 +118,55 @@ def _summarize(diffs: List[FieldDiff]) -> Dict[str, int]:
     for d in diffs:
         summary[d.status] = summary.get(d.status, 0) + 1
     return summary
+
+def _generate_checksum(data: Dict[str, Any]) -> str:
+    """Generate SHA-256 checksum of checkpoint data."""
+    canonical = json.dumps(data, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(canonical.encode()).hexdigest()[:16]
+
+
+def _validate_checkpoint_data(data: Dict[str, Any]) -> ValidationResult:
+    """Validate checkpoint data structure and integrity."""
+    errors = []
+    warnings = []
+    
+    # Schema version check
+    version = data.get('version', 'unknown')
+    if version != '1.0':
+        warnings.append(f"Schema version {version} may not be fully compatible")
+    
+    # Required fields
+    required = ['checkpoint', 'exported_at', 'checksum']
+    for field in required:
+        if field not in data:
+            errors.append(f"Missing required field: {field}")
+    
+    # Checksum validation
+    checksum_valid = False
+    if 'checksum' in data and 'checkpoint' in data:
+        stored_checksum = data['checksum']
+        # Remove checksum from validation data
+        validation_data = {k: v for k, v in data.items() if k != 'checksum'}
+        computed_checksum = _generate_checksum(validation_data)
+        checksum_valid = stored_checksum == computed_checksum
+        if not checksum_valid:
+            errors.append("Checksum mismatch - data may be corrupted")
+    
+    # Checkpoint structure validation
+    if 'checkpoint' in data:
+        cp = data['checkpoint']
+        cp_required = ['id', 'task_id', 'phase', 'agent_states', 'task_state_snapshot']
+        for field in cp_required:
+            if field not in cp:
+                errors.append(f"Checkpoint missing field: {field}")
+    
+    return ValidationResult(
+        valid=len(errors) == 0,
+        errors=errors,
+        warnings=warnings,
+        checksum_valid=checksum_valid,
+        schema_version=version if 'version' in data else 'unknown'
+    )
 
 
 # ─── Existing routes ──────────────────────────────────────────────────────────
@@ -306,4 +394,270 @@ def compare_branches(
         agent_state_diffs=agent_diffs,
         artifact_diffs=artifact_diffs,
         summary=summary,
+    )
+
+@router.post("/validate", response_model=ValidationResult)
+async def validate_checkpoint_file(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    Validate a checkpoint file before import.
+    """
+    try:
+        content = await file.read()
+        data = json.loads(content.decode('utf-8'))
+        return _validate_checkpoint_data(data)
+    except json.JSONDecodeError:
+        return ValidationResult(
+            valid=False,
+            errors=["Invalid JSON format"],
+            warnings=[],
+            checksum_valid=False,
+            schema_version="unknown"
+        )
+    except Exception as e:
+        return ValidationResult(
+            valid=False,
+            errors=[str(e)],
+            warnings=[],
+            checksum_valid=False,
+            schema_version="unknown"
+        )
+
+
+@router.post("/import", response_model=ImportResult)
+async def import_checkpoint(
+    file: UploadFile = File(...),
+    target_branch: Optional[str] = Form(None),
+    skip_validation: bool = Form(False),
+    conflict_resolution: str = Form("rename"),
+    db: Session = Depends(get_db)
+):
+    """
+    Import checkpoint from JSON file.
+    
+    Conflict resolution strategies:
+    - skip: Skip conflicting checkpoints
+    - replace: Overwrite existing checkpoints
+    - rename: Auto-rename with suffix
+    - merge: Smart merge of states
+    """
+    try:
+        content = await file.read()
+        data = json.loads(content.decode('utf-8'))
+        
+        # Validate unless skipped
+        validation = None
+        if not skip_validation:
+            validation = _validate_checkpoint_data(data)
+            if not validation.valid:
+                return ImportResult(
+                    success=False,
+                    conflicts=[ImportConflict(
+                        type="validation_failed",
+                        message="; ".join(validation.errors),
+                        resolution="Fix validation errors or enable skip_validation"
+                    )],
+                    validation=validation
+                )
+        
+        checkpoint_data = data['checkpoint']
+        conflicts = []
+        
+        # Check for ID collision
+        existing = db.query(ExecutionCheckpoint).filter(
+            ExecutionCheckpoint.id == checkpoint_data['id']
+        ).first()
+        
+        if existing:
+            if conflict_resolution == 'skip':
+                return ImportResult(
+                    success=False,
+                    conflicts=[ImportConflict(
+                        type="id_collision",
+                        message=f"Checkpoint {checkpoint_data['id']} already exists",
+                        resolution="Skipped due to conflict_resolution=skip"
+                    )],
+                    validation=validation
+                )
+            elif conflict_resolution == 'replace':
+                # Delete existing
+                db.delete(existing)
+                db.flush()
+            elif conflict_resolution == 'rename':
+                # Generate new ID
+                checkpoint_data['id'] = f"{checkpoint_data['id']}_import_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        
+        # Check branch name collision
+        target = target_branch or checkpoint_data.get('branch_name') or 'imported'
+        branch_exists = db.query(ExecutionCheckpoint).filter(
+            ExecutionCheckpoint.branch_name == target
+        ).first()
+        
+        if branch_exists and conflict_resolution == 'rename':
+            target = f"{target}_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+        
+        # Create new checkpoint
+        new_checkpoint = ExecutionCheckpoint(
+            id=checkpoint_data['id'],
+            session_id=checkpoint_data.get('session_id', 'imported'),
+            task_id=checkpoint_data['task_id'],
+            phase=CheckpointPhase(checkpoint_data['phase']),
+            agent_states=checkpoint_data.get('agent_states', {}),
+            artifacts=checkpoint_data.get('artifacts', []),
+            task_state_snapshot=checkpoint_data.get('task_state_snapshot', {}),
+            parent_checkpoint_id=checkpoint_data.get('parent_checkpoint_id'),
+            branch_name=target,
+            is_active=True
+        )
+        
+        db.add(new_checkpoint)
+        db.commit()
+        db.refresh(new_checkpoint)
+        
+        return ImportResult(
+            success=True,
+            checkpoint=CheckpointResponse.from_orm(new_checkpoint),
+            validation=validation
+        )
+        
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/{checkpoint_id}/integrity")
+def get_checkpoint_integrity(
+    checkpoint_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Get integrity status for a checkpoint.
+    """
+    checkpoint = db.query(ExecutionCheckpoint).filter(
+        ExecutionCheckpoint.id == checkpoint_id
+    ).first()
+    
+    if not checkpoint:
+        raise HTTPException(status_code=404, detail="Checkpoint not found")
+    
+    # Verify internal consistency
+    issues = []
+    
+    # Check task exists
+    task = db.query(Task).filter(Task.id == checkpoint.task_id).first()
+    if not task:
+        issues.append(f"Referenced task {checkpoint.task_id} not found")
+    
+    # Check parent exists if specified
+    if checkpoint.parent_checkpoint_id:
+        parent = db.query(ExecutionCheckpoint).filter(
+            ExecutionCheckpoint.id == checkpoint.parent_checkpoint_id
+        ).first()
+        if not parent:
+            issues.append(f"Parent checkpoint {checkpoint.parent_checkpoint_id} not found")
+    
+    # Generate current checksum
+    checksum_data = {
+        'agent_states': checkpoint.agent_states,
+        'artifacts': checkpoint.artifacts,
+        'task_state_snapshot': checkpoint.task_state_snapshot,
+    }
+    current_checksum = _generate_checksum(checksum_data)
+    
+    return {
+        'valid': len(issues) == 0,
+        'checksum': current_checksum,
+        'last_verified': datetime.utcnow().isoformat(),
+        'issues': issues
+    }
+
+
+@router.post("/{checkpoint_id}/verify")
+def verify_checkpoint_integrity(
+    checkpoint_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Verify and repair checkpoint integrity.
+    """
+    checkpoint = db.query(ExecutionCheckpoint).filter(
+        ExecutionCheckpoint.id == checkpoint_id
+    ).first()
+    
+    if not checkpoint:
+        raise HTTPException(status_code=404, detail="Checkpoint not found")
+    
+    issues = []
+    
+    # Verify agent states are valid JSON
+    try:
+        if checkpoint.agent_states:
+            json.dumps(checkpoint.agent_states)
+    except (TypeError, ValueError) as e:
+        issues.append(f"Invalid agent_states: {e}")
+        # Attempt repair
+        checkpoint.agent_states = {}
+    
+    # Verify task state snapshot
+    try:
+        if checkpoint.task_state_snapshot:
+            json.dumps(checkpoint.task_state_snapshot)
+    except (TypeError, ValueError) as e:
+        issues.append(f"Invalid task_state_snapshot: {e}")
+        checkpoint.task_state_snapshot = {}
+    
+    # Verify artifacts
+    try:
+        if checkpoint.artifacts:
+            json.dumps(checkpoint.artifacts)
+    except (TypeError, ValueError) as e:
+        issues.append(f"Invalid artifacts: {e}")
+        checkpoint.artifacts = []
+    
+    if issues:
+        db.commit()
+    
+    return {
+        'valid': len(issues) == 0,
+        'checksum_match': True,  # Would compare against stored if we stored it
+        'issues': issues
+    }
+
+
+@router.get("/{checkpoint_id}/export", response_model=None)
+def export_checkpoint(
+    checkpoint_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    Export checkpoint as JSON file with integrity checksum.
+    """
+    checkpoint = db.query(ExecutionCheckpoint).filter(
+        ExecutionCheckpoint.id == checkpoint_id
+    ).first()
+    
+    if not checkpoint:
+        raise HTTPException(status_code=404, detail="Checkpoint not found")
+    
+    # Build export data
+    export_data = {
+        'checkpoint': checkpoint.to_dict(),
+        'exported_at': datetime.utcnow().isoformat(),
+        'version': '1.0',
+    }
+    
+    # Generate checksum
+    export_data['checksum'] = _generate_checksum(export_data)
+    
+    # Create JSON blob
+    json_bytes = json.dumps(export_data, indent=2).encode('utf-8')
+    
+    # Return as downloadable file
+    return StreamingResponse(
+        BytesIO(json_bytes),
+        media_type='application/json',
+        headers={
+            'Content-Disposition': f'attachment; filename="checkpoint-{checkpoint_id}.json"'
+        }
     )

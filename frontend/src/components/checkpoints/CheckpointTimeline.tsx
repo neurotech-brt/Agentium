@@ -15,6 +15,7 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
+import { Download, Upload } from 'lucide-react';
 import {
     Clock,
     GitBranch,
@@ -121,6 +122,7 @@ const CheckpointRow: React.FC<CheckpointRowProps> = ({
     const [isRestoring, setIsRestoring] = useState(false);
     const [isBranching, setIsBranching] = useState(false);
     const [isInspectorOpen, setIsInspectorOpen] = useState(false);
+    const [isExporting, setIsExporting] = useState(false);
 
     const meta = getPhaseMeta(checkpoint.phase);
 
@@ -131,6 +133,27 @@ const CheckpointRow: React.FC<CheckpointRowProps> = ({
             await onRestore(checkpoint.id);
         } finally {
             setIsRestoring(false);
+        }
+    };
+
+    const handleExport = async (e: React.MouseEvent) => {
+        e.stopPropagation();
+        setIsExporting(true);
+        try {
+            const blob = await checkpointsService.exportCheckpoint(checkpoint.id);
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `checkpoint-${checkpoint.id}-${checkpoint.branch_name || 'main'}.json`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            window.URL.revokeObjectURL(url);
+            toast.success('Checkpoint exported successfully');
+        } catch (err: any) {
+            toast.error(err?.response?.data?.detail || 'Failed to export checkpoint');
+        } finally {
+            setIsExporting(false);
         }
     };
 
@@ -244,7 +267,18 @@ const CheckpointRow: React.FC<CheckpointRowProps> = ({
                                     <Search className="w-3 h-3" />
                                     Inspect State
                                 </button>
-
+                                <button
+                                    onClick={handleExport}
+                                    disabled={isExporting}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                                        bg-emerald-50 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300
+                                        border border-emerald-200 dark:border-emerald-500/25
+                                        hover:bg-emerald-100 dark:hover:bg-emerald-500/25
+                                        disabled:opacity-50 transition-colors duration-150"
+                                >
+                                    {isExporting ? <Loader2 className="w-3 h-3 animate-spin" /> : <Download className="w-3 h-3" />}
+                                    {isExporting ? 'Exporting…' : 'Export'}
+                                </button>
                                 {/* Restore */}
                                 <button
                                     onClick={handleRestore}

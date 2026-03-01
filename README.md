@@ -10,7 +10,7 @@
 
 Built for those who believe AI should be **transparent, accountable, and sovereign**, Agentium runs entirely on your infrastructure with local-first architecture. Agentium can spawn up to **99,999 AI Agents** with proper control and management, and handle up to **9,999 concurrent tasks** provided by the user — all at once.
 
-## ![[Agentium Demo]](./docs/animation.svg)
+## ![[Agentium Demo]](./docs/assets/animation.svg)
 
 ---
 
@@ -229,7 +229,7 @@ open http://localhost:3000
 
 ## 🏠 Self-Hosting Guide
 
-👉 [Self-Hosting Documentation](./docs/selfhost.md)
+👉 [Self-Hosting Documentation](./docs/documents/selfhost.md)
 
 ---
 

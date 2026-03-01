@@ -42,7 +42,13 @@ detect_os_family() {
       if grep -qi microsoft /proc/version 2>/dev/null; then echo "wsl2"
       else echo "linux"
       fi ;;
-    MINGW*|CYGWIN*) echo "wsl2" ;;
+    MINGW*|CYGWIN*|MSYS*)
+      # Native Windows (Git Bash, MSYS2, Cygwin) — NOT WSL2
+      if grep -qi microsoft /proc/version 2>/dev/null; then
+        echo "wsl2"
+      else
+        echo "windows"
+      fi ;;
     *) warn "Unknown OS '$uname'; defaulting to linux"; echo "linux" ;;
   esac
 }
@@ -79,6 +85,9 @@ detect_pkg_mgr() {
         opensuse*)                   echo "zypper" ;;
         *) warn "Unknown distro '$DISTRO'; defaulting to apt"; echo "apt" ;;
       esac ;;
+    windows)
+      # Windows uses pip directly (PyAudio has precompiled wheels)
+      echo "pip" ;;
     *) warn "Cannot select pkg manager for OS_FAMILY=$OS_FAMILY"; echo "unknown" ;;
   esac
 }
@@ -120,6 +129,9 @@ case "$OS_FAMILY" in
     else
       warn "No ALSA capture device found — voice capture may fail at runtime"
     fi ;;
+  windows)
+    # On Windows, let PyAudio handle detection at runtime
+    HAS_MIC="true" ;;
 esac
 conf "HAS_MIC" "$HAS_MIC"
 log "  HAS_MIC=$HAS_MIC"
@@ -142,6 +154,7 @@ detect_svc_mgr() {
     macos)  echo "launchd" ;;
     linux)  systemctl --user status &>/dev/null && echo "systemd" || echo "none" ;;
     wsl2)   echo "wsl2" ;;
+    windows) echo "task_scheduler" ;;
     *)      echo "none" ;;
   esac
 }

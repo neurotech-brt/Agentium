@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import os
+import platform
 import sys
 import time
 from pathlib import Path
@@ -56,6 +57,18 @@ BACKEND_URL: str  = _conf.get("BACKEND_URL",  os.getenv("BACKEND_URL",  "http://
 WS_PORT:     int  = int(_conf.get("WS_PORT",  os.getenv("WS_PORT",  "9999")))
 WAKE_WORD:   str  = _conf.get("WAKE_WORD",   os.getenv("WAKE_WORD",   "agentium")).lower()
 VOICE_TOKEN: str  = _conf.get("VOICE_TOKEN", os.getenv("VOICE_TOKEN", ""))
+
+# ── Cross-platform venv path helper ───────────────────────────────────────────
+
+def get_venv_python_path() -> Path:
+    """
+    Get the correct venv Python executable path for the current platform.
+    Windows uses Scripts\python.exe, Unix uses bin/python.
+    """
+    venv_dir = Path.home() / ".agentium" / "voice-venv"
+    if platform.system() == "Windows":
+        return venv_dir / "Scripts" / "python.exe"
+    return venv_dir / "bin" / "python"
 
 # ── Optional dependency guards ─────────────────────────────────────────────────
 
@@ -334,6 +347,7 @@ async def _main() -> None:
     logger.info("  Wake word: '%s'", WAKE_WORD)
     logger.info("  STT      : %s", "SpeechRecognition" if SR_AVAILABLE else "DISABLED")
     logger.info("  TTS      : %s", "pyttsx3" if TTS_AVAILABLE else "DISABLED")
+    logger.info("  Platform : %s", platform.system())
     logger.info("=" * 60)
 
     await asyncio.gather(

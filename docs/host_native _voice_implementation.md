@@ -3865,4 +3865,3 @@ Write-Host "=== Agentium Voice Bridge Windows Installer ==="
 Summary of Work Required
 TaskEffortdetect-host.ps1~50 linesinstall-voice-bridge.ps1~80 linesuninstall-voice-bridge.ps1~30 linesFix venv path in scripts~5 linesPyAudio install workaround~10 linesService via Task Scheduler or NSSM~20 linesmain.py path fix~5 lines
 Total: ~200 lines of new PowerShell + minor Python fix. main.py needs almost no changes since pathlib and asyncio are cross-platform. The bulk of the work is the installer/detector scripts.
-Want me to write these PowerShell scripts?

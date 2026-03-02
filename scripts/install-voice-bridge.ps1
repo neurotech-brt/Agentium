@@ -9,7 +9,8 @@ $CONF_DIR = Join-Path $env:USERPROFILE ".agentium"
 $CONF_FILE = Join-Path $CONF_DIR "env.conf"
 $LOG_FILE = Join-Path $CONF_DIR "install.log"
 $VENV_DIR = Join-Path $CONF_DIR "voice-venv"
-$REPO_ROOT = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+# $PSScriptRoot is scripts/ → one level up is repo root
+$REPO_ROOT = Split-Path $PSScriptRoot -Parent
 $BRIDGE_DIR = Join-Path $REPO_ROOT "voice-bridge"
 
 New-Item -ItemType Directory -Force -Path $CONF_DIR | Out-Null
@@ -102,24 +103,39 @@ $BRIDGE_CMD = "`"$VENV_PYTHON`" `"$BRIDGE_DIR\main.py`""
 
 switch ($SVC_MGR) {
     "task_scheduler" {
-        $TaskName = "AgentiumVoiceBridge"
-        
+        $TaskName  = "AgentiumVoiceBridge"
+        $LogFile   = Join-Path $CONF_DIR "voice-bridge.log"
+        $MainPy    = Join-Path $BRIDGE_DIR "main.py"
+
+        # Validate paths before registering
+        if (-not (Test-Path $VENV_PYTHON)) {
+            Write-Warn "venv Python not found at $VENV_PYTHON -- did pip install succeed?"
+        }
+        if (-not (Test-Path $MainPy)) {
+            Write-Warn "main.py not found at $MainPy -- check REPO_ROOT path"
+        }
+
         # Remove existing task if present
         Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false
-        
-        $action = New-ScheduledTaskAction -Execute $VENV_PYTHON -Argument "`"$BRIDGE_DIR\main.py`""
-        $trigger = New-ScheduledTaskTrigger -AtLogon
-        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
-        
+
+        # Wrap in cmd.exe to capture stdout+stderr to log file
+        $cmdArgs = "/c `"`"$VENV_PYTHON`" `"$MainPy`" >> `"$LogFile`" 2>&1`""
+        $action   = New-ScheduledTaskAction -Execute "cmd.exe" -Argument $cmdArgs
+        $trigger  = New-ScheduledTaskTrigger -AtLogon
+        $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Hours 0)
+
         # Run as current user (no admin needed)
         $principal = New-ScheduledTaskPrincipal -GroupId "Users" -RunLevel Limited
-        
+
         Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings | Out-Null
-        
+
         # Start immediately
         Start-ScheduledTask -TaskName $TaskName
-        
-        Write-Log "  Task Scheduler: Task '$TaskName' registered and started"
+        Start-Sleep -Seconds 2
+
+        $state = (Get-ScheduledTask -TaskName $TaskName).State
+        Write-Log "  Task '$TaskName' state: $state"
+        Write-Log "  Bridge log: $LogFile"
         Write-Log "  Manage with: Get-ScheduledTask -TaskName '$TaskName'"
     }
     

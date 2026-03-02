@@ -95,6 +95,23 @@ services:
   # Safe to re-run — skips install if already done.
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   voice-autoinstall:
+    # ─────────────────────────────────────────────────────────────────────────
+    # Fully automatic voice bridge installer — runs once, safe to re-run.
+    #
+    # Linux / macOS / WSL2:
+    #   Runs detect-host.sh + install-voice-bridge.sh inside the container.
+    #   Those scripts create the venv + register the OS service via the
+    #   mounted ~/.agentium volume. Zero manual steps needed.
+    #
+    # Windows (Docker Desktop):
+    #   A Linux container cannot run PowerShell on the host, so instead:
+    #   1. Copies scripts/windows-bootstrap.cmd  →  %USERPROFILE%\.agentium\
+    #      (bakes in the real repo path so setup.ps1 is always found)
+    #   2. Copies scripts/agentium-voice-startup.cmd  →  Windows Startup folder
+    #      so the bridge starts automatically on every login.
+    #   The bridge runs on the next Windows login (or the user can double-click
+    #   %USERPROFILE%\.agentium\bootstrap-voice.cmd to start it right away).
+    # ─────────────────────────────────────────────────────────────────────────
     image: ubuntu:22.04
     container_name: agentium-voice-autoinstall
     network_mode: host
@@ -102,42 +119,18 @@ services:
       - ./scripts:/scripts:ro
       - ./voice-bridge:/voice-bridge:ro
       - ${HOME:-~}/.agentium:/root/.agentium
+      # Gives the container write access to the host home dir so it can
+      # drop files into AppData\Roaming on Windows.
+      - ${USERPROFILE:-~}:/host_home:rw
     environment:
       - HOME=/root
       - BACKEND_URL=http://127.0.0.1:8000
+      - WIN_USERPROFILE=${USERPROFILE:-}
     depends_on:
       backend:
         condition: service_healthy
-    command: >
-      bash -c "
-        set -e
-
-        echo '[voice-autoinstall] Backend is healthy. Starting voice bridge setup...'
-
-        apt-get update -qq > /dev/null 2>&1 &&
-        apt-get install -y -qq bash curl python3 python3-venv python3-pip > /dev/null 2>&1
-
-        MARKER=/root/.agentium/voice-installed.marker
-
-        if [ -f \"$$MARKER\" ]; then
-          echo '[voice-autoinstall] Voice bridge already installed. Skipping.'
-          echo '[voice-autoinstall] To force reinstall, delete ~/.agentium/voice-installed.marker'
-          exit 0
-        fi
-
-        mkdir -p /root/.agentium
-
-        echo '[voice-autoinstall] Running OS detection...'
-        bash /scripts/detect-host.sh
-
-        echo '[voice-autoinstall] Installing voice bridge...'
-        bash /scripts/install-voice-bridge.sh
-
-        touch \"$$MARKER\"
-        echo '[voice-autoinstall] Done. Voice bridge is installed and running.'
-      "
+    command: bash /scripts/voice-autoinstall.sh
     restart: "no"
-
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # Backend API (FastAPI) - PRIVILEGED
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

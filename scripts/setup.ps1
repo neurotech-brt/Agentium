@@ -30,4 +30,26 @@ if (Test-Path $installScript) {
 Write-Host ""
 Write-Host "=== Voice bridge installation complete ===" -ForegroundColor Green
 Write-Host "Check $env:USERPROFILE\.agentium\install.log for details."
-Write-Host "Run 'Get-ScheduledTask -TaskName AgentiumVoiceBridge' to check status."
+Write-Host ""
+
+# ── Verify the scheduled task actually started ────────────────────────────────
+Write-Host "[setup.ps1] Verifying scheduled task..." -ForegroundColor Yellow
+$task = Get-ScheduledTask -TaskName "AgentiumVoiceBridge" -ErrorAction SilentlyContinue
+if ($task) {
+    $state = $task.State
+    Write-Host "  Task state: $state" -ForegroundColor $(if ($state -eq "Running") { "Green" } else { "Yellow" })
+    if ($state -ne "Running") {
+        Write-Host "  Starting task now..." -ForegroundColor Yellow
+        Start-ScheduledTask -TaskName "AgentiumVoiceBridge"
+        Start-Sleep -Seconds 2
+        $state = (Get-ScheduledTask -TaskName "AgentiumVoiceBridge").State
+        Write-Host "  Task state after start: $state" -ForegroundColor $(if ($state -eq "Running") { "Green" } else { "Red" })
+    }
+} else {
+    Write-Warning "  AgentiumVoiceBridge task not found — check install.log"
+}
+
+Write-Host ""
+Write-Host "To check status : Get-ScheduledTask -TaskName AgentiumVoiceBridge"
+Write-Host "To start manually: Start-ScheduledTask -TaskName AgentiumVoiceBridge"
+Write-Host "To view logs    : Get-Content `$env:USERPROFILE\.agentium\voice-bridge.log -Tail 50"

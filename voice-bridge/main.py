@@ -6,13 +6,6 @@ via HTTP, streams microphone input through STT, sends text to the Head of
 Council, speaks the reply with TTS, and pushes the exchange to the browser
 via a local WebSocket server on 127.0.0.1:9999.
 
-Fixes applied:
-  - listen_once() runs in a thread executor so it never blocks the async loop
-  - Wake word is OPTIONAL (configurable via REQUIRE_WAKE_WORD in env.conf)
-  - query_backend tries the WebSocket chat endpoint first, falls back to HTTP
-  - Full debug logging so you can see exactly what is happening
-  - pyttsx3 TTS runs in executor too (it blocks on Windows)
-
 Start:  python voice-bridge/main.py
 """
 from __future__ import annotations
@@ -66,7 +59,7 @@ WS_PORT:           int  = int(_conf.get("WS_PORT",        os.getenv("WS_PORT",  
 WAKE_WORD:         str  = _conf.get("WAKE_WORD",          os.getenv("WAKE_WORD",          "agentium")).lower()
 VOICE_TOKEN:       str  = _conf.get("VOICE_TOKEN",        os.getenv("VOICE_TOKEN",        ""))
 # Set REQUIRE_WAKE_WORD=false in env.conf to skip the wake-word step entirely
-REQUIRE_WAKE_WORD: bool = _conf.get("REQUIRE_WAKE_WORD",  os.getenv("REQUIRE_WAKE_WORD",  "false")).lower() == "true"
+REQUIRE_WAKE_WORD: bool = _conf.get("REQUIRE_WAKE_WORD",  os.getenv("REQUIRE_WAKE_WORD",  "true")).lower() == "true"
 
 logger.info("[bridge] BACKEND_URL=%s  WS_PORT=%d  WAKE_WORD='%s'  REQUIRE_WAKE_WORD=%s",
             BACKEND_URL, WS_PORT, WAKE_WORD, REQUIRE_WAKE_WORD)

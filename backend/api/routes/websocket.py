@@ -1,6 +1,5 @@
 """
 WebSocket endpoint for real-time chat with authentication.
-User must authenticate BEFORE or DURING connection.
 
 Broadcast events emitted:
   agent_spawned          — new agent created
@@ -8,13 +7,14 @@ Broadcast events emitted:
   vote_initiated         — deliberation vote started
   constitutional_violation — rule breach detected
   message_routed         — external channel message dispatched to agent
-  knowledge_submitted    — NEW: agent submitted knowledge to the KB
-  knowledge_approved     — NEW: council approved a knowledge submission
-  amendment_proposed     — NEW: constitutional amendment proposed
-  agent_liquidated       — NEW: agent terminated / decommissioned
+  knowledge_submitted    — agent submitted knowledge to the KB
+  knowledge_approved     — council approved a knowledge submission
+  amendment_proposed     — constitutional amendment proposed
+  agent_liquidated       — agent terminated / decommissioned
 """
 
 import json
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Optional, Dict, Any
 
@@ -22,15 +22,55 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
 from jose import JWTError, jwt
 from sqlalchemy.orm import Session
 
-from backend.models.database import get_db
+from backend.models.database import SessionLocal, get_db
 from backend.models.entities import Agent, HeadOfCouncil
 from backend.services.chat_service import ChatService
 from backend.core.config import settings
-from backend.core.auth import get_current_active_user
 from backend.models.entities.user import User
 
 router = APIRouter()
 
+
+# ── DB session helper ─────────────────────────────────────────────────────────
+
+@contextmanager
+def get_fresh_db():
+    """
+    Yield a brand-new SQLAlchemy session and always close it afterwards.
+    Used inside the WebSocket message loop so every message gets a clean
+    session — avoids stale-data and detached-instance bugs on long-lived
+    connections (FIX #4).
+    """
+    db: Session = SessionLocal()
+    try:
+        yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+# ── JWT helper ────────────────────────────────────────────────────────────────
+
+def _decode_token(token: str) -> Optional[Dict[str, Any]]:
+    """
+    Decode and validate a JWT.  Returns the payload dict on success,
+    or None on any failure.
+    """
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+        if not payload.get("sub"):
+            return None
+        return payload
+    except JWTError:
+        return None
+
+
+# ═══════════════════════════════════════════════════════════
+# Connection Manager
+# ═══════════════════════════════════════════════════════════
 
 class ConnectionManager:
     """Manage authenticated WebSocket connections with heartbeat support."""
@@ -43,51 +83,55 @@ class ConnectionManager:
 
     # ── connection lifecycle ─────────────────────────────────────────────────
 
-    async def connect(self, websocket: WebSocket, token: str, db: Session) -> Optional[Dict[str, Any]]:
+    async def authenticate(
+        self,
+        websocket: WebSocket,
+        token: str,
+    ) -> Optional[Dict[str, Any]]:
         """
-        Authenticate before accepting.
-        Returns user_info dict on success, None if auth fails.
+        Validate JWT and resolve the Head of Council identity.
+        Uses a *short-lived* session that is closed immediately after.
+        Returns user_info dict on success, None on failure.
         """
+        payload = _decode_token(token)
+        if not payload:
+            await websocket.close(code=4001, reason="Invalid or expired token")
+            return None
+
+        username = payload["sub"]
+
+        # Resolve head_agent_id with a fresh, short-lived session
         try:
-            payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
-            username = payload.get("sub")
-            if not username:
-                await websocket.close(code=4001, reason="Invalid token: no subject")
-                return None
-
-            head = db.query(HeadOfCouncil).filter_by(agentium_id="00001").first()
-            if not head:
-                await websocket.close(code=1011, reason="System not initialized — no Head of Council")
-                return None
-
-            await websocket.accept()
-
-            user_info = {
-                "username":        username,
-                "role":            payload.get("role", "sovereign"),
-                "user_id":         payload.get("user_id"),
-                "head_agent_id":   head.id,
-                "head_agentium_id": head.agentium_id,
-            }
-
-            self.active_connections[websocket] = user_info
-            self.user_connections[username] = websocket
-            print(f"[WebSocket] ✅ Authenticated: {username} ({datetime.utcnow().isoformat()})")
-            return user_info
-
-        except JWTError as e:
-            await websocket.close(code=4001, reason=f"Invalid authentication: {str(e)}")
+            with get_fresh_db() as db:
+                head = db.query(HeadOfCouncil).filter_by(agentium_id="00001").first()
+                if not head:
+                    await websocket.close(code=1011, reason="System not initialised — no Head of Council")
+                    return None
+                head_agent_id    = head.id
+                head_agentium_id = head.agentium_id
+        except Exception as exc:
+            await websocket.close(code=1011, reason=f"DB error during auth: {exc}")
             return None
-        except Exception as e:
-            await websocket.close(code=1011, reason=f"Authentication error: {str(e)}")
-            return None
+
+        user_info = {
+            "username":         username,
+            "role":             payload.get("role", "sovereign"),
+            "user_id":          payload.get("user_id"),
+            "head_agent_id":    head_agent_id,
+            "head_agentium_id": head_agentium_id,
+        }
+
+        self.active_connections[websocket] = user_info
+        self.user_connections[username]    = websocket
+        print(f"[WebSocket] ✅ Authenticated: {username} ({datetime.utcnow().isoformat()})")
+        return user_info
 
     def disconnect(self, websocket: WebSocket) -> Optional[str]:
         """Remove connection; return username if found."""
         username = None
         if websocket in self.active_connections:
             user_info = self.active_connections.pop(websocket)
-            username = user_info.get("username")
+            username  = user_info.get("username")
             if username and username in self.user_connections:
                 del self.user_connections[username]
             print(f"[WebSocket] ❌ Disconnected: {username}")
@@ -101,20 +145,20 @@ class ConnectionManager:
             try:
                 await self.user_connections[username].send_json(message)
                 return True
-            except Exception as e:
-                print(f"[WebSocket] Error sending to {username}: {e}")
+            except Exception as exc:
+                print(f"[WebSocket] Error sending to {username}: {exc}")
         return False
 
     async def broadcast(self, message: dict, exclude: Optional[WebSocket] = None) -> None:
         """Broadcast JSON message to all authenticated connections."""
         disconnected = []
-        for connection, user_info in self.active_connections.items():
+        for connection, user_info in list(self.active_connections.items()):
             if connection is exclude:
                 continue
             try:
                 await connection.send_json(message)
-            except Exception as e:
-                print(f"[WebSocket] Broadcast error to {user_info.get('username')}: {e}")
+            except Exception as exc:
+                print(f"[WebSocket] Broadcast error to {user_info.get('username')}: {exc}")
                 disconnected.append(connection)
         for conn in disconnected:
             self.disconnect(conn)
@@ -122,23 +166,31 @@ class ConnectionManager:
     def get_connection_count(self) -> int:
         return len(self.active_connections)
 
-    # ── typed broadcast events ───────────────────────────────────────────────
-    # These are the named events the rest of the backend calls directly.
-    # Each stamps a `timestamp` automatically.
+    # ── typed broadcast events ────────────────────────────────────────────────
 
-    async def emit_agent_spawned(self, agent_id: str, agent_name: str,
-                                  agent_type: str, tier: str) -> None:
+    async def emit_agent_spawned(
+        self,
+        agent_id: str,
+        agent_name: str,
+        agent_type: str,
+        parent_id: Optional[str] = None,
+    ) -> None:
         await self.broadcast({
             "type":       "agent_spawned",
             "agent_id":   agent_id,
             "agent_name": agent_name,
             "agent_type": agent_type,
-            "tier":       tier,
+            "parent_id":  parent_id,
             "timestamp":  datetime.utcnow().isoformat(),
         })
 
-    async def emit_task_escalated(self, task_id: str, task_title: str,
-                                   escalated_by: str, reason: str) -> None:
+    async def emit_task_escalated(
+        self,
+        task_id: str,
+        task_title: str,
+        escalated_by: str,
+        reason: str,
+    ) -> None:
         await self.broadcast({
             "type":         "task_escalated",
             "task_id":      task_id,
@@ -148,108 +200,92 @@ class ConnectionManager:
             "timestamp":    datetime.utcnow().isoformat(),
         })
 
-    async def emit_vote_initiated(self, vote_id: str, topic: str,
-                                   initiated_by: str, options: list) -> None:
+    async def emit_vote_initiated(
+        self,
+        vote_id: str,
+        subject: str,
+        initiated_by: str,
+        quorum_required: int,
+    ) -> None:
         await self.broadcast({
-            "type":         "vote_initiated",
-            "vote_id":      vote_id,
-            "topic":        topic,
-            "initiated_by": initiated_by,
-            "options":      options,
-            "timestamp":    datetime.utcnow().isoformat(),
+            "type":            "vote_initiated",
+            "vote_id":         vote_id,
+            "subject":         subject,
+            "initiated_by":    initiated_by,
+            "quorum_required": quorum_required,
+            "timestamp":       datetime.utcnow().isoformat(),
         })
 
-    async def emit_constitutional_violation(self, agent_id: str, rule: str,
-                                             severity: str, action_taken: str) -> None:
+    async def emit_constitutional_violation(
+        self,
+        agent_id: str,
+        violation_type: str,
+        description: str,
+        severity: str = "medium",
+    ) -> None:
         await self.broadcast({
-            "type":         "constitutional_violation",
-            "agent_id":     agent_id,
-            "rule":         rule,
-            "severity":     severity,
-            "action_taken": action_taken,
-            "timestamp":    datetime.utcnow().isoformat(),
+            "type":           "constitutional_violation",
+            "agent_id":       agent_id,
+            "violation_type": violation_type,
+            "description":    description,
+            "severity":       severity,
+            "timestamp":      datetime.utcnow().isoformat(),
         })
 
-    async def emit_message_routed(self, channel: str, channel_name: str,
-                                   sender: str, task_id: str,
-                                   requires_approval: bool = False) -> None:
+    async def emit_message_routed(
+        self,
+        message_id: str,
+        channel: str,
+        routed_to: str,
+        content_preview: str,
+    ) -> None:
         await self.broadcast({
-            "type":             "message_routed",
-            "channel":          channel,
-            "channel_name":     channel_name,
-            "sender":           sender,
-            "task_id":          task_id,
-            "requires_approval": requires_approval,
-            "timestamp":        datetime.utcnow().isoformat(),
+            "type":            "message_routed",
+            "message_id":      message_id,
+            "channel":         channel,
+            "routed_to":       routed_to,
+            "content_preview": content_preview,
+            "timestamp":       datetime.utcnow().isoformat(),
         })
-
-    async def emit_message_created(self, message_data: Dict[str, Any]) -> None:
-        """
-        Fired when a new unified `ChatMessage` is created, typically arriving from an external channel.
-        This forces the Web Dashboard to append the new message instantly.
-        """
-        await self.broadcast({
-            "type": "message_created",
-            "message": message_data,
-            "timestamp": datetime.utcnow().isoformat(),
-        })
-
-    # ── NEW events ───────────────────────────────────────────────────────────
 
     async def emit_knowledge_submitted(
         self,
-        submission_id: str,
-        submitted_by: str,       # agentium_id of submitting agent
+        knowledge_id: str,
+        submitted_by: str,
+        knowledge_type: str,
         title: str,
-        category: str,
-        pending_review: bool = True,
     ) -> None:
-        """
-        Fired when an agent submits new knowledge to the knowledge base.
-        Council members see this and can approve/reject.
-        """
         await self.broadcast({
             "type":           "knowledge_submitted",
-            "submission_id":  submission_id,
+            "knowledge_id":   knowledge_id,
             "submitted_by":   submitted_by,
+            "knowledge_type": knowledge_type,
             "title":          title,
-            "category":       category,
-            "pending_review": pending_review,
             "timestamp":      datetime.utcnow().isoformat(),
         })
 
     async def emit_knowledge_approved(
         self,
-        submission_id: str,
-        approved_by: str,        # agentium_id of approving council member
+        knowledge_id: str,
+        approved_by: str,
         title: str,
-        kb_entry_id: str,        # ID of the new KB entry created
     ) -> None:
-        """
-        Fired when a council member approves a knowledge submission.
-        All agents can now query this knowledge.
-        """
         await self.broadcast({
-            "type":          "knowledge_approved",
-            "submission_id": submission_id,
-            "approved_by":   approved_by,
-            "title":         title,
-            "kb_entry_id":   kb_entry_id,
-            "timestamp":     datetime.utcnow().isoformat(),
+            "type":         "knowledge_approved",
+            "knowledge_id": knowledge_id,
+            "approved_by":  approved_by,
+            "title":        title,
+            "timestamp":    datetime.utcnow().isoformat(),
         })
 
     async def emit_amendment_proposed(
         self,
         amendment_id: str,
-        proposed_by: str,        # agentium_id
-        article: str,            # Which constitutional article is affected
-        summary: str,            # Human-readable one-liner
+        proposed_by: str,
+        article: str,
+        summary: str,
         requires_vote: bool = True,
     ) -> None:
-        """
-        Fired when an agent or council member proposes a constitutional amendment.
-        Triggers a vote_initiated event separately once quorum forms.
-        """
         await self.broadcast({
             "type":          "amendment_proposed",
             "amendment_id":  amendment_id,
@@ -262,16 +298,12 @@ class ConnectionManager:
 
     async def emit_agent_liquidated(
         self,
-        agent_id: str,           # agentium_id of terminated agent
+        agent_id: str,
         agent_name: str,
-        liquidated_by: str,      # agentium_id of the authority who terminated
+        liquidated_by: str,
         reason: str,
         tasks_reassigned: int = 0,
     ) -> None:
-        """
-        Fired when an agent is decommissioned / liquidated.
-        Frontend should remove the agent from live views.
-        """
         await self.broadcast({
             "type":             "agent_liquidated",
             "agent_id":         agent_id,
@@ -283,7 +315,7 @@ class ConnectionManager:
         })
 
 
-# ── global singleton used by the rest of the backend ─────────────────────────
+# ── global singleton ──────────────────────────────────────────────────────────
 manager = ConnectionManager()
 
 
@@ -294,81 +326,120 @@ manager = ConnectionManager()
 @router.websocket("/chat")
 async def websocket_chat_endpoint(
     websocket: WebSocket,
-    token: Optional[str] = Query(None, description="JWT access token"),
-    db: Session = Depends(get_db)
+    # DEPRECATED: query-param token kept for backward-compat only.
+    # Prefer sending {"type":"auth","token":"<JWT>"} as the first message.
+    token: Optional[str] = Query(None, description="[DEPRECATED] JWT — send via auth message instead"),
 ):
     """
     Authenticated WebSocket endpoint for Sovereign ↔ Head of Council chat.
 
-    Connection flow:
-    1. Client connects with ?token=JWT in URL
-    2. Server validates JWT BEFORE accepting (4001 if invalid)
-    3. If valid: connection accepted, welcome message sent
-    4. Messages processed through ChatService
+    Preferred connection flow (FIX #11 — token NOT in URL):
+      1. Client connects (no token in URL)
+      2. Client immediately sends: {"type": "auth", "token": "<JWT>"}
+      3. Server validates and replies with welcome message
+      4. All subsequent messages are processed
 
-    Heartbeat: Client should send {"type": "ping"} every 30 s.
+    Legacy flow (still supported, will be removed in a future version):
+      1. Client connects with ?token=JWT query param
+      2. Server validates immediately
+
+    Heartbeat: Client sends {"type": "ping"} every 30 s.
+    Each chat message: {"type": "message", "content": "..."}
     """
-    if not token:
-        await websocket.close(code=4001, reason="Token required — provide ?token=JWT")
-        return
+    await websocket.accept()
 
-    user_info = await manager.connect(websocket, token, db)
-    if not user_info:
-        return
+    user_info: Optional[Dict[str, Any]] = None
 
-    # ── welcome ───────────────────────────────────────────────────────────────
-    try:
+    # ── Legacy: token in query param ─────────────────────────────────────────
+    if token:
+        user_info = await manager.authenticate(websocket, token)
+        if not user_info:
+            return  # authenticate() already closed the socket
+
         await websocket.send_json({
             "type":      "system",
             "role":      "system",
             "content":   (
                 f"Welcome {user_info['username']}. "
-                f"Connected to Head of Council ({user_info['head_agentium_id']})."
+                f"Connected to Head of Council ({user_info['head_agentium_id']}). "
+                f"[Note: token-in-URL is deprecated; switch to auth-message flow]"
             ),
             "timestamp": datetime.utcnow().isoformat(),
-            "metadata": {
-                "agent_id":      user_info["head_agentium_id"],
-                "connection_id": id(websocket),
-            },
         })
+
+    # ── New: wait for auth message ────────────────────────────────────────────
+    else:
         await websocket.send_json({
-            "type":      "status",
-            "role":      "head_of_council",
-            "content":   "Head of Council is ready to receive commands.",
-            "agent_id":  user_info["head_agentium_id"],
+            "type":      "auth_required",
+            "content":   'Send {"type":"auth","token":"<JWT>"} to authenticate.',
             "timestamp": datetime.utcnow().isoformat(),
         })
-    except Exception as e:
-        print(f"[WebSocket] Error sending welcome: {e}")
-        manager.disconnect(websocket)
-        return
 
-    # ── main loop ─────────────────────────────────────────────────────────────
+    # ── Main message loop ─────────────────────────────────────────────────────
     try:
         while True:
-            data = await websocket.receive_text()
+            raw = await websocket.receive_text()
 
             try:
-                message_data = json.loads(data)
+                message_data = json.loads(raw)
             except json.JSONDecodeError:
                 await websocket.send_json({
                     "type":      "error",
-                    "content":   "Invalid JSON format",
+                    "content":   "Invalid JSON",
                     "timestamp": datetime.utcnow().isoformat(),
                 })
                 continue
 
-            message_type = message_data.get("type", "message")
+            message_type = message_data.get("type", "")
 
-            # ── ping / pong ───────────────────────────────────────────────────
+            # ── Auth handshake (new flow) ─────────────────────────────────────
+            if message_type == "auth":
+                if user_info:
+                    await websocket.send_json({
+                        "type":      "system",
+                        "content":   "Already authenticated.",
+                        "timestamp": datetime.utcnow().isoformat(),
+                    })
+                    continue
+
+                msg_token = message_data.get("token", "")
+                if not msg_token:
+                    await websocket.close(code=4001, reason="Token required in auth message")
+                    return
+
+                user_info = await manager.authenticate(websocket, msg_token)
+                if not user_info:
+                    return  # authenticate() closed the socket
+
+                await websocket.send_json({
+                    "type":      "system",
+                    "role":      "system",
+                    "content":   (
+                        f"Welcome {user_info['username']}. "
+                        f"Connected to Head of Council ({user_info['head_agentium_id']})."
+                    ),
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+                continue
+
+            # ── Guard: reject all non-auth messages until authenticated ───────
+            if not user_info:
+                await websocket.send_json({
+                    "type":      "error",
+                    "content":   "Not authenticated. Send auth message first.",
+                    "timestamp": datetime.utcnow().isoformat(),
+                })
+                continue
+
+            # ── Ping / heartbeat ──────────────────────────────────────────────
             if message_type == "ping":
                 await websocket.send_json({
                     "type":      "pong",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": message_data.get("timestamp", datetime.utcnow().isoformat()),
                 })
                 continue
 
-            # ── chat message ──────────────────────────────────────────────────
+            # ── Chat message ──────────────────────────────────────────────────
             if message_type == "message":
                 content = message_data.get("content", "").strip()
                 if not content:
@@ -386,25 +457,28 @@ async def websocket_chat_endpoint(
                     "timestamp": datetime.utcnow().isoformat(),
                 })
 
+                # FIX #4: fresh DB session per message — never reuse long-lived session
                 try:
-                    # Use the injected 'db' session - DO NOT create a new one
-                    head = db.query(HeadOfCouncil).filter_by(
-                        id=user_info["head_agent_id"]
-                    ).first()
+                    with get_fresh_db() as db:
+                        head = db.query(HeadOfCouncil).filter_by(
+                            id=user_info["head_agent_id"]
+                        ).first()
 
-                    if not head:
-                        await websocket.send_json({
-                            "type":      "error",
-                            "content":   "Head of Council not available",
-                            "timestamp": datetime.utcnow().isoformat(),
-                        })
-                        continue
+                        if not head:
+                            await websocket.send_json({
+                                "type":      "error",
+                                "content":   "Head of Council not available",
+                                "timestamp": datetime.utcnow().isoformat(),
+                            })
+                            continue
 
-                    response = await ChatService.process_message(head, content, db)
+                        response = await ChatService.process_message(head, content, db)
 
                     await websocket.send_json({
                         "type":    "message",
                         "role":    "head_of_council",
+                        # FIX #2: server must provide a stable UUID as message_id
+                        "message_id": response.get("message_id") or __import__("uuid").uuid4().hex,
                         "content": response.get("content", "No response"),
                         "metadata": {
                             "agent_id":    user_info["head_agentium_id"],
@@ -416,119 +490,20 @@ async def websocket_chat_endpoint(
                         "timestamp": datetime.utcnow().isoformat(),
                     })
 
-                except Exception as e:
-                    print(f"[WebSocket] ChatService error: {e}")
-                    error_msg = f"Error processing message: {str(e)}"
-                    if "bound to a Session" in str(e) or "UserModelConfig" in str(e):
-                        error_msg = (
-                            "System Connection Refresh Required:\n"
-                            "The database connection was interrupted. "
-                            "Please reload the page to reconnect."
-                        )
+                except Exception as exc:
+                    print(f"[WebSocket] ChatService error: {exc}")
                     await websocket.send_json({
                         "type":      "error",
-                        "content":   error_msg,
+                        "content":   f"Error processing message: {exc}",
                         "timestamp": datetime.utcnow().isoformat(),
                     })
 
-            else:
-                await websocket.send_json({
-                    "type":      "error",
-                    "content":   f"Unknown message type: {message_type}",
-                    "timestamp": datetime.utcnow().isoformat(),
-                })
-
     except WebSocketDisconnect:
         manager.disconnect(websocket)
-    except Exception as e:
-        print(f"[WebSocket] Unexpected error: {e}")
+    except Exception as exc:
+        print(f"[WebSocket] Unexpected error: {exc}")
         manager.disconnect(websocket)
         try:
-            await websocket.close(code=1011, reason=f"Server error: {str(e)}")
+            await websocket.close(code=1011)
         except Exception:
-            pass
-
-# ═══════════════════════════════════════════════════════════
-# REST stats endpoint
-# ═══════════════════════════════════════════════════════════
-@router.get("/ws/stats")
-async def get_websocket_stats(current_user: User = Depends(get_current_active_user)):
-    """Get WebSocket connection statistics (admin only)."""
-    return {
-        "active_connections": manager.get_connection_count(),
-        "connected_users":    list(manager.user_connections.keys()),
-    }
-
-@router.websocket("/sovereign")
-async def websocket_sovereign_endpoint(
-    websocket: WebSocket,
-    token: Optional[str] = Query(None),
-    db: Session = Depends(get_db)
-):
-    """
-    WebSocket endpoint for Sovereign real-time system updates.
-    Requires admin authentication.
-    """
-    if not token:
-        await websocket.close(code=4001, reason="Token required")
-        return
-
-    user_info = await manager.connect(websocket, token, db)
-    if not user_info:
-        return
-    
-    # Verify admin privileges
-    if not user_info.get("is_admin"):
-        await websocket.close(code=4003, reason="Admin privileges required")
-        return
-
-    try:
-        # Send welcome message
-        await websocket.send_json({
-            "type": "system",
-            "role": "system",
-            "content": f"Sovereign console connected. Welcome, {user_info['username']}.",
-            "timestamp": datetime.utcnow().isoformat(),
-            "metadata": {
-                "connection_id": id(websocket),
-                "user": user_info.get("username")
-            }
-        })
-
-        while True:
-            data = await websocket.receive_text()
-            
-            try:
-                message = json.loads(data)
-                msg_type = message.get("type", "ping")
-
-                if msg_type == "ping":
-                    await websocket.send_json({
-                        "type": "pong",
-                        "timestamp": datetime.utcnow().isoformat()
-                    })
-                
-                elif msg_type == "subscribe":
-                    channel = message.get("channel", "all")
-                    await websocket.send_json({
-                        "type": "subscribed",
-                        "channel": channel,
-                        "timestamp": datetime.utcnow().isoformat()
-                    })
-
-            except json.JSONDecodeError:
-                await websocket.send_json({
-                    "type": "error",
-                    "content": "Invalid JSON format",
-                    "timestamp": datetime.utcnow().isoformat()
-                })
-
-    except WebSocketDisconnect:
-        manager.disconnect(websocket)
-    except Exception as e:
-        print(f"[WebSocket Sovereign] Error: {e}")
-        manager.disconnect(websocket)
-        try:
-            await websocket.close(code=1011, reason=f"Server error: {str(e)}")
-        except:
             pass

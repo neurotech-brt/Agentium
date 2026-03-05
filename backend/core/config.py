@@ -101,6 +101,24 @@ class Settings(BaseSettings):
     MAX_CONCURRENT_SANDBOXES: int = Field(default=10, env="MAX_CONCURRENT_SANDBOXES")
     SANDBOX_NETWORK_ENABLED: bool = Field(default=False, env="SANDBOX_NETWORK_ENABLED")
     
+    # Phase 10.1: Browser Control
+    BROWSER_ENABLED: bool = Field(default=True, env="BROWSER_ENABLED")
+    BROWSER_TIMEOUT_SECONDS: int = Field(default=30, env="BROWSER_TIMEOUT_SECONDS")
+    BROWSER_MAX_CONCURRENT: int = Field(default=5, env="BROWSER_MAX_CONCURRENT")
+    BROWSER_BLOCKED_DOMAINS: str = Field(default="", env="BROWSER_BLOCKED_DOMAINS")
+    
+    # Phase 11.2: Federation
+    FEDERATION_ENABLED: bool = Field(default=False, env="FEDERATION_ENABLED")
+    FEDERATION_INSTANCE_NAME: str = Field(default="Agentium-Primary", env="FEDERATION_INSTANCE_NAME")
+    FEDERATION_HEARTBEAT_INTERVAL: int = Field(default=300, env="FEDERATION_HEARTBEAT_INTERVAL")  # seconds
+    FEDERATION_STALE_TIMEOUT_MINUTES: int = Field(default=1440, env="FEDERATION_STALE_TIMEOUT_MINUTES")  # 24h
+    
+    # Phase 11.4: Mobile Push Notifications
+    FCM_SERVER_KEY: Optional[str] = Field(default=None, env="FCM_SERVER_KEY")
+    APNS_KEY_ID: Optional[str] = Field(default=None, env="APNS_KEY_ID")
+    APNS_TEAM_ID: Optional[str] = Field(default=None, env="APNS_TEAM_ID")
+    PUSH_NOTIFICATION_ENABLED: bool = Field(default=False, env="PUSH_NOTIFICATION_ENABLED")
+    
     @property
     def cors_origins(self) -> list:
         """Parse CORS origins string to list."""

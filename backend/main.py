@@ -51,6 +51,10 @@ from backend.api.routes import webhooks as webhooks_router
 from backend.api.routes import models as model_routes
 from backend.api.routes import websocket as websocket_routes
 from backend.api.routes import auth as auth_routes
+from backend.api.routes import rbac as rbac_routes
+from backend.api.routes import federation as federation_routes
+from backend.api.routes import plugins as plugins_routes
+from backend.api.routes import mobile as mobile_routes
 from backend.api.routes import inbox as inbox_routes
 from backend.core.auth import get_current_user
 from backend.api import sovereign
@@ -75,6 +79,8 @@ from backend.api.routes import voting as voting_routes            # Phase 7: Vot
 from backend.api.routes.ab_testing import router as ab_testing_router
 from backend.api.routes import provider_analytics as provider_analytics_routes
 from backend.api.routes import skills as skills_routes
+from backend.api.routes import browser as browser_routes  # Phase 10.1: Browser Control
+from backend.api.routes import audio as audio_routes      # Phase 10.3: Voice Interface
 
 # Phase 9.4: Security Middleware
 from backend.core.security_middleware import (
@@ -389,6 +395,12 @@ app.include_router(user_preferences_routes.router, prefix="/api/v1")
 app.include_router(ab_testing_router, prefix="/api/v1")
 app.include_router(provider_analytics_routes.router, prefix="/api/v1")
 app.include_router(skills_routes.router, prefix="/api/v1")
+app.include_router(browser_routes.router, prefix="/api/v1")  # Phase 10.1
+app.include_router(audio_routes.router, prefix="/api/v1")    # Phase 10.3
+app.include_router(rbac_routes.router, prefix="/api/v1")     # Phase 11.1
+app.include_router(federation_routes.router, prefix="/api/v1") # Phase 11.2
+app.include_router(plugins_routes.router, prefix="/api/v1")    # Phase 11.3
+app.include_router(mobile_routes.router, prefix="/api/v1")     # Phase 11.4
 
 
 # ══════════════════════════════════════════════════════════════════════════════

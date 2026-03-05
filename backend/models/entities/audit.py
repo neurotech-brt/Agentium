@@ -68,6 +68,8 @@ class AuditLog(BaseEntity):
     before_state = Column(Text, nullable=True)  # State before action
     after_state = Column(Text, nullable=True)   # State after action
     metadata_json = Column(Text, nullable=True)      # ✅ FIXED: Changed from 'metadata' to 'metadata_json'
+    screenshot_url = Column(String(500), nullable=True) # Used for Phase 10 Browser Control evidence
+
     
     # Result
     success = Column(String(5), default='Y', nullable=False)  # Y/N or True/False
@@ -108,6 +110,7 @@ class AuditLog(BaseEntity):
             before_state: Dict = None,
             after_state: Dict = None,
             meta_data: Dict = None,  # ✅ FIXED: Changed parameter name
+            screenshot_url: str = None,
             **kwargs) -> 'AuditLog':
         """
         Factory method to create audit log entry.
@@ -127,6 +130,7 @@ class AuditLog(BaseEntity):
             before_state=json.dumps(before_state) if before_state else None,
             after_state=json.dumps(after_state) if after_state else None,
             metadata_json=json.dumps(meta_data) if meta_data else None,
+            screenshot_url=screenshot_url,
             **kwargs
         )
         return entry
@@ -183,7 +187,8 @@ class AuditLog(BaseEntity):
             },
             'timestamp': self.created_at.isoformat(),
             'duration_ms': self.duration_ms,
-            'metadata': json.loads(self.metadata_json) if self.metadata_json else None
+            'metadata': json.loads(self.metadata_json) if self.metadata_json else None,
+            'screenshot_url': self.screenshot_url
         })
         return base
 

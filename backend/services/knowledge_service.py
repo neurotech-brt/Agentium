@@ -413,6 +413,56 @@ class KnowledgeService:
         )
 
     # ------------------------------------------------------------------
+    # Phase 10.2: Citation Integration
+    # ------------------------------------------------------------------
+
+    def attach_citations(
+        self,
+        agent_context: Dict[str, Any],
+        text: str,
+    ) -> str:
+        """
+        Run fact-checking on *text* against the knowledge segments in
+        *agent_context* and append inline ``[Source: URL]`` annotations.
+
+        This is the bridge between KnowledgeService and FactChecker.
+        """
+        try:
+            from backend.services.fact_checker import get_fact_checker
+            checker = get_fact_checker()
+        except Exception:
+            logger.debug("FactChecker unavailable; returning text without citations")
+            return text
+
+        # Gather context docs from the knowledge segments already retrieved
+        context_docs = []
+        for seg in agent_context.get("knowledge_segments", []):
+            content = seg.get("content", "")
+            if isinstance(content, dict):
+                content = str(content)
+            if content:
+                context_docs.append(content)
+
+        if not context_docs:
+            return text
+
+        result = checker.check_claim(text, context_docs=context_docs)
+        return checker.annotate_text(text, result.sources)
+
+    @staticmethod
+    def validate_citation_metadata(metadata: Optional[Dict[str, Any]]) -> List[str]:
+        """
+        Validate that ingested knowledge includes citation fields.
+
+        Returns a list of missing fields (empty list = all present).
+        """
+        if not metadata:
+            return ["source_url", "author", "context"]
+        required = ["source_url", "author", "context"]
+        return [f for f in required if not metadata.get(f)]
+
+
+    # ------------------------------------------------------------------
     # Compliance
     # ------------------------------------------------------------------
 

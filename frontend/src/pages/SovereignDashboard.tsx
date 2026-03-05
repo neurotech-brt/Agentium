@@ -7,7 +7,6 @@ import {
     Shield,
     Server,
     Activity,
-    AlertTriangle,
     Terminal,
     Play,
     Square,
@@ -23,12 +22,19 @@ import {
     DollarSign,
     BookOpen,
     Store,
+    Network,
+    Users,
+    Smartphone,
+    Lock,
 } from 'lucide-react';
 import { hostAccessApi } from '@/services/hostAccessApi';
 import { MCPToolRegistry } from '@/components/mcp/MCPToolRegistry';
 import { FinancialBurnDashboard } from '@/components/dashboard/FinancialBurnDashboard';
 import { SkillsPage } from './SkillsPage';
 import ToolMarketplacePage from './ToolMarketplacePage';
+import FederationPage from './FederationPage';
+import MobilePage from './MobilePage';
+import RBACManagementPage from './RBACManagement';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -57,47 +63,123 @@ interface CommandLog {
 
 // ── Tab definitions ───────────────────────────────────────────────────────────
 
-type TabId = 'system' | 'mcp-tools' | 'financial-burn' | 'skills' | 'tools-marketplace';
+type TabId =
+    | 'system'
+    | 'mcp-tools'
+    | 'financial-burn'
+    | 'skills'
+    | 'tools-marketplace'
+    | 'federation'
+    | 'rbac'
+    | 'mobile';
 
 interface Tab {
     id: TabId;
     label: string;
     icon: React.ComponentType<{ className?: string }>;
     description: string;
+    badge?: string;
 }
 
 const TABS: Tab[] = [
     {
         id: 'system',
-        label: 'System Control',
+        label: 'System',
         icon: Terminal,
-        description: 'Containers, resources, command history',
+        description: 'Containers, resources, and command history',
     },
     {
         id: 'mcp-tools',
-        label: 'MCP Tool Registry',
+        label: 'MCP Tools',
         icon: Wrench,
         description: 'Constitutional MCP server governance',
+        badge: '1.0',
     },
     {
         id: 'financial-burn',
-        label: 'Financial & Burn Rate',
+        label: 'Financial',
         icon: DollarSign,
         description: 'Token usage, cost burn rate, and completion stats',
     },
     {
         id: 'skills',
-        label: 'Knowledge Library',
+        label: 'Knowledge',
         icon: BookOpen,
         description: 'Search and manage reusable skills and knowledge snippets',
     },
     {
         id: 'tools-marketplace',
-        label: 'Tool Marketplace',
+        label: 'Marketplace',
         icon: Store,
         description: 'Browse, publish, and manage tools in the marketplace',
     },
+    {
+        id: 'federation',
+        label: 'Federation',
+        icon: Network,
+        description: 'Peer instances, cross-instance task delegation, and knowledge sharing',
+    },
+    {
+        id: 'rbac',
+        label: 'Access Control',
+        icon: Lock,
+        description: 'Manage user roles, capabilities, and delegations',
+    },
+    {
+        id: 'mobile',
+        label: 'Mobile',
+        icon: Smartphone,
+        description: 'Devices, push notifications, and offline sync settings',
+    },
 ];
+
+// ── Helper: status badge colours ─────────────────────────────────────────────
+
+const getContainerStatusClasses = (status: string) => {
+    switch (status.toLowerCase()) {
+        case 'running':
+            return 'bg-green-100 text-green-700 border-green-200 dark:bg-green-500/10 dark:text-green-400 dark:border-green-500/20';
+        case 'stopped':
+        case 'exited':
+            return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/20';
+        case 'paused':
+            return 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-500/10 dark:text-yellow-400 dark:border-yellow-500/20';
+        default:
+            return 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-[#1e2535] dark:text-gray-400 dark:border-[#2a3347]';
+    }
+};
+
+const getCommandStatusIcon = (status: string) => {
+    switch (status) {
+        case 'approved':
+        case 'executed':
+            return <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400 shrink-0" />;
+        case 'rejected':
+            return <XCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />;
+        case 'pending':
+            return <Clock className="w-4 h-4 text-yellow-600 dark:text-yellow-400 shrink-0" />;
+        default:
+            return null;
+    }
+};
+
+const getCommandStatusClasses = (status: string) => {
+    switch (status) {
+        case 'executed':
+            return 'bg-green-100 text-green-700 border-green-200 dark:bg-green-500/10 dark:text-green-400 dark:border-green-500/20';
+        case 'rejected':
+            return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/20';
+        default:
+            return 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-500/10 dark:text-yellow-400 dark:border-yellow-500/20';
+    }
+};
+
+const getResourceBarColor = (value: number) => {
+    if (value >= 90) return 'bg-red-500';
+    if (value >= 75) return 'bg-yellow-500 dark:bg-yellow-400';
+    if (value >= 50) return 'bg-blue-500 dark:bg-blue-400';
+    return 'bg-green-500 dark:bg-green-400';
+};
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 
@@ -105,10 +187,7 @@ export function SovereignDashboard() {
     const { user } = useAuthStore();
     const { status: backendStatus } = useBackendStore();
 
-    // Tab state
     const [activeTab, setActiveTab] = useState<TabId>('system');
-
-    // System tab state
     const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null);
     const [containers, setContainers] = useState<Container[]>([]);
     const [commandLogs, setCommandLogs] = useState<CommandLog[]>([]);
@@ -120,32 +199,47 @@ export function SovereignDashboard() {
             fetchContainers();
             fetchCommandLogs();
 
-            const ws = hostAccessApi.connectWebSocket((data) => {
+            const ws = hostAccessApi.connectWebSocket((data: any) => {
                 if (data.type === 'system_status') setSystemStatus(data.payload);
                 else if (data.type === 'container_update') fetchContainers();
-                else if (data.type === 'command_log') setCommandLogs(prev => [data.payload, ...prev]);
+                else if (data.type === 'command_log')
+                    setCommandLogs((prev) => [data.payload, ...prev]);
             });
 
-            return () => { ws.close(); };
+            return () => {
+                ws.close();
+            };
         }
     }, [backendStatus.status]);
 
     const fetchSystemStatus = async () => {
-        try { setSystemStatus(await hostAccessApi.getSystemStatus()); }
-        catch (error) { console.error('Failed to fetch system status:', error); }
+        try {
+            setSystemStatus(await hostAccessApi.getSystemStatus());
+        } catch (error) {
+            console.error('Failed to fetch system status:', error);
+        }
     };
 
     const fetchContainers = async () => {
-        try { setContainers(await hostAccessApi.getContainers()); }
-        catch (error) { console.error('Failed to fetch containers:', error); }
+        try {
+            setContainers(await hostAccessApi.getContainers());
+        } catch (error) {
+            console.error('Failed to fetch containers:', error);
+        }
     };
 
     const fetchCommandLogs = async () => {
-        try { setCommandLogs(await hostAccessApi.getCommandHistory(50)); }
-        catch (error) { console.error('Failed to fetch command logs:', error); }
+        try {
+            setCommandLogs(await hostAccessApi.getCommandHistory(50));
+        } catch (error) {
+            console.error('Failed to fetch command logs:', error);
+        }
     };
 
-    const handleContainerAction = async (containerId: string, action: 'start' | 'stop' | 'restart' | 'remove') => {
+    const handleContainerAction = async (
+        containerId: string,
+        action: 'start' | 'stop' | 'restart' | 'remove',
+    ) => {
         setIsLoading(true);
         try {
             await hostAccessApi.manageContainer(containerId, action);
@@ -157,61 +251,19 @@ export function SovereignDashboard() {
         }
     };
 
-    // ── Classname helpers ────────────────────────────────────────────────────
-
-    const getContainerStatusClasses = (status: string) => {
-        switch (status.toLowerCase()) {
-            case 'running':
-                return 'bg-green-100 text-green-700 border-green-200 dark:bg-green-500/10 dark:text-green-400 dark:border-green-500/20';
-            case 'stopped':
-            case 'exited':
-                return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/20';
-            case 'paused':
-                return 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-500/10 dark:text-yellow-400 dark:border-yellow-500/20';
-            default:
-                return 'bg-gray-100 text-gray-700 border-gray-200 dark:bg-[#1e2535] dark:text-gray-400 dark:border-[#2a3347]';
-        }
-    };
-
-    const getCommandStatusIcon = (status: string) => {
-        switch (status) {
-            case 'approved':
-            case 'executed':
-                return <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400 shrink-0" />;
-            case 'rejected':
-                return <XCircle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0" />;
-            case 'pending':
-                return <Clock className="w-4 h-4 text-yellow-600 dark:text-yellow-400 shrink-0" />;
-            default:
-                return null;
-        }
-    };
-
-    const getCommandStatusClasses = (status: string) => {
-        switch (status) {
-            case 'executed': return 'bg-green-100 text-green-700 border-green-200 dark:bg-green-500/10 dark:text-green-400 dark:border-green-500/20';
-            case 'rejected': return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/20';
-            default: return 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-500/10 dark:text-yellow-400 dark:border-yellow-500/20';
-        }
-    };
-
-    const getResourceBarColor = (value: number) => {
-        if (value >= 90) return 'bg-red-500 dark:bg-red-500';
-        if (value >= 75) return 'bg-yellow-500 dark:bg-yellow-400';
-        if (value >= 50) return 'bg-blue-500 dark:bg-blue-400';
-        return 'bg-green-500 dark:bg-green-400';
-    };
-
     // ── Access denied ────────────────────────────────────────────────────────
 
-    if (!user?.isSovereign) {
+    // Use is_admin as the sovereign gate (matches backend User model)
+    if (!user?.is_admin) {
         return (
             <div className="min-h-screen bg-gray-50 dark:bg-[#0f1117] flex items-center justify-center p-6 transition-colors duration-200">
                 <div className="text-center">
                     <div className="w-20 h-20 bg-red-100 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-2xl flex items-center justify-center mx-auto mb-5 shadow-sm dark:shadow-[0_2px_16px_rgba(0,0,0,0.25)]">
                         <Shield className="w-9 h-9 text-red-600 dark:text-red-400" />
                     </div>
-                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Access Denied</h2>
+                    <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+                        Access Denied
+                    </h2>
                     <p className="text-gray-500 dark:text-gray-400 text-sm">
                         Only Sovereign users can access this dashboard.
                     </p>
@@ -220,7 +272,9 @@ export function SovereignDashboard() {
         );
     }
 
-    const runningContainers = containers.filter(c => c.status.toLowerCase() === 'running').length;
+    const runningContainers = containers.filter(
+        (c) => c.status.toLowerCase() === 'running',
+    ).length;
 
     return (
         <div className="min-h-screen bg-gray-50 dark:bg-[#0f1117] p-6 transition-colors duration-200">
@@ -242,8 +296,8 @@ export function SovereignDashboard() {
 
             {/* ── Tab navigation ───────────────────────────────────────────── */}
             <div className="mb-6">
-                <div className="flex gap-1 p-1 bg-white dark:bg-[#161b27] rounded-xl border border-gray-200 dark:border-[#1e2535] w-fit shadow-sm">
-                    {TABS.map(tab => {
+                <div className="flex flex-wrap gap-1 p-1 bg-white dark:bg-[#161b27] rounded-xl border border-gray-200 dark:border-[#1e2535] w-fit shadow-sm">
+                    {TABS.map((tab) => {
                         const Icon = tab.icon;
                         const isActive = activeTab === tab.id;
                         return (
@@ -261,7 +315,7 @@ export function SovereignDashboard() {
                             >
                                 <Icon className="w-4 h-4" />
                                 {tab.label}
-                                {tab.id === 'mcp-tools' && (
+                                {tab.badge && (
                                     <span className={`
                                         px-1.5 py-0.5 text-xs rounded-full font-semibold
                                         ${isActive
@@ -269,38 +323,38 @@ export function SovereignDashboard() {
                                             : 'bg-blue-100 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400'
                                         }
                                     `}>
-                                        1.0
+                                        {tab.badge}
                                     </span>
                                 )}
                             </button>
                         );
                     })}
                 </div>
-                {/* Active tab description */}
                 <p className="mt-2 ml-1 text-xs text-gray-400 dark:text-gray-500">
-                    {TABS.find(t => t.id === activeTab)?.description}
+                    {TABS.find((t) => t.id === activeTab)?.description}
                 </p>
             </div>
 
             {/* ── MCP Tools Tab ────────────────────────────────────────────── */}
-            {activeTab === 'mcp-tools' && (
-                <MCPToolRegistry />
-            )}
+            {activeTab === 'mcp-tools' && <MCPToolRegistry />}
 
             {/* ── Financial & Burn Rate Tab ────────────────────────────────── */}
-            {activeTab === 'financial-burn' && (
-                <FinancialBurnDashboard />
-            )}
+            {activeTab === 'financial-burn' && <FinancialBurnDashboard />}
 
             {/* ── Skills / Knowledge Library Tab ───────────────────────────── */}
-            {activeTab === 'skills' && (
-                <SkillsPage />
-            )}
+            {activeTab === 'skills' && <SkillsPage />}
 
             {/* ── Tool Marketplace Tab ─────────────────────────────────────── */}
-            {activeTab === 'tools-marketplace' && (
-                <ToolMarketplacePage embedded />
-            )}
+            {activeTab === 'tools-marketplace' && <ToolMarketplacePage embedded />}
+
+            {/* ── Federation Tab ───────────────────────────────────────────── */}
+            {activeTab === 'federation' && <FederationPage />}
+
+            {/* ── RBAC / Access Control Tab ────────────────────────────────── */}
+            {activeTab === 'rbac' && <RBACManagementPage />}
+
+            {/* ── Mobile Tab ───────────────────────────────────────────────── */}
+            {activeTab === 'mobile' && <MobilePage />}
 
             {/* ── System Control Tab ───────────────────────────────────────── */}
             {activeTab === 'system' && (
@@ -319,7 +373,9 @@ export function SovereignDashboard() {
                                         {systemStatus.cpu.usage.toFixed(1)}%
                                     </span>
                                 </div>
-                                <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">CPU Usage</p>
+                                <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">
+                                    CPU Usage
+                                </p>
                                 <div className="w-full bg-gray-200 dark:bg-[#1e2535] rounded-full h-1.5">
                                     <div
                                         className={`${getResourceBarColor(systemStatus.cpu.usage)} h-1.5 rounded-full transition-all duration-500`}
@@ -341,7 +397,9 @@ export function SovereignDashboard() {
                                         {systemStatus.memory.percentage.toFixed(1)}%
                                     </span>
                                 </div>
-                                <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">Memory</p>
+                                <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">
+                                    Memory
+                                </p>
                                 <div className="w-full bg-gray-200 dark:bg-[#1e2535] rounded-full h-1.5">
                                     <div
                                         className={`${getResourceBarColor(systemStatus.memory.percentage)} h-1.5 rounded-full transition-all duration-500`}
@@ -349,7 +407,8 @@ export function SovereignDashboard() {
                                     />
                                 </div>
                                 <p className="text-xs text-gray-400 dark:text-gray-500 mt-2">
-                                    {(systemStatus.memory.used / 1024).toFixed(1)} / {(systemStatus.memory.total / 1024).toFixed(1)} GB
+                                    {(systemStatus.memory.used / 1024).toFixed(1)} /{' '}
+                                    {(systemStatus.memory.total / 1024).toFixed(1)} GB
                                 </p>
                             </div>
 
@@ -363,7 +422,9 @@ export function SovereignDashboard() {
                                         {systemStatus.disk.percentage.toFixed(1)}%
                                     </span>
                                 </div>
-                                <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">Disk Usage</p>
+                                <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">
+                                    Disk Usage
+                                </p>
                                 <div className="w-full bg-gray-200 dark:bg-[#1e2535] rounded-full h-1.5">
                                     <div
                                         className={`${getResourceBarColor(systemStatus.disk.percentage)} h-1.5 rounded-full transition-all duration-500`}
@@ -385,9 +446,12 @@ export function SovereignDashboard() {
                                         {Math.floor(systemStatus.uptime.seconds / 3600)}h
                                     </span>
                                 </div>
-                                <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">System Uptime</p>
+                                <p className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-3">
+                                    System Uptime
+                                </p>
                                 <p className="text-xs text-gray-400 dark:text-gray-500">
-                                    {Math.floor((systemStatus.uptime.seconds % 3600) / 60)} minutes running
+                                    {Math.floor((systemStatus.uptime.seconds % 3600) / 60)} minutes
+                                    running
                                 </p>
                             </div>
                         </div>
@@ -424,11 +488,21 @@ export function SovereignDashboard() {
                             <table className="w-full">
                                 <thead className="bg-gray-50 dark:bg-[#0f1117]">
                                     <tr>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Container</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Status</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Image</th>
-                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Created</th>
-                                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                            Container
+                                        </th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                            Status
+                                        </th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                            Image
+                                        </th>
+                                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                            Created
+                                        </th>
+                                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                            Actions
+                                        </th>
                                     </tr>
                                 </thead>
                                 <tbody className="divide-y divide-gray-100 dark:divide-[#1e2535]">
@@ -446,7 +520,9 @@ export function SovereignDashboard() {
                                                 </div>
                                             </td>
                                             <td className="px-6 py-4">
-                                                <span className={`inline-flex items-center px-2.5 py-0.5 text-xs font-medium rounded-full border ${getContainerStatusClasses(container.status)}`}>
+                                                <span
+                                                    className={`inline-flex items-center px-2.5 py-0.5 text-xs font-medium rounded-full border ${getContainerStatusClasses(container.status)}`}
+                                                >
                                                     {container.status}
                                                 </span>
                                             </td>
@@ -461,23 +537,35 @@ export function SovereignDashboard() {
                                             <td className="px-6 py-4">
                                                 <div className="flex items-center justify-end gap-1.5">
                                                     <button
-                                                        onClick={() => handleContainerAction(container.id, 'start')}
-                                                        disabled={isLoading || container.status === 'running'}
+                                                        onClick={() =>
+                                                            handleContainerAction(container.id, 'start')
+                                                        }
+                                                        disabled={
+                                                            isLoading ||
+                                                            container.status.toLowerCase() === 'running'
+                                                        }
                                                         className="p-2 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-500/10 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition-colors duration-150"
                                                         title="Start"
                                                     >
                                                         <Play className="w-3.5 h-3.5" />
                                                     </button>
                                                     <button
-                                                        onClick={() => handleContainerAction(container.id, 'stop')}
-                                                        disabled={isLoading || container.status !== 'running'}
+                                                        onClick={() =>
+                                                            handleContainerAction(container.id, 'stop')
+                                                        }
+                                                        disabled={
+                                                            isLoading ||
+                                                            container.status.toLowerCase() !== 'running'
+                                                        }
                                                         className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition-colors duration-150"
                                                         title="Stop"
                                                     >
                                                         <Square className="w-3.5 h-3.5" />
                                                     </button>
                                                     <button
-                                                        onClick={() => handleContainerAction(container.id, 'restart')}
+                                                        onClick={() =>
+                                                            handleContainerAction(container.id, 'restart')
+                                                        }
                                                         disabled={isLoading}
                                                         className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition-colors duration-150"
                                                         title="Restart"
@@ -485,7 +573,9 @@ export function SovereignDashboard() {
                                                         <RotateCw className="w-3.5 h-3.5" />
                                                     </button>
                                                     <button
-                                                        onClick={() => handleContainerAction(container.id, 'remove')}
+                                                        onClick={() =>
+                                                            handleContainerAction(container.id, 'remove')
+                                                        }
                                                         disabled={isLoading}
                                                         className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed transition-colors duration-150"
                                                         title="Remove"
@@ -504,7 +594,9 @@ export function SovereignDashboard() {
                                     <div className="w-14 h-14 bg-gray-100 dark:bg-[#1e2535] border border-gray-200 dark:border-[#2a3347] rounded-xl flex items-center justify-center mx-auto mb-3">
                                         <Terminal className="w-6 h-6 text-gray-400 dark:text-gray-500" />
                                     </div>
-                                    <p className="text-sm text-gray-500 dark:text-gray-400">No containers found</p>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                                        No containers found
+                                    </p>
                                 </div>
                             )}
                         </div>
@@ -534,15 +626,20 @@ export function SovereignDashboard() {
                                         <code className="text-sm font-mono text-gray-900 dark:text-gray-100 bg-gray-100 dark:bg-[#0f1117] border border-gray-200 dark:border-[#2a3347] px-2 py-0.5 rounded-md flex-1 truncate">
                                             {log.command}
                                         </code>
-                                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full border shrink-0 ${getCommandStatusClasses(log.status)}`}>
+                                        <span
+                                            className={`text-xs font-medium px-2 py-0.5 rounded-full border shrink-0 ${getCommandStatusClasses(log.status)}`}
+                                        >
                                             {log.status}
                                         </span>
                                     </div>
                                     <div className="flex items-center gap-4 text-xs text-gray-400 dark:text-gray-500 ml-7">
                                         <span>{new Date(log.timestamp).toLocaleString()}</span>
                                         {log.executor && (
-                                            <span className="text-gray-400 dark:text-gray-500">
-                                                via <span className="text-gray-600 dark:text-gray-400">{log.executor}</span>
+                                            <span>
+                                                via{' '}
+                                                <span className="text-gray-600 dark:text-gray-400">
+                                                    {log.executor}
+                                                </span>
                                             </span>
                                         )}
                                     </div>
@@ -554,7 +651,9 @@ export function SovereignDashboard() {
                                     <div className="w-14 h-14 bg-gray-100 dark:bg-[#1e2535] border border-gray-200 dark:border-[#2a3347] rounded-xl flex items-center justify-center mx-auto mb-3">
                                         <CheckCircle className="w-6 h-6 text-gray-400 dark:text-gray-500" />
                                     </div>
-                                    <p className="text-sm text-gray-500 dark:text-gray-400">No command history</p>
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">
+                                        No command history
+                                    </p>
                                 </div>
                             )}
                         </div>

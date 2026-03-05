@@ -3,7 +3,7 @@
 > Your Personal AI Agent Nation — Sovereign, Constitutional, and Fully Self-Governing.
 
 [![Status](https://img.shields.io/badge/status-active--development-brightgreen)](https://github.com/AshminDhungana/Agentium)
-[![Version](https://img.shields.io/badge/version-0.7.0--alpha-blue)](https://github.com/AshminDhungana/Agentium)
+[![Version](https://img.shields.io/badge/version-0.10.0--alpha-blue)](https://github.com/AshminDhungana/Agentium)
 [![Docker](https://img.shields.io/badge/docker-ready-blue)](https://www.docker.com/)
 
 **Agentium** transforms AI task execution into a structured digital democracy. Unlike monolithic AI assistants, Agentium operates as a self-governing ecosystem where AI agents function like a parliamentary system — complete with a **Head of Council** (Executive), **Council Members** (Legislature), **Lead Agents** (Directors), **Task Agents** (Executors), and **Critic Agents** (Independent Judiciary) — all bound by a **Constitution** and managed through democratic voting.
@@ -292,6 +292,8 @@ Results aggregated → Head → You (2–3 line response only)
 | **Tool Governance**  | MCP SDK + Constitutional Guard                         | Tiered external tool access                           |
 | **Containerization** | Docker, Compose, Healthchecks                          | Cross-platform deployment                             |
 | **Security**         | JWT, Role-based capabilities                           | Per-agent authentication and authorization            |
+| **Browser Control**  | Playwright (headless Chromium)                         | Web scraping, screenshots, search — sandboxed         |
+| **Voice**            | OpenAI Whisper (STT), OpenAI TTS                       | Speech-to-text, text-to-speech, WebSocket streaming   |
 
 ---
 
@@ -337,15 +339,15 @@ Results aggregated → Head → You (2–3 line response only)
 - [x] Loop prevention — no re-echo to origin channel
 - [x] Media normalization — all media stored in object storage, accessible from any channel
 
-### Phase 5: AI Model Integration ✅ COMPLETE (core) / 🚧 Enhancements Pending
+### Phase 5: AI Model Integration ✅ COMPLETE
 
 - [x] Multi-provider support: OpenAI, Anthropic, Groq, Ollama, any OpenAI-compatible endpoint
 - [x] API key failover (primary → secondary → tertiary → local fallback)
 - [x] Circuit breaker, exponential backoff, token usage tracking
 - [x] Universal model provider (custom base URL, dynamic model discovery)
-- [ ] Browser automation integration (Phase 10)
-- [ ] Advanced RAG with source citations (Phase 10)
-- [ ] Voice interface — Whisper + TTS (Phase 10)
+- [x] Browser automation integration (Phase 10)
+- [x] Advanced RAG with source citations (Phase 10)
+- [x] Voice interface — Whisper + TTS (Phase 10)
 
 ### Phase 6: Advanced Execution Ecosystem ✅ COMPLETE
 
@@ -388,12 +390,12 @@ Results aggregated → Head → You (2–3 line response only)
 - [x] MFA, token rotation, session management
 - [x] Rate limiting, HTTPS enforcement, DDoS protection
 
-### Phase 10: Advanced Intelligence 🔮 FUTURE
+### Phase 10: Advanced Intelligence ✅ COMPLETE
 
-- [ ] Browser automation (Playwright/Puppeteer) with URL whitelisting
-- [ ] Advanced RAG with source attribution and confidence scoring
-- [ ] Voice interface (Whisper STT + ElevenLabs/Coqui TTS)
-- [ ] Autonomous learning — best practice extraction from task outcomes
+- [x] Browser automation (Playwright) with URL whitelisting and SSRF prevention
+- [x] Advanced RAG with source attribution, confidence scoring, and contradiction detection
+- [x] Voice interface (OpenAI Whisper STT + TTS with WebSocket streaming)
+- [x] Autonomous learning — best practice and anti-pattern extraction from critic reviews
 
 ### Phase 11–12: Federation & SDK 🔮 FUTURE
 

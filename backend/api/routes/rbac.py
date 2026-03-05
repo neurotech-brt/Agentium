@@ -1,0 +1,177 @@
+"""
+RBAC API Routes
+Endpoints for managing roles and delegations.
+"""
+from typing import List, Optional
+from datetime import datetime
+from pydantic import BaseModel
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from backend.models.database import get_db
+from backend.models.entities.user import User
+from backend.services.rbac_service import RBACService
+from backend.core.auth import security
+
+router = APIRouter(prefix="/rbac", tags=["Role-Based Access Control"])
+
+
+# --- Request/Response Schemas --- #
+
+class DelegateRequest(BaseModel):
+    grantee_id: str
+    capabilities: List[str]
+    expires_at: Optional[datetime] = None
+    reason: Optional[str] = None
+
+class EmergencyTransferRequest(BaseModel):
+    new_sovereign_id: str
+    reason: str
+
+
+# --- Dependencies --- #
+
+def get_current_user_from_token(
+    db: Session = Depends(get_db),
+    credentials=Depends(security)
+) -> User:
+    """
+    Dependency to resolve the current user from a Bearer token.
+
+    Uses the shared `security` (HTTPBearer) dependency to extract
+    the raw token string, then delegates to the auth module's
+    token-verification logic.
+    """
+    from backend.core.auth import verify_token
+
+    token = credentials.credentials  # HTTPAuthorizationCredentials → str
+
+    payload = verify_token(token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+        )
+
+    user_id = payload.get("user_id")
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+        )
+    return user
+
+
+# --- Endpoints --- #
+
+@router.get("/roles")
+def list_users_with_roles(
+    current_user: User = Depends(get_current_user_from_token),
+    db: Session = Depends(get_db),
+):
+    """List all users and their roles (requires Sovereign or Observer)."""
+    # Only admins/sovereigns may see the full user list
+    if not (current_user.is_admin or getattr(current_user, "is_sovereign", current_user.is_admin)):
+        raise HTTPException(status_code=403, detail="Insufficient permissions.")
+
+    users = db.query(User).all()
+    include_delegations = current_user.is_admin  # include delegations for privileged users
+
+    result = []
+    for u in users:
+        u_dict = u.to_dict()
+        # Ensure effective_role is always present in the response
+        u_dict.setdefault("effective_role", "observer")
+        if include_delegations:
+            active_dels = [
+                d.to_dict()
+                for d in getattr(u, "delegations_received", [])
+                if d.is_active
+            ]
+            u_dict["active_delegations"] = active_dels
+        result.append(u_dict)
+    return result
+
+
+@router.post("/delegate")
+def delegate_capability(
+    request: DelegateRequest,
+    current_user: User = Depends(get_current_user_from_token),
+    db: Session = Depends(get_db),
+):
+    """Delegate capabilities to another user. Only Primary Sovereign / Admin."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only Sovereign can delegate capabilities.")
+    try:
+        delegation = RBACService.delegate_capabilities(
+            db=db,
+            grantor=current_user,
+            grantee_id=request.grantee_id,
+            capabilities=request.capabilities,
+            expires_at=request.expires_at,
+            reason=request.reason,
+        )
+        return delegation.to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.delete("/delegate/{delegation_id}")
+def revoke_delegation(
+    delegation_id: str,
+    current_user: User = Depends(get_current_user_from_token),
+    db: Session = Depends(get_db),
+):
+    """Revoke an active delegation."""
+    try:
+        delegation = RBACService.revoke_delegation(db, current_user, delegation_id)
+        return delegation.to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/emergency-transfer")
+def emergency_override_transfer(
+    request: EmergencyTransferRequest,
+    current_user: User = Depends(get_current_user_from_token),
+    db: Session = Depends(get_db),
+):
+    """Emergency transfer of Primary Sovereign role."""
+    if not current_user.is_admin:
+        raise HTTPException(status_code=403, detail="Only Sovereign can initiate emergency transfer.")
+    try:
+        delegation = RBACService.transfer_emergency_override(
+            db=db,
+            current_sovereign=current_user,
+            new_sovereign_id=request.new_sovereign_id,
+            reason=request.reason,
+        )
+        return {
+            "success": True,
+            "message": "Sovereignty transferred successfully",
+            "delegation_record": delegation.to_dict(),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/permissions/me")
+def get_my_permissions(
+    current_user: User = Depends(get_current_user_from_token),
+    db: Session = Depends(get_db),
+):
+    """Get effective permissions for the current user."""
+    perms = RBACService.get_effective_permissions(current_user)
+    return {
+        "user_id": current_user.id,
+        "role": getattr(current_user, "effective_role", "observer"),
+        "effective_permissions": list(perms),
+    }

@@ -61,6 +61,7 @@ from .ab_testing import (
 from backend.models.entities.base import Base, BaseEntity
 
 from backend.models.entities.user import User
+from backend.models.entities.delegation import Delegation
 
 from backend.models.entities.constitution import (
     Constitution, 
@@ -133,6 +134,10 @@ from backend.models.entities.remote_execution import (
 # Phase 6.7 — MCP Server Integration
 from backend.models.entities.mcp_tool import MCPTool
 
+# Phase 11 — Ecosystem Expansion
+from backend.models.entities.federation import FederatedInstance, FederatedTask, FederatedVote
+from backend.models.entities.plugin import Plugin, PluginInstallation, PluginReview
+from backend.models.entities.mobile import DeviceToken, NotificationPreference
 
 # All models for Alembic/database creation
 __all__ = [
@@ -142,6 +147,7 @@ __all__ = [
     
     # User Configuration (Frontend-managed models)
     'User',
+    'Delegation',
     'UserModelConfig',
     'ProviderType', 
     'ConnectionStatus',
@@ -234,4 +240,14 @@ __all__ = [
 
     # MCP Tools (Constitutional Tool Registry — Phase 6.7)
     'MCPTool',
+
+    # Ecosystem Expansion (Phase 11)
+    'FederatedInstance',
+    'FederatedTask',
+    'FederatedVote',
+    'Plugin',
+    'PluginInstallation',
+    'PluginReview',
+    'DeviceToken',
+    'NotificationPreference',
 ]

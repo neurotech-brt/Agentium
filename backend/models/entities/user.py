@@ -1,12 +1,20 @@
 import uuid
 import hashlib
 import base64
+from datetime import datetime
 
-from sqlalchemy import Column, String, Boolean, DateTime, func
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, func
 from sqlalchemy.orm import Session, relationship
 from passlib.context import CryptContext
 
 from backend.models.entities.base import Base
+
+
+# Valid RBAC roles
+ROLE_PRIMARY_SOVEREIGN = "primary_sovereign"
+ROLE_DEPUTY_SOVEREIGN = "deputy_sovereign"
+ROLE_OBSERVER = "observer"
+VALID_ROLES = {ROLE_PRIMARY_SOVEREIGN, ROLE_DEPUTY_SOVEREIGN, ROLE_OBSERVER}
 
 
 # Password hashing context
@@ -35,6 +43,11 @@ class User(Base):
     created_at       = Column(DateTime(timezone=True), server_default=func.now())
     updated_at       = Column(DateTime(timezone=True), onupdate=func.now())
 
+    # Phase 11.1 — RBAC role system
+    role             = Column(String(30), default=ROLE_OBSERVER, nullable=False)
+    delegated_by_id  = Column(String(36), ForeignKey("users.id"), nullable=True)
+    role_expires_at  = Column(DateTime(timezone=True), nullable=True)
+
     # Relationships
     chat_messages = relationship(
         "ChatMessage",
@@ -46,6 +59,50 @@ class User(Base):
         back_populates="user",
         order_by="Conversation.updated_at.desc()",
     )
+    # Phase 11.1 — Delegation relationships
+    delegations_granted = relationship(
+        "Delegation",
+        foreign_keys="Delegation.grantor_id",
+        back_populates="grantor",
+        lazy="dynamic",
+    )
+    delegations_received = relationship(
+        "Delegation",
+        foreign_keys="Delegation.grantee_id",
+        back_populates="grantee",
+        lazy="dynamic",
+    )
+    delegated_by = relationship(
+        "User",
+        remote_side="User.id",
+        foreign_keys=[delegated_by_id],
+        uselist=False,
+    )
+
+    # ------------------------------------------------------------------ #
+    #  RBAC helpers                                                        #
+    # ------------------------------------------------------------------ #
+
+    @property
+    def effective_role(self) -> str:
+        """Return the effective role, considering expiry and is_admin compat."""
+        # Backward compat: is_admin=True always maps to primary_sovereign
+        if self.is_admin:
+            return ROLE_PRIMARY_SOVEREIGN
+        # Check if role has expired
+        if self.role_expires_at and datetime.utcnow() > self.role_expires_at:
+            return ROLE_OBSERVER
+        return self.role or ROLE_OBSERVER
+
+    @property
+    def can_veto(self) -> bool:
+        """Whether this user has veto power."""
+        return self.effective_role in (ROLE_PRIMARY_SOVEREIGN, ROLE_DEPUTY_SOVEREIGN)
+
+    @property
+    def is_sovereign(self) -> bool:
+        """Whether this user is the primary sovereign."""
+        return self.effective_role == ROLE_PRIMARY_SOVEREIGN
 
     # ------------------------------------------------------------------ #
     #  Password helpers                                                    #
@@ -86,8 +143,11 @@ class User(Base):
         is_admin: bool = False,
         is_active: bool = False,
         is_pending: bool = True,
+        role: str = ROLE_OBSERVER,
     ) -> "User":
         """Create a new user with a hashed password and commit."""
+        # Sync role with is_admin for backward compat
+        effective_role = ROLE_PRIMARY_SOVEREIGN if is_admin else role
         user = cls(
             username=username,
             email=email,
@@ -95,6 +155,7 @@ class User(Base):
             is_active=is_active,
             is_admin=is_admin,
             is_pending=is_pending,
+            role=effective_role,
         )
         db.add(user)
         db.commit()
@@ -123,6 +184,11 @@ class User(Base):
             "is_active":  self.is_active,
             "is_admin":   self.is_admin,
             "is_pending": self.is_pending,
+            "role":       self.effective_role,
+            "can_veto":   self.can_veto,
+            "is_sovereign": self.is_sovereign,
+            "role_expires_at": self.role_expires_at.isoformat() if self.role_expires_at else None,
+            "delegated_by_id": self.delegated_by_id,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

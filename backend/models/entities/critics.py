@@ -168,6 +168,9 @@ class CritiqueReview(BaseEntity):
     # Timestamps
     reviewed_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     
+    # Phase 10.4: Autonomous Learning tracking
+    learning_extracted = Column("learning_extracted", Integer, default=0, nullable=False)
+    
     # Relationships
     task = relationship("Task", foreign_keys=[task_id])
     
@@ -206,5 +209,6 @@ class CritiqueReview(BaseEntity):
                 if self.criteria_evaluated is not None and self.criteria_passed is not None
                 else None
             ),
+            'learning_extracted': bool(self.learning_extracted),
         })
         return base

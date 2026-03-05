@@ -25,13 +25,22 @@ export const authService = {
         return response.data;
     },
 
+    /**
+     * Verify the current token by hitting the backend verify endpoint.
+     * The token is sent in the Authorization header (already set on the
+     * shared `api` instance) rather than as a query parameter — query
+     * params are visible in server logs and browser history.
+     */
     async verifyToken(token: string): Promise<boolean> {
         try {
-            // Send as query parameter to match backend
-            const response = await api.post('/api/v1/auth/verify', null, {
-                params: { token }
-            });
-            return response.data?.valid || false;
+            const response = await api.post(
+                '/api/v1/auth/verify',
+                null,
+                {
+                    headers: { Authorization: `Bearer ${token}` },
+                },
+            );
+            return response.data?.valid === true;
         } catch (error) {
             console.warn('Token verification failed:', error);
             return false;
@@ -57,5 +66,5 @@ export const authService = {
         if (token) {
             api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
         }
-    }
+    },
 };

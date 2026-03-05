@@ -11,7 +11,7 @@ export interface BudgetData {
         tokens_used_today: number;
         tokens_remaining: number;
         cost_used_today_usd: number;
-        cost_remaining_usd: number;  // Note: frontend expects this name
+        cost_remaining_usd: number;
         cost_percentage_used: number;
         cost_percentage_tokens: number;
     };
@@ -42,7 +42,7 @@ export interface UserListResponse {
 const defaultBudgetData: BudgetData = {
     current_limits: {
         daily_token_limit: 200000,
-        daily_cost_limit: 100
+        daily_cost_limit: 100,
     },
     usage: {
         tokens_used_today: 0,
@@ -50,43 +50,38 @@ const defaultBudgetData: BudgetData = {
         cost_used_today_usd: 0,
         cost_remaining_usd: 100,
         cost_percentage_used: 0,
-        cost_percentage_tokens: 0
+        cost_percentage_tokens: 0,
     },
     can_modify: false,
     optimizer_status: {
         idle_mode_active: false,
-        time_since_last_activity_seconds: 0
-    }
+        time_since_last_activity_seconds: 0,
+    },
 };
 
 export const adminService = {
     async getBudget(): Promise<BudgetData> {
         try {
             const response = await api.get(`/api/v1/admin/budget`);
-
-            // Ensure we have data
             if (!response.data) {
                 console.warn('Budget endpoint returned empty data');
                 return defaultBudgetData;
             }
-
-            // Merge with defaults to ensure all nested fields exist
             const mergedData: BudgetData = {
                 current_limits: {
                     ...defaultBudgetData.current_limits,
-                    ...response.data.current_limits
+                    ...response.data.current_limits,
                 },
                 usage: {
                     ...defaultBudgetData.usage,
-                    ...response.data.usage
+                    ...response.data.usage,
                 },
                 can_modify: response.data.can_modify ?? defaultBudgetData.can_modify,
                 optimizer_status: {
                     ...defaultBudgetData.optimizer_status,
-                    ...response.data.optimizer_status
-                }
+                    ...response.data.optimizer_status,
+                },
             };
-
             return mergedData;
         } catch (error: any) {
             console.warn('Budget endpoint error:', error.message);
@@ -107,7 +102,7 @@ export const adminService = {
     async getAllUsers(includePending = false): Promise<UserListResponse> {
         try {
             const response = await api.get(`/api/v1/admin/users`, {
-                params: { include_pending: includePending }
+                params: { include_pending: includePending },
             });
             return response.data || { users: [], total: 0 };
         } catch (error) {
@@ -131,11 +126,22 @@ export const adminService = {
         return response.data;
     },
 
-    async changeUserPassword(userId: number, newPassword: string): Promise<{ success: boolean; message: string }> {
-        // The backend expects `/api/v1/admin/users/${userId}/change-password?new_password=...` as query parameters defined in the fast api routes.
+    /**
+     * Change a user's password.
+     * Password is sent in the request BODY — never in the URL — to avoid
+     * it appearing in server access logs, browser history, or proxy caches.
+     *
+     * Note: if the FastAPI route uses a query param, update it to accept
+     * a JSON body: `new_password: str = Body(...)` instead of a query param.
+     */
+    async changeUserPassword(
+        userId: number,
+        newPassword: string,
+    ): Promise<{ success: boolean; message: string }> {
         const response = await api.post(
-            `/api/v1/admin/users/${userId}/change-password?new_password=${encodeURIComponent(newPassword)}`
+            `/api/v1/admin/users/${userId}/change-password`,
+            { new_password: newPassword },
         );
         return response.data;
-    }
+    },
 };

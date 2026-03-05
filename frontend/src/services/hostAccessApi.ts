@@ -1,65 +1,63 @@
-import axios from 'axios';
-
-const API_URL = '';
-
-// Get auth token from localStorage
-const getAuthHeaders = () => {
-    const token = localStorage.getItem('access_token');
-    return {
-        Authorization: `Bearer ${token}`
-    };
-};
+/**
+ * Sovereign host-access API.
+ *
+ * Uses the shared `api` axios instance (defined in ./api) so that:
+ *  - The Authorization header is set automatically via the shared instance/interceptors.
+ *  - Token refresh / 401 handling is consistent with the rest of the app.
+ *  - There is no duplication of auth logic here.
+ */
+import { api } from './api';
 
 export const hostAccessApi = {
-    // System Status
+    // ── System Status ──────────────────────────────────────────────────────────
+
     getSystemStatus: async () => {
-        const response = await axios.get(`${API_URL}/api/v1/sovereign/system/status`, {
-            headers: getAuthHeaders()
-        });
+        const response = await api.get('/api/v1/sovereign/system/status');
         return response.data;
     },
 
-    // Containers
+    // ── Containers ─────────────────────────────────────────────────────────────
+
     getContainers: async () => {
-        const response = await axios.get(`${API_URL}/api/v1/sovereign/containers`, {
-            headers: getAuthHeaders()
-        });
+        const response = await api.get('/api/v1/sovereign/containers');
         return response.data;
     },
 
-    manageContainer: async (containerId: string, action: 'start' | 'stop' | 'restart' | 'remove') => {
-        const response = await axios.post(
-            `${API_URL}/api/v1/sovereign/containers/${containerId}/${action}`,
+    manageContainer: async (
+        containerId: string,
+        action: 'start' | 'stop' | 'restart' | 'remove',
+    ) => {
+        const response = await api.post(
+            `/api/v1/sovereign/containers/${containerId}/${action}`,
             {},
-            { headers: getAuthHeaders() }
         );
         return response.data;
     },
 
-    // Commands
+    // ── Commands ───────────────────────────────────────────────────────────────
+
     getCommandHistory: async (limit = 50) => {
-        const response = await axios.get(`${API_URL}/api/v1/sovereign/commands`, {
+        const response = await api.get('/api/v1/sovereign/commands', {
             params: { limit },
-            headers: getAuthHeaders()
         });
         return response.data;
     },
 
-    executeSovereignCommand: async (command: string, params: Record<string, any> = {}) => {
-        const response = await axios.post(
-            `${API_URL}/api/v1/sovereign/command`,
-            {
-                command,
-                params,
-                target: 'head_of_council',
-                requireApproval: false
-            },
-            { headers: getAuthHeaders() }
-        );
+    executeSovereignCommand: async (
+        command: string,
+        params: Record<string, unknown> = {},
+    ) => {
+        const response = await api.post('/api/v1/sovereign/command', {
+            command,
+            params,
+            target: 'head_of_council',
+            requireApproval: false,
+        });
         return response.data;
     },
 
-    // Audit Logs
+    // ── Audit Logs ─────────────────────────────────────────────────────────────
+
     getAuditLogs: async (filters?: {
         agentiumId?: string;
         level?: string;
@@ -67,74 +65,82 @@ export const hostAccessApi = {
         endTime?: string;
         limit?: number;
     }) => {
-        const response = await axios.get(`${API_URL}/api/v1/sovereign/audit`, {
+        const response = await api.get('/api/v1/sovereign/audit', {
             params: filters,
-            headers: getAuthHeaders()
         });
         return response.data;
     },
 
-    // Agent Management
+    // ── Agent Management ───────────────────────────────────────────────────────
+
     blockAgent: async (agentiumId: string, reason: string) => {
-        const response = await axios.post(
-            `${API_URL}/api/v1/sovereign/agents/${agentiumId}/block`,
+        const response = await api.post(
+            `/api/v1/sovereign/agents/${agentiumId}/block`,
             { reason },
-            { headers: getAuthHeaders() }
         );
         return response.data;
     },
 
     unblockAgent: async (agentiumId: string) => {
-        const response = await axios.post(
-            `${API_URL}/api/v1/sovereign/agents/${agentiumId}/unblock`,
+        const response = await api.post(
+            `/api/v1/sovereign/agents/${agentiumId}/unblock`,
             {},
-            { headers: getAuthHeaders() }
         );
         return response.data;
     },
 
-    // File System
+    // ── File System ────────────────────────────────────────────────────────────
+
     readFile: async (path: string) => {
-        const response = await axios.get(`${API_URL}/api/v1/sovereign/files`, {
+        const response = await api.get('/api/v1/sovereign/files', {
             params: { path },
-            headers: getAuthHeaders()
         });
         return response.data;
     },
 
     writeFile: async (path: string, content: string) => {
-        const response = await axios.post(
-            `${API_URL}/api/v1/sovereign/files`,
-            { path, content },
-            { headers: getAuthHeaders() }
-        );
-        return response.data;
-    },
-
-    listDirectory: async (path: string = '/') => {
-        const response = await axios.get(`${API_URL}/api/v1/sovereign/directory`, {
-            params: { path },
-            headers: getAuthHeaders()
+        const response = await api.post('/api/v1/sovereign/files', {
+            path,
+            content,
         });
         return response.data;
     },
 
-    // WebSocket for real-time updates
-    connectWebSocket: (onMessage: (data: any) => void) => {
+    listDirectory: async (path = '/') => {
+        const response = await api.get('/api/v1/sovereign/directory', {
+            params: { path },
+        });
+        return response.data;
+    },
+
+    // ── WebSocket for real-time updates ───────────────────────────────────────
+
+    /**
+     * Open a WebSocket connection for live sovereign events.
+     * Derives the WS URL from the current page's protocol/host so it
+     * works in both HTTP (ws://) and HTTPS (wss://) environments.
+     */
+    connectWebSocket: (onMessage: (data: unknown) => void) => {
         const token = localStorage.getItem('access_token');
-        const ws = new WebSocket(`${API_URL.replace('http', 'ws')}/ws/sovereign?token=${token}`);
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+        const wsBase = `${wsProtocol}://${window.location.host}`;
+        const ws = new WebSocket(`${wsBase}/ws/sovereign?token=${token}`);
 
         ws.onopen = () => {
             console.log('Sovereign WebSocket connected');
         };
 
         ws.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            onMessage(data);
+            try {
+                const data = JSON.parse(event.data);
+                onMessage(data);
+            } catch (err) {
+                console.error('Failed to parse WebSocket message:', err);
+            }
         };
 
         ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
+            console.error('Sovereign WebSocket error:', error);
         };
 
         ws.onclose = () => {
@@ -142,8 +148,8 @@ export const hostAccessApi = {
         };
 
         return {
-            send: (data: any) => ws.send(JSON.stringify(data)),
-            close: () => ws.close()
+            send: (data: unknown) => ws.send(JSON.stringify(data)),
+            close: () => ws.close(),
         };
-    }
+    },
 };

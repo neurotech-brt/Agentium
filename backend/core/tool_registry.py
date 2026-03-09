@@ -1,16 +1,9 @@
 """
-Tool Registry — Phase 6.8
-
-Changes vs Phase 6.7:
-- desktop_tool registered: mouse/keyboard, file management, document editing,
-  browser automation (Playwright) — 30+ individual tool endpoints
-- host_os_tool registered: cross-platform OS detection + command execution
-- browser_screenshot fix: was missing authorized_tiers (no agent could use it)
-- browser_control + browser_screenshot now share a single BrowserTool instance
+Tool Registry
 """
 import asyncio
 import inspect
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from backend.tools.nodriver_tool import nodriver_tool
 from backend.tools.browser_tool  import BrowserTool
@@ -49,10 +42,10 @@ class ToolRegistry:
             description="Analyze code for syntax errors, lint issues, security vulnerabilities, and complexity metrics. Supports Python (pylint, bandit, mypy) and JS/TS.",
             function=code_analyzer.execute,
             parameters={
-                "code":           {"type": "string",  "description": "Source code string to analyze"},
-                "file_path":      {"type": "string",  "description": "Path to code file (alternative to code)"},
+                "code":           {"type": "string",  "description": "Source code string to analyze", "optional": True},
+                "file_path":      {"type": "string",  "description": "Path to code file (alternative to code)", "optional": True},
                 "language":       {"type": "string",  "description": "Language: python, javascript, typescript, json, yaml"},
-                "analysis_types": {"type": "array",   "description": "Checks to run: syntax, lint, security, complexity, all"},
+                "analysis_types": {"type": "array",   "description": "Checks to run: syntax, lint, security, complexity, all", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx", "3xxxx", "4xxxx", "5xxxx", "6xxxx"],
         )
@@ -66,12 +59,12 @@ class ToolRegistry:
             function=data_transform_tool.execute,
             parameters={
                 "action":        {"type": "string", "description": "convert, filter, aggregate, sort, deduplicate, flatten"},
-                "data":          {"type": "any",    "description": "Input data (dict, list, or string)"},
-                "input_format":  {"type": "string", "description": "Input format: json, csv, yaml, xml"},
-                "output_format": {"type": "string", "description": "Output format: json, csv, yaml, parquet, excel"},
-                "file_path":     {"type": "string", "description": "Load data from file path instead of data param"},
-                "query":         {"type": "string", "description": "Filter query e.g. 'age>18,status=active'"},
-                "options":       {"type": "object", "description": "Extra options: by, descending, group_by, function, separator"},
+                "data":          {"type": "string", "description": "Input data (dict, list, or string)", "optional": True},
+                "input_format":  {"type": "string", "description": "Input format: json, csv, yaml, xml", "optional": True},
+                "output_format": {"type": "string", "description": "Output format: json, csv, yaml, parquet, excel", "optional": True},
+                "file_path":     {"type": "string", "description": "Load data from file path instead of data param", "optional": True},
+                "query":         {"type": "string", "description": "Filter query e.g. 'age>18,status=active'", "optional": True},
+                "options":       {"type": "object", "description": "Extra options: by, descending, group_by, function, separator", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx", "3xxxx", "4xxxx", "5xxxx", "6xxxx"],
         )
@@ -85,15 +78,15 @@ class ToolRegistry:
             function=embedding_tool.execute,
             parameters={
                 "action":     {"type": "string",  "description": "embed, similarity, search, cluster"},
-                "texts":      {"type": "any",     "description": "String or list of strings to embed"},
-                "text_a":     {"type": "string",  "description": "First text for similarity comparison"},
-                "text_b":     {"type": "string",  "description": "Second text for similarity comparison"},
-                "query":      {"type": "string",  "description": "Query text for semantic search"},
-                "candidates": {"type": "array",   "description": "Candidate texts to search through"},
-                "provider":   {"type": "string",  "description": "Embedding provider: local, openai (default: local)"},
-                "model":      {"type": "string",  "description": "Model name override (optional)"},
-                "top_k":      {"type": "integer", "description": "Number of results to return for search (default 5)"},
-                "n_clusters": {"type": "integer", "description": "Number of clusters for cluster action (default 3)"},
+                "texts":      {"type": "string",  "description": "String or list of strings to embed", "optional": True},
+                "text_a":     {"type": "string",  "description": "First text for similarity comparison", "optional": True},
+                "text_b":     {"type": "string",  "description": "Second text for similarity comparison", "optional": True},
+                "query":      {"type": "string",  "description": "Query text for semantic search", "optional": True},
+                "candidates": {"type": "array",   "description": "Candidate texts to search through", "optional": True},
+                "provider":   {"type": "string",  "description": "Embedding provider: local, openai (default: local)", "optional": True},
+                "model":      {"type": "string",  "description": "Model name override (optional)", "optional": True},
+                "top_k":      {"type": "integer", "description": "Number of results to return for search (default 5)", "optional": True},
+                "n_clusters": {"type": "integer", "description": "Number of clusters for cluster action (default 3)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx", "3xxxx", "4xxxx", "5xxxx", "6xxxx"],
         )
@@ -106,16 +99,16 @@ class ToolRegistry:
             description="Git version control: clone repos, manage branches, view history/diffs, commit and push changes. Not available to task-tier agents (3xxxx).",
             function=git_tool.execute,
             parameters={
-                "action":    {"type": "string", "description": "clone, status, log, diff, checkout, pull, commit, push, branch_list, blame"},
-                "repo_url":  {"type": "string", "description": "Repository URL (for clone)"},
-                "path":      {"type": "string", "description": "Local repo path"},
-                "branch":    {"type": "string", "description": "Branch name"},
-                "message":   {"type": "string", "description": "Commit message"},
-                "files":     {"type": "array",  "description": "Files to stage for commit (omit to stage all)"},
-                "commit":    {"type": "string", "description": "Commit hash for diff"},
-                "file":      {"type": "string", "description": "File path for blame"},
-                "limit":     {"type": "integer","description": "Number of commits for log (default 10)"},
-                "remote":    {"type": "string", "description": "Remote name for push (default: origin)"},
+                "action":    {"type": "string",  "description": "clone, status, log, diff, checkout, pull, commit, push, branch_list, blame"},
+                "repo_url":  {"type": "string",  "description": "Repository URL (for clone)", "optional": True},
+                "path":      {"type": "string",  "description": "Local repo path", "optional": True},
+                "branch":    {"type": "string",  "description": "Branch name", "optional": True},
+                "message":   {"type": "string",  "description": "Commit message", "optional": True},
+                "files":     {"type": "array",   "description": "Files to stage for commit (omit to stage all)", "optional": True},
+                "commit":    {"type": "string",  "description": "Commit hash for diff", "optional": True},
+                "file":      {"type": "string",  "description": "File path for blame", "optional": True},
+                "limit":     {"type": "integer", "description": "Number of commits for log (default 10)", "optional": True},
+                "remote":    {"type": "string",  "description": "Remote name for push (default: origin)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],  # intentionally excludes 3xxxx
         )
@@ -129,18 +122,18 @@ class ToolRegistry:
             function=http_api_tool.execute,
             parameters={
                 "url":              {"type": "string",  "description": "Request URL"},
-                "method":           {"type": "string",  "description": "HTTP method: GET, POST, PUT, DELETE, PATCH (default: GET)"},
-                "headers":          {"type": "object",  "description": "Custom request headers"},
-                "params":           {"type": "object",  "description": "URL query parameters"},
-                "data":             {"type": "any",     "description": "Raw request body"},
-                "json_data":        {"type": "object",  "description": "JSON body (sets Content-Type automatically)"},
-                "auth_type":        {"type": "string",  "description": "Auth method: bearer, basic, api_key"},
-                "auth_value":       {"type": "string",  "description": "Auth credential (token, user:pass, or key)"},
-                "timeout":          {"type": "integer", "description": "Request timeout in seconds (default 30)"},
-                "retries":          {"type": "integer", "description": "Max retry attempts (default 3)"},
-                "parse_as":         {"type": "string",  "description": "Response parser: json, xml, html, text, auto (default: json)"},
-                "follow_redirects": {"type": "boolean", "description": "Follow HTTP redirects (default true)"},
-                "verify_ssl":       {"type": "boolean", "description": "Verify SSL certificates (default true)"},
+                "method":           {"type": "string",  "description": "HTTP method: GET, POST, PUT, DELETE, PATCH (default: GET)", "optional": True},
+                "headers":          {"type": "object",  "description": "Custom request headers", "optional": True},
+                "params":           {"type": "object",  "description": "URL query parameters", "optional": True},
+                "data":             {"type": "string",  "description": "Raw request body", "optional": True},
+                "json_data":        {"type": "object",  "description": "JSON body (sets Content-Type automatically)", "optional": True},
+                "auth_type":        {"type": "string",  "description": "Auth method: bearer, basic, api_key", "optional": True},
+                "auth_value":       {"type": "string",  "description": "Auth credential (token, user:pass, or key)", "optional": True},
+                "timeout":          {"type": "integer", "description": "Request timeout in seconds (default 30)", "optional": True},
+                "retries":          {"type": "integer", "description": "Max retry attempts (default 3)", "optional": True},
+                "parse_as":         {"type": "string",  "description": "Response parser: json, xml, html, text, auto (default: json)", "optional": True},
+                "follow_redirects": {"type": "boolean", "description": "Follow HTTP redirects (default true)", "optional": True},
+                "verify_ssl":       {"type": "boolean", "description": "Verify SSL certificates (default true)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx", "3xxxx", "4xxxx", "5xxxx", "6xxxx"],
         )
@@ -151,10 +144,11 @@ class ToolRegistry:
             function=http_api_tool.batch_request,
             parameters={
                 "requests":    {"type": "array",   "description": "List of request dicts (same params as http_api)"},
-                "concurrency": {"type": "integer", "description": "Max concurrent requests (default 5)"},
+                "concurrency": {"type": "integer", "description": "Max concurrent requests (default 5)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx", "3xxxx", "4xxxx", "5xxxx", "6xxxx"],
         )
+
         # ══════════════════════════════════════════════════════════════════════
         # ORIGINAL BUILT-IN TOOLS
         # ══════════════════════════════════════════════════════════════════════
@@ -177,7 +171,7 @@ class ToolRegistry:
             parameters={
                 "path": {"type": "string", "description": "Save path for screenshot"},
             },
-            authorized_tiers=["0xxxx", "1xxxx"],  # fixed: was missing, no agent could use it
+            authorized_tiers=["0xxxx", "1xxxx"],
         )
 
         # ── File Tool (original simple read/write) ─────────────────────────────
@@ -188,7 +182,7 @@ class ToolRegistry:
             function=file_tool.read_file,
             parameters={
                 "filepath": {"type": "string",  "description": "Absolute file path"},
-                "limit":    {"type": "integer", "description": "Max characters to read"},
+                "limit":    {"type": "integer", "description": "Max characters to read", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -211,7 +205,7 @@ class ToolRegistry:
             function=shell_tool.execute,
             parameters={
                 "command": {"type": "array",   "description": "Command and args as list"},
-                "timeout": {"type": "integer", "description": "Timeout in seconds"},
+                "timeout": {"type": "integer", "description": "Timeout in seconds", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx"],
         )
@@ -219,7 +213,6 @@ class ToolRegistry:
         # ══════════════════════════════════════════════════════════════════════
         # HOST OS TOOL — cross-platform detection + execution
         # ══════════════════════════════════════════════════════════════════════
-
         self.register_tool(
             name="host_detect_os",
             description=(
@@ -248,8 +241,8 @@ class ToolRegistry:
             function=host_os_tool.resolve_command,
             parameters={
                 "operation":  {"type": "string", "description": "Logical operation name e.g. 'pkg_update'"},
-                "os_profile": {"type": "object", "description": "OS profile from host_detect_os (optional)"},
-                "extra_args": {"type": "array",  "description": "Extra args to append e.g. service name (optional)"},
+                "os_profile": {"type": "object", "description": "OS profile from host_detect_os (optional)", "optional": True},
+                "extra_args": {"type": "array",  "description": "Extra args to append e.g. service name (optional)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -265,9 +258,9 @@ class ToolRegistry:
             function=host_os_tool.execute_for_os,
             parameters={
                 "operation":         {"type": "string",  "description": "Logical operation name"},
-                "extra_args":        {"type": "array",   "description": "Extra args e.g. ['nginx'] for service_start"},
-                "timeout":           {"type": "integer", "description": "Timeout in seconds (default 120)"},
-                "working_directory": {"type": "string",  "description": "Working directory (optional)"},
+                "extra_args":        {"type": "array",   "description": "Extra args e.g. ['nginx'] for service_start", "optional": True},
+                "timeout":           {"type": "integer", "description": "Timeout in seconds (default 120)", "optional": True},
+                "working_directory": {"type": "string",  "description": "Working directory (optional)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -280,8 +273,8 @@ class ToolRegistry:
             function=host_os_tool.smart_execute,
             parameters={
                 "raw_command":       {"type": "array",   "description": "Command and args as list"},
-                "timeout":           {"type": "integer", "description": "Timeout in seconds (default 120)"},
-                "working_directory": {"type": "string",  "description": "Working directory (optional)"},
+                "timeout":           {"type": "integer", "description": "Timeout in seconds (default 120)", "optional": True},
+                "working_directory": {"type": "string",  "description": "Working directory (optional)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx"],
         )
@@ -298,7 +291,7 @@ class ToolRegistry:
             parameters={
                 "x":        {"type": "integer", "description": "X coordinate"},
                 "y":        {"type": "integer", "description": "Y coordinate"},
-                "duration": {"type": "number",  "description": "Movement duration in seconds (default 0.2)"},
+                "duration": {"type": "number",  "description": "Movement duration in seconds (default 0.2)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -309,8 +302,8 @@ class ToolRegistry:
             parameters={
                 "x":      {"type": "integer", "description": "X coordinate"},
                 "y":      {"type": "integer", "description": "Y coordinate"},
-                "button": {"type": "string",  "description": "left | right | middle (default left)"},
-                "clicks": {"type": "integer", "description": "Number of clicks (default 1)"},
+                "button": {"type": "string",  "description": "left | right | middle (default left)", "optional": True},
+                "clicks": {"type": "integer", "description": "Number of clicks (default 1)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -343,7 +336,7 @@ class ToolRegistry:
                 "from_y":   {"type": "integer", "description": "Start Y"},
                 "to_x":     {"type": "integer", "description": "End X"},
                 "to_y":     {"type": "integer", "description": "End Y"},
-                "duration": {"type": "number",  "description": "Drag duration in seconds (default 0.5)"},
+                "duration": {"type": "number",  "description": "Drag duration in seconds (default 0.5)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -354,8 +347,8 @@ class ToolRegistry:
             parameters={
                 "x":         {"type": "integer", "description": "X coordinate"},
                 "y":         {"type": "integer", "description": "Y coordinate"},
-                "clicks":    {"type": "integer", "description": "Scroll steps (default 3)"},
-                "direction": {"type": "string",  "description": "up | down | left | right"},
+                "clicks":    {"type": "integer", "description": "Scroll steps (default 3)", "optional": True},
+                "direction": {"type": "string",  "description": "up | down | left | right", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -372,7 +365,7 @@ class ToolRegistry:
             function=mouse_kb_tool.type_text,
             parameters={
                 "text":     {"type": "string", "description": "Text to type"},
-                "interval": {"type": "number", "description": "Delay between keystrokes in seconds (default 0.02)"},
+                "interval": {"type": "number", "description": "Delay between keystrokes in seconds (default 0.02)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -424,7 +417,7 @@ class ToolRegistry:
             description="Take a screenshot of the entire desktop and save to a file.",
             function=mouse_kb_tool.screenshot,
             parameters={
-                "save_path": {"type": "string", "description": "File path to save screenshot (default /tmp/desktop_screenshot.png)"},
+                "save_path": {"type": "string", "description": "File path to save screenshot (default /tmp/desktop_screenshot.png)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -444,7 +437,7 @@ class ToolRegistry:
             function=mouse_kb_tool.find_on_screen,
             parameters={
                 "image_path": {"type": "string", "description": "Path to reference image (PNG/JPG)"},
-                "confidence": {"type": "number", "description": "Match threshold 0.0-1.0 (default 0.9)"},
+                "confidence": {"type": "number", "description": "Match threshold 0.0-1.0 (default 0.9)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -465,7 +458,7 @@ class ToolRegistry:
             function=desktop_file_tool.create_file,
             parameters={
                 "filepath": {"type": "string", "description": "Absolute path for new file"},
-                "content":  {"type": "string", "description": "Initial file content (optional)"},
+                "content":  {"type": "string", "description": "Initial file content (optional)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -475,8 +468,8 @@ class ToolRegistry:
             function=desktop_file_tool.read_file,
             parameters={
                 "filepath": {"type": "string",  "description": "Absolute path to file"},
-                "offset":   {"type": "integer", "description": "Line offset to start reading from (default 0)"},
-                "limit":    {"type": "integer", "description": "Max lines to return (default 500)"},
+                "offset":   {"type": "integer", "description": "Line offset to start reading from (default 0)", "optional": True},
+                "limit":    {"type": "integer", "description": "Max lines to return (default 500)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -487,7 +480,7 @@ class ToolRegistry:
             parameters={
                 "filepath": {"type": "string",  "description": "Absolute path to file"},
                 "content":  {"type": "string",  "description": "Content to write"},
-                "backup":   {"type": "boolean", "description": "Create .bak backup before overwriting (default true)"},
+                "backup":   {"type": "boolean", "description": "Create .bak backup before overwriting (default true)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -527,8 +520,8 @@ class ToolRegistry:
             function=desktop_file_tool.list_directory,
             parameters={
                 "path":        {"type": "string",  "description": "Directory path"},
-                "show_hidden": {"type": "boolean", "description": "Include hidden files (default false)"},
-                "recursive":   {"type": "boolean", "description": "List recursively (default false)"},
+                "show_hidden": {"type": "boolean", "description": "Include hidden files (default false)", "optional": True},
+                "recursive":   {"type": "boolean", "description": "List recursively (default false)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -552,8 +545,8 @@ class ToolRegistry:
             function=desktop_doc_tool.create_document,
             parameters={
                 "filepath": {"type": "string", "description": "Path for new document"},
-                "content":  {"type": "string", "description": "Initial content (optional, plain text types only)"},
-                "doc_type": {"type": "string", "description": "txt | md | docx | xlsx | json | csv"},
+                "content":  {"type": "string", "description": "Initial content (optional, plain text types only)", "optional": True},
+                "doc_type": {"type": "string", "description": "txt | md | docx | xlsx | json | csv", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -582,8 +575,8 @@ class ToolRegistry:
             function=desktop_doc_tool.save_document,
             parameters={
                 "filepath": {"type": "string",  "description": "Absolute path to document"},
-                "content":  {"type": "any",     "description": "Content: string | dict | list"},
-                "backup":   {"type": "boolean", "description": "Create .bak backup (default true)"},
+                "content":  {"type": "string",  "description": "Content: string | dict | list"},
+                "backup":   {"type": "boolean", "description": "Create .bak backup (default true)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -595,8 +588,8 @@ class ToolRegistry:
             function=desktop_browser_tool.browse_to,
             parameters={
                 "url":        {"type": "string",  "description": "URL to navigate to"},
-                "wait_until": {"type": "string",  "description": "domcontentloaded | load | networkidle (default domcontentloaded)"},
-                "headless":   {"type": "boolean", "description": "Run browser headless (default true)"},
+                "wait_until": {"type": "string",  "description": "domcontentloaded | load | networkidle (default domcontentloaded)", "optional": True},
+                "headless":   {"type": "boolean", "description": "Run browser headless (default true)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -605,8 +598,8 @@ class ToolRegistry:
             description="Extract visible text from a CSS selector on the current page (default: full body).",
             function=desktop_browser_tool.browser_get_text,
             parameters={
-                "selector": {"type": "string",  "description": "CSS selector (default 'body')"},
-                "limit":    {"type": "integer", "description": "Max characters to return (default 5000)"},
+                "selector": {"type": "string",  "description": "CSS selector (default 'body')", "optional": True},
+                "limit":    {"type": "integer", "description": "Max characters to return (default 5000)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -626,7 +619,7 @@ class ToolRegistry:
             parameters={
                 "selector":    {"type": "string",  "description": "CSS selector of input field"},
                 "text":        {"type": "string",  "description": "Text to type"},
-                "clear_first": {"type": "boolean", "description": "Clear field before typing (default true)"},
+                "clear_first": {"type": "boolean", "description": "Clear field before typing (default true)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -638,8 +631,8 @@ class ToolRegistry:
             ),
             function=desktop_browser_tool.browser_fill_form,
             parameters={
-                "fields":           {"type": "object", "description": "Dict of {css_selector: value}"},
-                "submit_selector":  {"type": "string", "description": "CSS selector of submit button (optional)"},
+                "fields":          {"type": "object", "description": "Dict of {css_selector: value}"},
+                "submit_selector": {"type": "string", "description": "CSS selector of submit button (optional)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -648,8 +641,8 @@ class ToolRegistry:
             description="Take a screenshot of the current browser page.",
             function=desktop_browser_tool.browser_screenshot,
             parameters={
-                "save_path": {"type": "string",  "description": "File path to save screenshot"},
-                "full_page": {"type": "boolean", "description": "Capture full scrollable page (default false)"},
+                "save_path": {"type": "string",  "description": "File path to save screenshot", "optional": True},
+                "full_page": {"type": "boolean", "description": "Capture full scrollable page (default false)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -659,7 +652,7 @@ class ToolRegistry:
             function=desktop_browser_tool.browser_scroll,
             parameters={
                 "direction": {"type": "string",  "description": "up | down | top | bottom"},
-                "amount":    {"type": "integer", "description": "Pixels to scroll (default 500)"},
+                "amount":    {"type": "integer", "description": "Pixels to scroll (default 500)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
@@ -726,56 +719,52 @@ class ToolRegistry:
             parameters={},
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
-        
+
         # ══════════════════════════════════════════════════════════════════════
-        # USER PREFERENCE TOOL ─ Agent access to user settings
+        # USER PREFERENCE TOOL
         # ══════════════════════════════════════════════════════════════════════
-        
         from backend.tools.user_preference_tool import user_preference_tool
-        
+
         self.register_tool(
             name="preference_get",
             description="Get a user preference value. Returns value and editability status.",
             function=user_preference_tool.get_preference,
             parameters={
-                "key": {"type": "string", "description": "Preference key (e.g., 'ui.theme', 'agents.timeout')"},
+                "key":        {"type": "string", "description": "Preference key (e.g., 'ui.theme', 'agents.timeout')"},
                 "agent_tier": {"type": "string", "description": "Agent tier (0xxxx, 1xxxx, 2xxxx, 3xxxx)"},
-                "agent_id": {"type": "string", "description": "Agentium ID of the calling agent"},
-                "user_id": {"type": "string", "description": "User ID (optional, for user-specific prefs)", "optional": True},
-                "default": {"type": "any", "description": "Default value if preference not found", "optional": True},
+                "agent_id":   {"type": "string", "description": "Agentium ID of the calling agent"},
+                "user_id":    {"type": "string", "description": "User ID (optional, for user-specific prefs)", "optional": True},
+                "default":    {"type": "string", "description": "Default value if preference not found", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx", "3xxxx", "4xxxx", "5xxxx", "6xxxx"],
         )
-        
         self.register_tool(
             name="preference_set",
             description="Set a user preference value. Requires appropriate agent tier permissions.",
             function=user_preference_tool.set_preference,
             parameters={
-                "key": {"type": "string", "description": "Preference key to set"},
-                "value": {"type": "any", "description": "New value (any JSON-serializable type)"},
+                "key":        {"type": "string", "description": "Preference key to set"},
+                "value":      {"type": "string", "description": "New value (any JSON-serializable type)"},
                 "agent_tier": {"type": "string", "description": "Agent tier (0xxxx, 1xxxx, 2xxxx)"},
-                "agent_id": {"type": "string", "description": "Agentium ID of the calling agent"},
-                "user_id": {"type": "string", "description": "User ID (optional)", "optional": True},
-                "reason": {"type": "string", "description": "Reason for the change", "optional": True},
+                "agent_id":   {"type": "string", "description": "Agentium ID of the calling agent"},
+                "user_id":    {"type": "string", "description": "User ID (optional)", "optional": True},
+                "reason":     {"type": "string", "description": "Reason for the change", "optional": True},
             },
-            authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],  # Task agents cannot set prefs
+            authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
-        
         self.register_tool(
             name="preference_list",
             description="List all preferences accessible to this agent tier.",
             function=user_preference_tool.list_preferences,
             parameters={
-                "agent_tier": {"type": "string", "description": "Agent tier (0xxxx, 1xxxx, 2xxxx, 3xxxx)"},
-                "agent_id": {"type": "string", "description": "Agentium ID of the calling agent"},
-                "user_id": {"type": "string", "description": "User ID (optional)", "optional": True},
-                "category": {"type": "string", "description": "Filter by category", "optional": True},
+                "agent_tier":     {"type": "string",  "description": "Agent tier (0xxxx, 1xxxx, 2xxxx, 3xxxx)"},
+                "agent_id":       {"type": "string",  "description": "Agentium ID of the calling agent"},
+                "user_id":        {"type": "string",  "description": "User ID (optional)", "optional": True},
+                "category":       {"type": "string",  "description": "Filter by category", "optional": True},
                 "include_values": {"type": "boolean", "description": "Include values in response", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx", "3xxxx", "4xxxx", "5xxxx", "6xxxx"],
         )
-        
         self.register_tool(
             name="preference_categories",
             description="Get list of preference categories accessible to this agent tier.",
@@ -785,25 +774,23 @@ class ToolRegistry:
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx", "3xxxx", "4xxxx", "5xxxx", "6xxxx"],
         )
-        
         self.register_tool(
             name="preference_bulk_update",
             description="Update multiple preferences at once. Each update is validated individually.",
             function=user_preference_tool.bulk_update,
             parameters={
                 "preferences": {"type": "object", "description": "Map of keys to values {key: value}"},
-                "agent_tier": {"type": "string", "description": "Agent tier (0xxxx, 1xxxx, 2xxxx)"},
-                "agent_id": {"type": "string", "description": "Agentium ID of the calling agent"},
-                "user_id": {"type": "string", "description": "User ID (optional)", "optional": True},
-                "reason": {"type": "string", "description": "Reason for bulk update", "optional": True},
+                "agent_tier":  {"type": "string", "description": "Agent tier (0xxxx, 1xxxx, 2xxxx)"},
+                "agent_id":    {"type": "string", "description": "Agentium ID of the calling agent"},
+                "user_id":     {"type": "string", "description": "User ID (optional)", "optional": True},
+                "reason":      {"type": "string", "description": "Reason for bulk update", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx", "2xxxx"],
         )
-        
+
         # ══════════════════════════════════════════════════════════════════════
         # NODRIVER TOOL — stealth/undetected browser automation
         # ══════════════════════════════════════════════════════════════════════
-
         self.register_tool(
             name="nodriver_navigate",
             description=(
@@ -815,9 +802,9 @@ class ToolRegistry:
             function=nodriver_tool.navigate,
             parameters={
                 "url":        {"type": "string",  "description": "Destination URL (include https://)"},
-                "new_tab":    {"type": "boolean", "description": "Open in a new tab (default false)"},
-                "new_window": {"type": "boolean", "description": "Open in a new window (default false)"},
-                "timeout":    {"type": "number",  "description": "Page-load timeout in seconds (default 30)"},
+                "new_tab":    {"type": "boolean", "description": "Open in a new tab (default false)", "optional": True},
+                "new_window": {"type": "boolean", "description": "Open in a new window (default false)", "optional": True},
+                "timeout":    {"type": "number",  "description": "Page-load timeout in seconds (default 30)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx"],
         )
@@ -826,7 +813,7 @@ class ToolRegistry:
             description="Return the HTML content of the current stealth browser page.",
             function=nodriver_tool.get_content,
             parameters={
-                "max_chars": {"type": "integer", "description": "Max characters to return (default 8000)"},
+                "max_chars": {"type": "integer", "description": "Max characters to return (default 8000)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx"],
         )
@@ -839,8 +826,8 @@ class ToolRegistry:
             function=nodriver_tool.find_element,
             parameters={
                 "text":       {"type": "string",  "description": "Visible text to search for"},
-                "best_match": {"type": "boolean", "description": "Return shortest/closest match (default true)"},
-                "timeout":    {"type": "number",  "description": "Retry timeout in seconds (default 10)"},
+                "best_match": {"type": "boolean", "description": "Return shortest/closest match (default true)", "optional": True},
+                "timeout":    {"type": "number",  "description": "Retry timeout in seconds (default 10)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx"],
         )
@@ -850,7 +837,7 @@ class ToolRegistry:
             function=nodriver_tool.find_all_elements,
             parameters={
                 "text":    {"type": "string", "description": "Visible text to search for"},
-                "timeout": {"type": "number", "description": "Retry timeout in seconds (default 10)"},
+                "timeout": {"type": "number", "description": "Retry timeout in seconds (default 10)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx"],
         )
@@ -864,7 +851,7 @@ class ToolRegistry:
             function=nodriver_tool.select_element,
             parameters={
                 "css_selector": {"type": "string", "description": "CSS selector string"},
-                "timeout":      {"type": "number", "description": "Retry timeout in seconds (default 10)"},
+                "timeout":      {"type": "number", "description": "Retry timeout in seconds (default 10)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx"],
         )
@@ -874,7 +861,7 @@ class ToolRegistry:
             function=nodriver_tool.select_all_elements,
             parameters={
                 "css_selector": {"type": "string", "description": "CSS selector string"},
-                "timeout":      {"type": "number", "description": "Retry timeout in seconds (default 10)"},
+                "timeout":      {"type": "number", "description": "Retry timeout in seconds (default 10)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx"],
         )
@@ -884,7 +871,7 @@ class ToolRegistry:
             function=nodriver_tool.xpath,
             parameters={
                 "xpath_selector": {"type": "string", "description": "XPath expression"},
-                "timeout":        {"type": "number", "description": "Retry timeout in seconds (default 10)"},
+                "timeout":        {"type": "number", "description": "Retry timeout in seconds (default 10)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx"],
         )
@@ -896,10 +883,10 @@ class ToolRegistry:
             ),
             function=nodriver_tool.click_element,
             parameters={
-                "selector":   {"type": "string",  "description": "CSS selector (optional if text given)"},
-                "text":       {"type": "string",  "description": "Visible text (optional if selector given)"},
-                "best_match": {"type": "boolean", "description": "Use best-match text algorithm (default true)"},
-                "timeout":    {"type": "number",  "description": "Retry timeout in seconds (default 10)"},
+                "selector":   {"type": "string",  "description": "CSS selector (optional if text given)", "optional": True},
+                "text":       {"type": "string",  "description": "Visible text (optional if selector given)", "optional": True},
+                "best_match": {"type": "boolean", "description": "Use best-match text algorithm (default true)", "optional": True},
+                "timeout":    {"type": "number",  "description": "Retry timeout in seconds (default 10)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx"],
         )
@@ -910,7 +897,7 @@ class ToolRegistry:
             parameters={
                 "selector": {"type": "string", "description": "CSS selector for the target element"},
                 "keys":     {"type": "string", "description": "Text / keys to send"},
-                "timeout":  {"type": "number", "description": "Retry timeout in seconds (default 10)"},
+                "timeout":  {"type": "number", "description": "Retry timeout in seconds (default 10)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx"],
         )
@@ -931,8 +918,8 @@ class ToolRegistry:
             description="Scroll the current page up or down by a pixel amount.",
             function=nodriver_tool.scroll,
             parameters={
-                "amount":    {"type": "integer", "description": "Pixels to scroll (default 200)"},
-                "direction": {"type": "string",  "description": "'down' or 'up' (default 'down')"},
+                "amount":    {"type": "integer", "description": "Pixels to scroll (default 200)", "optional": True},
+                "direction": {"type": "string",  "description": "'down' or 'up' (default 'down')", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx"],
         )
@@ -941,7 +928,7 @@ class ToolRegistry:
             description="Save a screenshot of the current stealth browser page to a file.",
             function=nodriver_tool.screenshot,
             parameters={
-                "save_path": {"type": "string", "description": "File path to save PNG (default /tmp/nodriver_screenshot.png)"},
+                "save_path": {"type": "string", "description": "File path to save PNG (default /tmp/nodriver_screenshot.png)", "optional": True},
             },
             authorized_tiers=["0xxxx", "1xxxx"],
         )
@@ -1137,6 +1124,100 @@ class ToolRegistry:
             return False
         del self.tools[name]
         return True
+
+    # ── API Schema Export ──────────────────────────────────────────────────────
+
+    def _build_props(self, tool: Dict[str, Any]) -> Tuple[Dict[str, Any], List[str]]:
+        """
+        Convert internal parameter dict → JSON Schema properties + required list.
+
+        Internal type names are normalised to valid JSON Schema types.
+        Parameters tagged "optional": True are excluded from the required list.
+        """
+        TYPE_MAP: Dict[str, str] = {
+            "string":  "string",
+            "integer": "integer",
+            "number":  "number",
+            "boolean": "boolean",
+            "array":   "array",
+            "object":  "object",
+            "any":     "string",   # broad fallback — agents stringify complex values
+        }
+
+        props: Dict[str, Any] = {}
+        required: List[str] = []
+
+        for param_name, meta in tool.get("parameters", {}).items():
+            raw_type = meta.get("type", "string")
+            json_type = TYPE_MAP.get(raw_type, "string")
+
+            prop: Dict[str, Any] = {
+                "type":        json_type,
+                "description": meta.get("description", ""),
+            }
+            if "enum" in meta:
+                prop["enum"] = meta["enum"]
+
+            props[param_name] = prop
+
+            if not meta.get("optional", False):
+                required.append(param_name)
+
+        return props, required
+
+    def to_openai_tools(self, tier: str) -> List[Dict[str, Any]]:
+        """
+        Export tier-filtered tools in OpenAI function-calling format.
+
+        Compatible with OpenAI, Groq, Mistral, Together, Fireworks, DeepSeek,
+        Moonshot, Azure, Gemini (OpenAI-compat), Ollama, llama.cpp, LM Studio.
+        Deprecated tools are excluded.
+        """
+        result: List[Dict[str, Any]] = []
+        for name, tool in self.tools.items():
+            if tier not in tool.get("authorized_tiers", []):
+                continue
+            if tool.get("deprecated"):
+                continue
+            props, required = self._build_props(tool)
+            result.append({
+                "type": "function",
+                "function": {
+                    "name":        name,
+                    "description": tool.get("description", ""),
+                    "parameters": {
+                        "type":       "object",
+                        "properties": props,
+                        "required":   required,
+                    },
+                },
+            })
+        return result
+
+    def to_anthropic_tools(self, tier: str) -> List[Dict[str, Any]]:
+        """
+        Export tier-filtered tools in Anthropic input_schema format.
+
+        Used exclusively by AnthropicProvider.generate_with_tools().
+        Deprecated tools are excluded.
+        """
+        result: List[Dict[str, Any]] = []
+        for name, tool in self.tools.items():
+            if tier not in tool.get("authorized_tiers", []):
+                continue
+            if tool.get("deprecated"):
+                continue
+            props, required = self._build_props(tool)
+            result.append({
+                "name":        name,
+                "description": tool.get("description", ""),
+                "input_schema": {
+                    "type":       "object",
+                    "properties": props,
+                    "required":   required,
+                },
+            })
+        return result
 
 
 # Global registry instance

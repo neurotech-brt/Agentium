@@ -282,14 +282,46 @@ export interface Task {
     event_count?: number;
 }
 
+// ─── Constitution types ────────────────────────────────────────────────────────
+
+/**
+ * A single article entry as normalized by the backend.
+ * The backend's get_articles_dict() always returns this shape.
+ * The optional `amended_at` field is provided per-article when available.
+ */
+export interface ConstitutionArticle {
+    title: string;
+    content: string;
+    amended_at?: string;
+}
+
+/** A single entry in the constitution's changelog. */
+export interface ConstitutionChangelogEntry {
+    change: string;
+    timestamp: string;
+    previous_version?: string;
+}
+
+/**
+ * The full constitution document as returned by GET /api/v1/constitution.
+ * Matches the shape produced by Constitution.to_dict() in the backend model.
+ */
 export interface Constitution {
     id: string;
     version: string;
+    version_number: number;
     preamble: string;
-    articles: Record<string, string>;
+    /** Always normalized to { title, content } objects by the backend. */
+    articles: Record<string, ConstitutionArticle>;
     prohibited_actions: string[];
     sovereign_preferences: Record<string, unknown>;
     effective_date: string;
+    amendment_date?: string | null;
+    is_active: boolean;
+    is_archived?: boolean;
+    created_by?: string;
+    replaces_version?: string | null;
+    changelog?: ConstitutionChangelogEntry[];
 }
 
 export interface AgentHealthReport {

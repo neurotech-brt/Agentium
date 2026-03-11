@@ -512,7 +512,10 @@ async def get_agent(
 # ── Constitution Management ───────────────────────────────────────────────────
 
 @app.get("/api/v1/constitution")
-async def get_constitution(db: Session = Depends(get_db)):
+async def get_constitution(
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),  # auth guard added — constitution is governance-sensitive
+):
     """Get the current active constitution."""
     constitution = db.query(Constitution).filter_by(
         is_active=True
@@ -579,6 +582,27 @@ async def update_constitution(
 
     new_version_number = (current.version_number or 1) + 1
     new_agentium_id    = f"C{new_version_number:04d}"
+    actor              = current_user.get("username", "sovereign")
+
+    # ── Build changelog ───────────────────────────────────────────────────────
+    # Prepend a new entry to the existing changelog so the history panel has
+    # data to display. Older versions had a NULL changelog; we handle that safely.
+    existing_changelog: list = []
+    try:
+        existing_changelog = _json.loads(current.changelog or "[]")
+        if not isinstance(existing_changelog, list):
+            existing_changelog = []
+    except (_json.JSONDecodeError, TypeError):
+        existing_changelog = []
+
+    new_changelog_entry = {
+        "change": f"Sovereign update by {actor}",
+        "timestamp": datetime.utcnow().isoformat(),
+        "previous_version": current.version,
+    }
+    # Most recent entry first
+    new_changelog = _json.dumps([new_changelog_entry] + existing_changelog)
+    # ─────────────────────────────────────────────────────────────────────────
 
     new_version = Constitution(
         agentium_id=new_agentium_id,
@@ -588,8 +612,9 @@ async def update_constitution(
         articles=new_articles,
         prohibited_actions=new_prohibited,
         sovereign_preferences=new_prefs,
+        changelog=new_changelog,
         is_active=True,
-        created_by_agentium_id=current_user.get("username", "sovereign"),
+        created_by_agentium_id=actor,
         effective_date=datetime.utcnow()
     )
 

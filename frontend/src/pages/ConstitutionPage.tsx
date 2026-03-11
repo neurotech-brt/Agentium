@@ -1,6 +1,7 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { constitutionService } from '@/services/constitution';
 import { votingService, AmendmentVoting } from '@/services/voting';
+import { Constitution, ConstitutionArticle } from '@/types';
 import { toast } from 'react-hot-toast';
 import {
     BookOpen, AlertTriangle, Save, RotateCcw,
@@ -11,22 +12,62 @@ import {
     RefreshCw, Users,
 } from 'lucide-react';
 
-const DEFAULT_CONSTITUTION = {
+// ─── Module-level constants ────────────────────────────────────────────────────
+// Declared outside the component so they are never recreated on re-render.
+const RECENTLY_AMENDED_DAYS = 7;
+const RECENTLY_AMENDED_MS   = RECENTLY_AMENDED_DAYS * 24 * 60 * 60 * 1000;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Safely parse raw article data from the API into the canonical
+ * { title, content } shape.  Handles three possible backend states:
+ *   1. Already a proper Record<string, ConstitutionArticle> object  → use as-is
+ *   2. A JSON string (legacy / in-transit format)                    → parse it
+ *   3. Anything else                                                  → fall back
+ */
+function safeParseArticles(
+    raw: unknown,
+    fallback: Record<string, ConstitutionArticle>,
+): Record<string, ConstitutionArticle> {
+    if (typeof raw === 'string') {
+        try {
+            return JSON.parse(raw) as Record<string, ConstitutionArticle>;
+        } catch {
+            return fallback;
+        }
+    }
+    if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        return raw as Record<string, ConstitutionArticle>;
+    }
+    return fallback;
+}
+
+// ─── Default / fallback constitution ─────────────────────────────────────────
+const DEFAULT_CONSTITUTION: Constitution = {
     id: '',
     version: 'v1.0.0',
     version_number: 1,
     preamble: 'We the Sovereign...',
     articles: {
-        'article_1': { title: 'Default', content: 'Default content' }
+        article_1: { title: 'Default', content: 'Default content' },
     },
     prohibited_actions: [],
     sovereign_preferences: { transparency: 'high' },
     effective_date: new Date().toISOString(),
     created_by: 'system',
-    is_active: true
+    is_active: true,
 };
 
-// ─── Section Wrapper ────────────────────────────────────────────────────────
+// ─── Proposal form state shape ────────────────────────────────────────────────
+interface ProposalForm {
+    title: string;
+    diff: string;
+    rationale: string;
+}
+const EMPTY_PROPOSAL: ProposalForm = { title: '', diff: '', rationale: '' };
+
+// ─── Section Wrapper ──────────────────────────────────────────────────────────
 function Section({
     icon: Icon,
     title,
@@ -43,10 +84,10 @@ function Section({
     const [open, setOpen] = useState(true);
 
     const accentMap: Record<string, { bar: string; iconText: string; iconBg: string }> = {
-        blue:   { bar: 'bg-blue-500',   iconText: 'text-blue-600 dark:text-blue-400',   iconBg: 'bg-blue-100 dark:bg-blue-500/15'   },
-        red:    { bar: 'bg-red-500',    iconText: 'text-red-600 dark:text-red-400',     iconBg: 'bg-red-100 dark:bg-red-500/15'     },
+        blue:   { bar: 'bg-blue-500',   iconText: 'text-blue-600 dark:text-blue-400',     iconBg: 'bg-blue-100 dark:bg-blue-500/15'     },
+        red:    { bar: 'bg-red-500',    iconText: 'text-red-600 dark:text-red-400',       iconBg: 'bg-red-100 dark:bg-red-500/15'       },
         purple: { bar: 'bg-purple-500', iconText: 'text-purple-600 dark:text-purple-400', iconBg: 'bg-purple-100 dark:bg-purple-500/15' },
-        amber:  { bar: 'bg-amber-500',  iconText: 'text-amber-600 dark:text-amber-400', iconBg: 'bg-amber-100 dark:bg-amber-500/15'  },
+        amber:  { bar: 'bg-amber-500',  iconText: 'text-amber-600 dark:text-amber-400',   iconBg: 'bg-amber-100 dark:bg-amber-500/15'   },
     };
     const a = accentMap[accent];
 
@@ -59,6 +100,8 @@ function Section({
                 <button
                     type="button"
                     onClick={() => collapsible && setOpen(o => !o)}
+                    aria-expanded={collapsible ? open : undefined}
+                    aria-label={collapsible ? `${open ? 'Collapse' : 'Expand'} ${title} section` : undefined}
                     className={`w-full flex items-center justify-between ${collapsible ? 'cursor-pointer' : 'cursor-default'}`}
                 >
                     <div className="flex items-center gap-3">
@@ -86,7 +129,7 @@ function Section({
     );
 }
 
-// ─── Article Card ────────────────────────────────────────────────────────────
+// ─── Article Card ─────────────────────────────────────────────────────────────
 function ArticleCard({
     index,
     articleKey,
@@ -98,20 +141,19 @@ function ArticleCard({
 }: {
     index: number;
     articleKey: string;
-    article: any;
+    article: ConstitutionArticle | string;
     isEditing: boolean;
     onContentChange: (key: string, content: string) => void;
     recentlyAmended?: boolean;
     searchQuery?: string;
 }) {
     // Always derive a clean Title Case title from the key (e.g. "article_3" → "Article 3").
-    // Never trust article.title from the DB — it may be the raw lowercase key.
     const displayTitle = articleKey
         .split('_')
         .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
         .join(' ');
 
-    // Derive content safely — article may be a string, { title, content }, or undefined
+    // Derive content safely — article may be a string or { title, content }
     const displayContent = typeof article === 'string'
         ? article
         : article?.content ?? '';
@@ -119,7 +161,8 @@ function ArticleCard({
     // Highlight search matches within content
     const highlightText = (text: string, query: string) => {
         if (!query.trim()) return <>{text}</>;
-        const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+        const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`(${escaped})`, 'gi');
         const parts = text.split(regex);
         return (
             <>
@@ -180,196 +223,219 @@ function ArticleCard({
     );
 }
 
-// ─── Main Component ──────────────────────────────────────────────────────────
+// ─── Main Component ───────────────────────────────────────────────────────────
 export function ConstitutionPage() {
-    const [constitution, setConstitution] = useState<any>(DEFAULT_CONSTITUTION);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-    const [isEditing, setIsEditing] = useState(false);
-    const [editedConstitution, setEditedConstitution] = useState<any>(DEFAULT_CONSTITUTION);
-    const [saving, setSaving] = useState(false);
+    // ── Core data state ────────────────────────────────────────────────────
+    const [constitution, setConstitution]             = useState<Constitution>(DEFAULT_CONSTITUTION);
+    const [editedConstitution, setEditedConstitution] = useState<Constitution>(DEFAULT_CONSTITUTION);
+    const [loading, setLoading]                       = useState(true);
+    const [error, setError]                           = useState<string | null>(null);
+    const [isEditing, setIsEditing]                   = useState(false);
+    const [saving, setSaving]                         = useState(false);
 
-    // 7.4 new features
+    // ── Search ─────────────────────────────────────────────────────────────
     const [searchQuery, setSearchQuery] = useState('');
-    const [showProposalModal, setShowProposalModal] = useState(false);
-    const [proposalTitle, setProposalTitle] = useState('');
-    const [proposalDiff, setProposalDiff] = useState('');
-    const [proposalRationale, setProposalRationale] = useState('');
+
+    // ── Proposal modal — all fields grouped into one state object ──────────
+    const [showProposalModal, setShowProposalModal]       = useState(false);
+    const [proposalForm, setProposalForm]                 = useState<ProposalForm>(EMPTY_PROPOSAL);
     const [isSubmittingProposal, setIsSubmittingProposal] = useState(false);
+
+    // ── PDF export ─────────────────────────────────────────────────────────
     const [isExportingPdf, setIsExportingPdf] = useState(false);
 
-    // Amendment history
-    const [amendments, setAmendments] = useState<any[]>([]);
+    // ── Amendment history ──────────────────────────────────────────────────
+    const [amendments, setAmendments]           = useState<AmendmentVoting[]>([]);
     const [amendmentsLoading, setAmendmentsLoading] = useState(false);
-    const [showHistory, setShowHistory] = useState(false);
+    const [showHistory, setShowHistory]         = useState(false);
 
-    const RECENTLY_AMENDED_DAYS = 7;
+    // ── Derived: active data (edited vs live) ──────────────────────────────
+    // Computed before any callbacks so handlers can capture it through closure.
+    const activeConstitution = isEditing ? editedConstitution : constitution;
 
-    /** Returns article keys that were amended within the last N days. */
-    const getRecentlyAmendedKeys = useCallback((data: any): Set<string> => {
-        const result = new Set<string>();
-        const cutoff = Date.now() - RECENTLY_AMENDED_DAYS * 24 * 60 * 60 * 1000;
-        const effectiveDate = data?.effective_date ? new Date(data.effective_date).getTime() : 0;
-        // If the whole constitution was updated recently, mark all articles
-        if (effectiveDate > cutoff && data?.articles) {
-            Object.keys(data.articles).forEach(k => result.add(k));
-        }
-        // Also honour per-article amended_at if backend provides it
-        if (data?.articles) {
-            Object.entries(data.articles).forEach(([k, v]: [string, any]) => {
-                if (v?.amended_at && new Date(v.amended_at).getTime() > cutoff) {
-                    result.add(k);
-                }
-            });
-        }
-        return result;
-    }, []);
-
-    /** Filter articles by search query (title or content). */
-    const filterArticles = useCallback((articles: Record<string, any>, query: string) => {
-        if (!query.trim()) return articles;
-        const q = query.toLowerCase();
+    // ── Memoised: filtered articles ────────────────────────────────────────
+    // useMemo on the *result* (not useCallback on the function) gives a real
+    // perf benefit: the expensive filter only runs when articles or the query change.
+    const filteredArticles = useMemo(() => {
+        const articles = activeConstitution.articles ?? {};
+        if (!searchQuery.trim()) return articles;
+        const q = searchQuery.toLowerCase();
         return Object.fromEntries(
             Object.entries(articles).filter(([key, article]) => {
-                const title = key.replace(/_/g, ' ').toLowerCase();
-                const content = typeof article === 'string'
-                    ? article
-                    : (article?.content ?? '');
-                return title.includes(q) || content.toLowerCase().includes(q);
+                const titleText  = key.replace(/_/g, ' ').toLowerCase();
+                const contentText = (typeof article === 'string' ? article : article?.content ?? '').toLowerCase();
+                return titleText.includes(q) || contentText.includes(q);
             })
         );
-    }, []);
+    }, [activeConstitution.articles, searchQuery]);
 
-    useEffect(() => { loadConstitution(); }, []);
+    // ── Memoised: recently amended keys ───────────────────────────────────
+    const recentlyAmendedKeys = useMemo((): Set<string> => {
+        const result    = new Set<string>();
+        const cutoff    = Date.now() - RECENTLY_AMENDED_MS;
+        const effective = activeConstitution.effective_date
+            ? new Date(activeConstitution.effective_date).getTime()
+            : 0;
 
-    const loadConstitution = async () => {
+        // If the whole constitution was updated recently, mark all articles
+        if (effective > cutoff && activeConstitution.articles) {
+            Object.keys(activeConstitution.articles).forEach(k => result.add(k));
+        }
+        // Also honour per-article amended_at if backend provides it
+        Object.entries(activeConstitution.articles ?? {}).forEach(([k, v]) => {
+            if (typeof v === 'object' && v.amended_at && new Date(v.amended_at).getTime() > cutoff) {
+                result.add(k);
+            }
+        });
+        return result;
+    }, [activeConstitution.effective_date, activeConstitution.articles]);
+
+    // ── Load constitution ──────────────────────────────────────────────────
+    // Defined with useCallback so it can be safely listed as a useEffect dep
+    // and used as a "Retry" handler in the error UI.
+    const loadConstitution = useCallback(async () => {
         try {
             setLoading(true);
             setError(null);
             const data = await constitutionService.getCurrentConstitution();
-            // Parse articles if the backend returns it as a JSON string
-            const rawArticles = data?.articles;
-            const parsedArticles: Record<string, { title: string; content: string }> =
-                typeof rawArticles === 'string'
-                    ? (() => { try { return JSON.parse(rawArticles); } catch { return DEFAULT_CONSTITUTION.articles; } })()
-                    : (rawArticles && typeof rawArticles === 'object' ? rawArticles : DEFAULT_CONSTITUTION.articles);
 
-            const safeData = {
+            const safeData: Constitution = {
                 ...DEFAULT_CONSTITUTION,
                 ...data,
-                articles: parsedArticles,
+                // safeParseArticles handles JSON-string payloads from older backend versions
+                articles: safeParseArticles(data?.articles, DEFAULT_CONSTITUTION.articles),
                 prohibited_actions: Array.isArray(data?.prohibited_actions)
                     ? data.prohibited_actions
-                    : (typeof data?.prohibited_actions === 'string'
+                    : typeof data?.prohibited_actions === 'string'
                         ? [data.prohibited_actions]
-                        : DEFAULT_CONSTITUTION.prohibited_actions),
+                        : DEFAULT_CONSTITUTION.prohibited_actions,
                 sovereign_preferences: {
                     ...DEFAULT_CONSTITUTION.sovereign_preferences,
-                    ...(data?.sovereign_preferences || {})
-                }
+                    ...(data?.sovereign_preferences ?? {}),
+                },
             };
+
             setConstitution(safeData);
-            setEditedConstitution(JSON.parse(JSON.stringify(safeData)));
-        } catch (err: any) {
-            const errorMsg = err.response?.data?.detail || err.message || 'Failed to load constitution';
-            setError(errorMsg);
+            // structuredClone is safer than JSON.parse(JSON.stringify(...)):
+            // handles undefined values and avoids issues with Date / Set / Map.
+            setEditedConstitution(structuredClone(safeData));
+        } catch (err: unknown) {
+            const axiosErr = err as { response?: { data?: { detail?: string } }; message?: string };
+            const msg = axiosErr?.response?.data?.detail ?? axiosErr?.message ?? 'Failed to load constitution';
+            setError(msg);
             toast.error('Failed to load constitution');
             setConstitution(DEFAULT_CONSTITUTION);
-            setEditedConstitution(JSON.parse(JSON.stringify(DEFAULT_CONSTITUTION)));
+            setEditedConstitution(structuredClone(DEFAULT_CONSTITUTION));
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
+    // ── Load amendment history ─────────────────────────────────────────────
+    const loadAmendmentHistory = useCallback(async () => {
+        setAmendmentsLoading(true);
+        try {
+            // Promise.allSettled reports partial failures instead of silently
+            // swallowing them the way .catch(() => []) did.
+            const [ratifiedResult, passedResult] = await Promise.allSettled([
+                votingService.getAmendmentVotings('ratified'),
+                votingService.getAmendmentVotings('passed'),
+            ]);
+
+            const ratified = ratifiedResult.status === 'fulfilled' ? ratifiedResult.value : [];
+            const passed   = passedResult.status  === 'fulfilled' ? passedResult.value  : [];
+
+            if (ratifiedResult.status === 'rejected' || passedResult.status === 'rejected') {
+                toast.error('Some amendment history could not be loaded');
+            }
+
+            // Merge, deduplicate by id, sort newest first
+            const seen   = new Set<string>();
+            const unique = [...ratified, ...passed].filter(a => {
+                if (seen.has(a.id)) return false;
+                seen.add(a.id);
+                return true;
+            });
+            unique.sort((a, b) =>
+                new Date(b.ended_at ?? b.created_at ?? 0).getTime() -
+                new Date(a.ended_at ?? a.created_at ?? 0).getTime()
+            );
+            setAmendments(unique);
+        } finally {
+            setAmendmentsLoading(false);
+        }
+    }, []);
+
+    // ── Boot load ──────────────────────────────────────────────────────────
+    useEffect(() => { loadConstitution(); }, [loadConstitution]);
+
+    // ── Save ───────────────────────────────────────────────────────────────
     const handleSave = async () => {
+        // Validate BEFORE setting saving state to avoid a flash of the spinner
+        // on a validation-only failure path.
+        if (!editedConstitution.preamble?.trim()) {
+            toast.error('Preamble cannot be empty');
+            return;
+        }
         try {
             setSaving(true);
-            if (!editedConstitution.preamble?.trim()) {
-                toast.error('Preamble cannot be empty');
-                return;
-            }
             await constitutionService.updateConstitution({
-                preamble: editedConstitution.preamble,
-                articles: editedConstitution.articles,
-                prohibited_actions: Array.isArray(editedConstitution.prohibited_actions)
+                preamble:             editedConstitution.preamble,
+                articles:             editedConstitution.articles,
+                prohibited_actions:   Array.isArray(editedConstitution.prohibited_actions)
                     ? editedConstitution.prohibited_actions
                     : [],
-                sovereign_preferences: editedConstitution.sovereign_preferences
+                sovereign_preferences: editedConstitution.sovereign_preferences as Record<string, unknown>,
             });
             toast.success('Constitution updated successfully');
             setIsEditing(false);
             await loadConstitution();
-        } catch (err: any) {
-            toast.error(err.response?.data?.detail || 'Update failed');
+        } catch (err: unknown) {
+            const axiosErr = err as { response?: { data?: { detail?: string } } };
+            toast.error(axiosErr?.response?.data?.detail ?? 'Update failed');
         } finally {
             setSaving(false);
         }
     };
 
     const handleReset = () => {
-        setEditedConstitution(JSON.parse(JSON.stringify(constitution)));
+        setEditedConstitution(structuredClone(constitution));
         setIsEditing(false);
     };
 
-    const loadAmendmentHistory = useCallback(async () => {
-        setAmendmentsLoading(true);
-        try {
-            const [ratified, passed] = await Promise.all([
-                votingService.getAmendmentVotings('ratified').catch(() => []),
-                votingService.getAmendmentVotings('passed').catch(() => []),
-            ]);
-            // Merge, dedupe by id, sort newest first
-            const merged = [...ratified, ...passed];
-            const seen = new Set<string>();
-            const unique = merged.filter(a => {
-                if (seen.has(a.id)) return false;
-                seen.add(a.id);
-                return true;
-            });
-            unique.sort((a, b) =>
-                new Date(b.ended_at || b.created_at || 0).getTime() -
-                new Date(a.ended_at || a.created_at || 0).getTime()
-            );
-            setAmendments(unique);
-        } catch (err) {
-            toast.error('Failed to load amendment history');
-        } finally {
-            setAmendmentsLoading(false);
-        }
-    }, []);
-
+    // ── Propose amendment ──────────────────────────────────────────────────
     const handleProposalSubmit = async () => {
-        if (!proposalTitle.trim() || !proposalDiff.trim()) {
+        if (!proposalForm.title.trim() || !proposalForm.diff.trim()) {
             toast.error('Title and diff are required');
             return;
         }
         setIsSubmittingProposal(true);
         try {
-            // constitutionService.proposeAmendment may not exist yet; route through votingService if needed
-            // For now we call the voting endpoint via fetch directly using the pattern from votingService
-            const { api } = await import('@/services/api');
-            await api.post('/api/v1/voting/amendments', {
-                title: proposalTitle.trim(),
-                diff_markdown: proposalDiff.trim(),
-                rationale: proposalRationale.trim(),
-                voting_period_hours: 48,
+            // Use votingService instead of a raw dynamic import
+            await votingService.proposeAmendment({
+                title:                proposalForm.title.trim(),
+                diff_markdown:        proposalForm.diff.trim(),
+                rationale:            proposalForm.rationale.trim(),
+                voting_period_hours:  48,
             });
             toast.success('Amendment proposal submitted for council vote');
             setShowProposalModal(false);
-            setProposalTitle('');
-            setProposalDiff('');
-            setProposalRationale('');
-        } catch (err: any) {
-            toast.error(err.response?.data?.detail || 'Failed to submit proposal');
+            setProposalForm(EMPTY_PROPOSAL);
+        } catch (err: unknown) {
+            const axiosErr = err as { response?: { data?: { detail?: string } } };
+            toast.error(axiosErr?.response?.data?.detail ?? 'Failed to submit proposal');
         } finally {
             setIsSubmittingProposal(false);
         }
     };
 
+    // ── Export PDF ─────────────────────────────────────────────────────────
     const handleExportPdf = async () => {
         setIsExportingPdf(true);
         try {
-            // Build a clean text representation and use browser print API
+            // Snapshot the current display data at call time
+            const data = isEditing ? editedConstitution : constitution;
+
             const printContent = `
 <!DOCTYPE html>
 <html>
@@ -393,15 +459,20 @@ export function ConstitutionPage() {
   <h2>Preamble</h2>
   <blockquote>${data.preamble}</blockquote>
   <h2>Articles</h2>
-  ${data.articles ? Object.entries(data.articles).map(([key, art]: [string, any], i) => {
-      const title = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-      const content = typeof art === 'string' ? art : art?.content ?? '';
-      return `<h3>${i + 1}. ${title}</h3><p>${content}</p>`;
-  }).join('') : ''}
+  ${data.articles
+      ? Object.entries(data.articles).map(([key, art], i) => {
+            const title   = key.split('_').map((w: string) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+            const content = typeof art === 'string' ? art : art?.content ?? '';
+            return `<h3>${i + 1}. ${title}</h3><p>${content}</p>`;
+        }).join('')
+      : ''}
   <h2>Prohibited Actions</h2>
-  ${Array.isArray(data.prohibited_actions) ? data.prohibited_actions.map((a: string) => `<div class="prohibited">${a}</div>`).join('') : ''}
+  ${Array.isArray(data.prohibited_actions)
+      ? data.prohibited_actions.map((a: string) => `<div class="prohibited">${a}</div>`).join('')
+      : ''}
 </body>
 </html>`;
+
             const win = window.open('', '_blank');
             if (win) {
                 win.document.write(printContent);
@@ -411,14 +482,14 @@ export function ConstitutionPage() {
             } else {
                 toast.error('Popup blocked — please allow popups for PDF export');
             }
-        } catch (err) {
+        } catch {
             toast.error('PDF export failed');
         } finally {
             setIsExportingPdf(false);
         }
     };
 
-    // ── Loading ────────────────────────────────────────────────────────────
+    // ── Early return: loading ──────────────────────────────────────────────
     if (loading) {
         return (
             <div className="flex items-center justify-center h-80">
@@ -436,9 +507,9 @@ export function ConstitutionPage() {
         );
     }
 
-    const data = isEditing ? (editedConstitution || DEFAULT_CONSTITUTION) : (constitution || DEFAULT_CONSTITUTION);
+    const data = activeConstitution;
 
-    // ── Error Fallback ─────────────────────────────────────────────────────
+    // ── Early return: fatal load error ─────────────────────────────────────
     if (!data || !data.prohibited_actions) {
         return (
             <div className="max-w-lg mx-auto mt-20 p-8 rounded-2xl border border-red-200 dark:border-red-500/20 bg-red-50 dark:bg-red-500/5 text-center shadow-sm dark:shadow-[0_2px_16px_rgba(0,0,0,0.25)]">
@@ -449,7 +520,7 @@ export function ConstitutionPage() {
                     Failed to Load Constitution
                 </h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
-                    {error || 'An unexpected error occurred.'}
+                    {error ?? 'An unexpected error occurred.'}
                 </p>
                 <button
                     onClick={loadConstitution}
@@ -461,11 +532,10 @@ export function ConstitutionPage() {
         );
     }
 
+    // ── Render-time computed values ────────────────────────────────────────
     const articleCount    = data.articles ? Object.keys(data.articles).length : 0;
     const prohibitedCount = Array.isArray(data.prohibited_actions) ? data.prohibited_actions.length : 0;
     const prefCount       = data.sovereign_preferences ? Object.keys(data.sovereign_preferences).length : 0;
-    const recentlyAmendedKeys = getRecentlyAmendedKeys(data);
-    const filteredArticles = filterArticles(data.articles || {}, searchQuery);
 
     // ── Render ─────────────────────────────────────────────────────────────
     return (
@@ -513,6 +583,7 @@ export function ConstitutionPage() {
                             onClick={handleExportPdf}
                             disabled={isExportingPdf}
                             title="Export as PDF"
+                            aria-label="Export constitution as PDF"
                             className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-gray-600 dark:text-gray-300 bg-white dark:bg-[#161b27] border border-gray-200 dark:border-[#1e2535] rounded-xl hover:bg-gray-50 dark:hover:bg-[#1e2535] disabled:opacity-50 transition-all duration-150"
                         >
                             {isExportingPdf
@@ -529,6 +600,7 @@ export function ConstitutionPage() {
                                     setShowHistory(x => !x);
                                     if (!showHistory && amendments.length === 0) loadAmendmentHistory();
                                 }}
+                                aria-label={showHistory ? 'Hide amendment history' : 'Show amendment history'}
                                 className={`inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-xl border transition-all duration-150
                                     ${showHistory
                                         ? 'bg-amber-50 dark:bg-amber-500/10 border-amber-200 dark:border-amber-500/20 text-amber-700 dark:text-amber-300'
@@ -544,6 +616,7 @@ export function ConstitutionPage() {
                         {!isEditing && (
                             <button
                                 onClick={() => setShowProposalModal(true)}
+                                aria-label="Propose a constitutional amendment"
                                 className="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-500/10 border border-violet-200 dark:border-violet-500/20 rounded-xl hover:bg-violet-100 dark:hover:bg-violet-500/20 transition-all duration-150"
                             >
                                 <GitPullRequest className="h-4 w-4" />
@@ -609,7 +682,8 @@ export function ConstitutionPage() {
                                 transition-colors duration-150"
                         />
                         {searchQuery && (
-                            <button aria-label="Clear search"
+                            <button
+                                aria-label="Clear search"
                                 onClick={() => setSearchQuery('')}
                                 className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500 hover:text-gray-600 dark:hover:text-gray-300"
                             >
@@ -632,11 +706,18 @@ export function ConstitutionPage() {
                     </p>
                 )}
 
-                {/* ── Error Banner ─────────────────────────────────────────── */}
+                {/* ── Inline error banner (shown alongside data, not instead of it) ── */}
                 {error && (
                     <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 text-sm text-red-700 dark:text-red-400">
                         <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-                        {error}
+                        <span className="flex-1">{error}</span>
+                        <button
+                            onClick={loadConstitution}
+                            className="flex-shrink-0 inline-flex items-center gap-1 text-xs font-medium underline underline-offset-2 hover:no-underline"
+                        >
+                            <RefreshCw className="h-3 w-3" />
+                            Retry
+                        </button>
                     </div>
                 )}
 
@@ -646,7 +727,7 @@ export function ConstitutionPage() {
                         { label: 'Articles',     value: articleCount,    icon: FileText, color: 'blue'   },
                         { label: 'Prohibitions', value: prohibitedCount, icon: Lock,     color: 'red'    },
                         { label: 'Preferences',  value: prefCount,       icon: Sliders,  color: 'purple' },
-                    ].map(({ label, value, icon: Icon, color }) => {
+                    ].map(({ label, value, icon: StatIcon, color }) => {
                         const colorMap: Record<string, string> = {
                             blue:   'bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-100 dark:border-blue-500/20',
                             red:    'bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 border-red-100 dark:border-red-500/20',
@@ -657,7 +738,7 @@ export function ConstitutionPage() {
                                 key={label}
                                 className={`flex items-center gap-3 px-4 py-3.5 rounded-xl border ${colorMap[color]} transition-colors duration-200`}
                             >
-                                <Icon className="h-5 w-5 flex-shrink-0" />
+                                <StatIcon className="h-5 w-5 flex-shrink-0" />
                                 <div>
                                     <p className="text-xl font-bold leading-none text-gray-900 dark:text-white">{value}</p>
                                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{label}</p>
@@ -683,6 +764,19 @@ export function ConstitutionPage() {
                                         {amendments.length} concluded
                                     </span>
                                 )}
+                                <button
+                                    onClick={loadAmendmentHistory}
+                                    disabled={amendmentsLoading}
+                                    aria-label="Refresh amendment history"
+                                    className="ml-auto inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium
+                                        border border-gray-200 dark:border-[#1e2535]
+                                        bg-white dark:bg-[#0f1117] text-gray-500 dark:text-gray-400
+                                        hover:bg-gray-50 dark:hover:bg-[#1e2535]
+                                        disabled:opacity-50 transition-colors"
+                                >
+                                    <RefreshCw className={`h-3 w-3 ${amendmentsLoading ? 'animate-spin' : ''}`} />
+                                    Refresh
+                                </button>
                             </div>
 
                             {amendmentsLoading ? (
@@ -697,16 +791,17 @@ export function ConstitutionPage() {
                                 </div>
                             ) : (
                                 <div className="space-y-0">
-                                    {amendments.map((amendment: any, idx: number) => {
-                                        const passed = ['passed', 'ratified'].includes(amendment.status);
-                                        const date = amendment.ended_at ?? amendment.created_at;
-                                        const isLast = idx === amendments.length - 1;
+                                    {amendments.map((amendment, idx) => {
+                                        const isPassed = amendment.final_result === 'passed' || amendment.status === 'ratified' || amendment.status === 'passed';
+                                        const date     = amendment.ended_at ?? amendment.created_at;
+                                        const isLast   = idx === amendments.length - 1;
+                                        const totalVotes = amendment.votes_for + amendment.votes_against + amendment.votes_abstain;
                                         return (
                                             <div key={amendment.id} className="relative flex gap-4">
                                                 {/* Spine */}
                                                 <div className="flex flex-col items-center flex-shrink-0 w-6">
                                                     <div className={`w-3 h-3 rounded-full ring-2 ring-white dark:ring-[#161b27] mt-1 flex-shrink-0
-                                                        ${passed ? 'bg-emerald-500 dark:bg-emerald-400' : 'bg-red-400 dark:bg-red-500'}`}
+                                                        ${isPassed ? 'bg-emerald-500 dark:bg-emerald-400' : 'bg-red-400 dark:bg-red-500'}`}
                                                     />
                                                     {!isLast && (
                                                         <div className="flex-1 w-px border-l-2 border-dashed border-gray-200 dark:border-[#1e2535] mt-1" />
@@ -716,7 +811,7 @@ export function ConstitutionPage() {
                                                 {/* Card */}
                                                 <div className="flex-1 pb-5">
                                                     <div className={`rounded-xl border p-4 transition-colors duration-150
-                                                        ${passed
+                                                        ${isPassed
                                                             ? 'border-emerald-100 dark:border-emerald-500/20 bg-emerald-50/40 dark:bg-emerald-500/5'
                                                             : 'border-red-100 dark:border-red-500/20 bg-red-50/40 dark:bg-red-500/5'
                                                         }`}
@@ -724,14 +819,13 @@ export function ConstitutionPage() {
                                                         <div className="flex items-start justify-between gap-3 flex-wrap">
                                                             <div className="flex-1 min-w-0">
                                                                 <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                                                    {/* Status badge */}
                                                                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium
-                                                                        ${passed
+                                                                        ${isPassed
                                                                             ? 'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300'
                                                                             : 'bg-red-100 dark:bg-red-500/20 text-red-700 dark:text-red-300'
                                                                         }`}
                                                                     >
-                                                                        {passed
+                                                                        {isPassed
                                                                             ? <CheckCircle2 className="w-3 h-3" />
                                                                             : <XCircle className="w-3 h-3" />
                                                                         }
@@ -739,25 +833,21 @@ export function ConstitutionPage() {
                                                                     </span>
                                                                 </div>
                                                                 <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                                                                    {amendment.title || amendment.agentium_id}
+                                                                    {amendment.title ?? amendment.agentium_id}
                                                                 </p>
                                                                 {amendment.sponsors?.length > 0 && (
                                                                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                                                                         Sponsored by {amendment.sponsors.join(', ')}
                                                                     </p>
                                                                 )}
-                                                                {/* Mini vote tally */}
-                                                                {(amendment.votes_for + amendment.votes_against + amendment.votes_abstain) > 0 && (
+                                                                {totalVotes > 0 && (
                                                                     <div className="flex items-center gap-3 mt-2 text-xs">
-                                                                        <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                                                                        <span className="text-emerald-600 dark:text-emerald-400 font-medium flex items-center gap-1">
+                                                                            <Users className="w-3 h-3" />
                                                                             ✓ {amendment.votes_for}
                                                                         </span>
-                                                                        <span className="text-red-500 dark:text-red-400 font-medium">
-                                                                            ✗ {amendment.votes_against}
-                                                                        </span>
-                                                                        <span className="text-gray-400 dark:text-gray-500">
-                                                                            — {amendment.votes_abstain}
-                                                                        </span>
+                                                                        <span className="text-red-500 dark:text-red-400 font-medium">✗ {amendment.votes_against}</span>
+                                                                        <span className="text-gray-400 dark:text-gray-500">— {amendment.votes_abstain}</span>
                                                                     </div>
                                                                 )}
                                                             </div>
@@ -779,115 +869,11 @@ export function ConstitutionPage() {
                     </div>
                 )}
 
-                {/* ── Amendment History Timeline ──────────────────────────── */}
-                {showHistory && (
-                    <div className="bg-white dark:bg-[#161b27] rounded-2xl border border-amber-200 dark:border-amber-500/20 overflow-hidden shadow-sm dark:shadow-[0_2px_16px_rgba(0,0,0,0.25)]">
-                        {/* left accent stripe */}
-                        <div className="absolute left-0 top-0 bottom-0 w-1 bg-amber-500" />
-
-                        <div className="pl-6 pr-6 pt-5 pb-5 relative">
-                            <div className="flex items-center justify-between mb-4">
-                                <div className="flex items-center gap-3">
-                                    <span className="p-2 rounded-lg bg-amber-100 dark:bg-amber-500/15 text-amber-600 dark:text-amber-400">
-                                        <History className="h-4 w-4" />
-                                    </span>
-                                    <h2 className="text-base font-semibold tracking-tight text-gray-900 dark:text-white">
-                                        Amendment History
-                                    </h2>
-                                </div>
-                                <button
-                                    onClick={loadAmendmentHistory}
-                                    disabled={amendmentsLoading}
-                                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium
-                                        border border-gray-200 dark:border-[#1e2535]
-                                        bg-white dark:bg-[#0f1117] text-gray-500 dark:text-gray-400
-                                        hover:bg-gray-50 dark:hover:bg-[#1e2535]
-                                        disabled:opacity-50 transition-colors"
-                                >
-                                    <RefreshCw className={`h-3 w-3 ${amendmentsLoading ? 'animate-spin' : ''}`} />
-                                    Refresh
-                                </button>
-                            </div>
-
-                            {amendmentsLoading ? (
-                                <div className="flex items-center justify-center py-8 gap-2 text-gray-400 dark:text-gray-500">
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                    <span className="text-sm">Loading history…</span>
-                                </div>
-                            ) : amendments.length === 0 ? (
-                                <div className="py-8 text-center">
-                                    <p className="text-sm text-gray-400 dark:text-gray-500 italic">No ratified amendments found.</p>
-                                    <p className="text-xs text-gray-400 dark:text-gray-600 mt-1">Passed amendments will appear here after ratification.</p>
-                                </div>
-                            ) : (
-                                <div className="space-y-0">
-                                    {amendments.map((amendment, idx) => {
-                                        const isLast = idx === amendments.length - 1;
-                                        const date = amendment.ended_at || amendment.created_at;
-                                        const isPassed = amendment.final_result === 'passed' || amendment.status === 'ratified' || amendment.status === 'passed';
-                                        const totalVotes = amendment.votes_for + amendment.votes_against + amendment.votes_abstain;
-                                        return (
-                                            <div key={amendment.id} className="relative flex gap-4">
-                                                {/* Spine */}
-                                                <div className="flex flex-col items-center flex-shrink-0 w-5">
-                                                    <div className={`w-3 h-3 rounded-full ring-2 ring-white dark:ring-[#161b27] mt-1 flex-shrink-0 ${isPassed ? 'bg-emerald-500' : 'bg-red-400'}`} />
-                                                    {!isLast && <div className="flex-1 w-px border-l-2 border-dashed border-amber-200 dark:border-amber-500/20 mt-1" />}
-                                                </div>
-                                                {/* Card */}
-                                                <div className={`flex-1 pb-5 ${!isLast ? '' : ''}`}>
-                                                    <div className="rounded-xl border border-gray-100 dark:border-[#1e2535] bg-gray-50 dark:bg-[#0f1117] px-4 py-3">
-                                                        <div className="flex items-start justify-between gap-2 mb-1">
-                                                            <p className="text-sm font-semibold text-gray-800 dark:text-gray-100 leading-snug">
-                                                                {amendment.title || amendment.agentium_id}
-                                                            </p>
-                                                            <span className={`flex-shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${
-                                                                isPassed
-                                                                    ? 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
-                                                                    : 'bg-red-100 dark:bg-red-500/15 text-red-700 dark:text-red-300'
-                                                            }`}>
-                                                                {isPassed
-                                                                    ? <CheckCircle2 className="w-3 h-3" />
-                                                                    : <XCircle className="w-3 h-3" />
-                                                                }
-                                                                {amendment.status}
-                                                            </span>
-                                                        </div>
-                                                        <div className="flex items-center gap-3 text-xs text-gray-400 dark:text-gray-500">
-                                                            {date && (
-                                                                <span className="flex items-center gap-1">
-                                                                    <Clock className="w-3 h-3" />
-                                                                    {new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                                                                </span>
-                                                            )}
-                                                            {totalVotes > 0 && (
-                                                                <span className="flex items-center gap-1">
-                                                                    <Users className="w-3 h-3" />
-                                                                    {amendment.votes_for}↑ {amendment.votes_against}↓ ({totalVotes} voted)
-                                                                </span>
-                                                            )}
-                                                            {amendment.sponsors?.length > 0 && (
-                                                                <span className="font-mono truncate max-w-[160px]">
-                                                                    by {amendment.sponsors[0]}
-                                                                    {amendment.sponsors.length > 1 ? ` +${amendment.sponsors.length - 1}` : ''}
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
-
                 {/* ── Preamble ─────────────────────────────────────────────── */}
                 <Section icon={BookOpen} title="Preamble" accent="blue">
                     {isEditing ? (
                         <textarea
-                            value={data.preamble || ''}
+                            value={data.preamble ?? ''}
                             onChange={e => setEditedConstitution({ ...editedConstitution, preamble: e.target.value })}
                             className="w-full h-36 p-4 rounded-xl border border-gray-300 dark:border-[#1e2535] bg-white dark:bg-[#0f1117] text-sm text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500/40 dark:focus:ring-blue-500/30 focus:border-blue-500 dark:focus:border-blue-500/50 resize-none font-serif leading-relaxed transition duration-150"
                             placeholder="Enter the preamble…"
@@ -904,7 +890,7 @@ export function ConstitutionPage() {
                 {/* ── Articles ─────────────────────────────────────────────── */}
                 <Section icon={FileText} title="Articles" accent="blue" collapsible>
                     <div className="relative ml-3 space-y-1 border-l border-gray-200 dark:border-[#1e2535]">
-                        {Object.entries(isEditing ? (data.articles || {}) : filteredArticles).map(([key, article]: [string, any], index) => (
+                        {Object.entries(isEditing ? (data.articles ?? {}) : filteredArticles).map(([key, article], index) => (
                             <ArticleCard
                                 key={key}
                                 index={index}
@@ -914,9 +900,13 @@ export function ConstitutionPage() {
                                 recentlyAmended={recentlyAmendedKeys.has(key)}
                                 searchQuery={searchQuery}
                                 onContentChange={(k, content) => {
+                                    const existing = editedConstitution.articles[k];
                                     const newArticles = {
                                         ...editedConstitution.articles,
-                                        [k]: { ...article, content }
+                                        [k]: {
+                                            title:   typeof existing === 'object' ? existing.title : k,
+                                            content,
+                                        } satisfies ConstitutionArticle,
                                     };
                                     setEditedConstitution({ ...editedConstitution, articles: newArticles });
                                 }}
@@ -941,7 +931,7 @@ export function ConstitutionPage() {
                                     prohibited_actions: e.target.value
                                         .split('\n')
                                         .map((l: string) => l.trim())
-                                        .filter((l: string) => l.length > 0)
+                                        .filter((l: string) => l.length > 0),
                                 })}
                                 className="w-full h-32 p-4 rounded-xl border border-gray-300 dark:border-[#1e2535] bg-white dark:bg-[#0f1117] text-sm font-mono text-gray-700 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-red-500/40 dark:focus:ring-red-500/25 focus:border-red-500 dark:focus:border-red-500/50 resize-none transition duration-150"
                                 placeholder="One prohibited action per line…"
@@ -974,7 +964,7 @@ export function ConstitutionPage() {
                 {/* ── Sovereign Preferences ────────────────────────────────── */}
                 <Section icon={Sliders} title="Sovereign Preferences" accent="purple" collapsible>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {data.sovereign_preferences && Object.entries(data.sovereign_preferences).map(([key, value]: [string, any]) => (
+                        {data.sovereign_preferences && Object.entries(data.sovereign_preferences).map(([key, value]) => (
                             <div
                                 key={key}
                                 className="px-4 py-3 rounded-xl bg-gray-50 dark:bg-[#0f1117] border border-gray-200 dark:border-[#1e2535] transition-colors duration-200"
@@ -983,13 +973,14 @@ export function ConstitutionPage() {
                                     {key.replace(/_/g, ' ')}
                                 </label>
                                 {isEditing ? (
-                                    <input aria-label="Sovereign Preference"
+                                    <input
+                                        aria-label={`Sovereign preference: ${key.replace(/_/g, ' ')}`}
                                         type="text"
                                         value={String(value ?? '')}
                                         onChange={e => {
                                             const newPrefs = {
                                                 ...editedConstitution.sovereign_preferences,
-                                                [key]: e.target.value
+                                                [key]: e.target.value,
                                             };
                                             setEditedConstitution({ ...editedConstitution, sovereign_preferences: newPrefs });
                                         }}
@@ -1008,7 +999,7 @@ export function ConstitutionPage() {
                 {/* ── Footer ───────────────────────────────────────────────── */}
                 <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-4 rounded-xl bg-white dark:bg-[#161b27] border border-gray-200 dark:border-[#1e2535] text-xs text-gray-500 dark:text-gray-500 transition-colors duration-200">
                     <span>
-                        Created by <span className="font-medium text-gray-700 dark:text-gray-300">{data.created_by || 'System'}</span>
+                        Created by <span className="font-medium text-gray-700 dark:text-gray-300">{data.created_by ?? 'System'}</span>
                     </span>
                     <span className="flex items-center gap-1">
                         <Clock className="h-3 w-3" />
@@ -1032,9 +1023,9 @@ export function ConstitutionPage() {
                                 Propose Constitutional Amendment
                             </h2>
                             <button
-                                onClick={() => setShowProposalModal(false)}
+                                onClick={() => { setShowProposalModal(false); setProposalForm(EMPTY_PROPOSAL); }}
                                 className="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#1e2535] transition-colors"
-                                aria-label="Close"
+                                aria-label="Close proposal modal"
                             >
                                 <X className="w-4 h-4" />
                             </button>
@@ -1048,8 +1039,8 @@ export function ConstitutionPage() {
                                 </label>
                                 <input
                                     type="text"
-                                    value={proposalTitle}
-                                    onChange={e => setProposalTitle(e.target.value)}
+                                    value={proposalForm.title}
+                                    onChange={e => setProposalForm(f => ({ ...f, title: e.target.value }))}
                                     placeholder="e.g. Amend Article 5 — Add Privacy Rights"
                                     className="w-full px-4 py-2.5 text-sm bg-white dark:bg-[#0f1117] border border-gray-200 dark:border-[#1e2535] rounded-lg text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500 transition-colors"
                                 />
@@ -1061,8 +1052,8 @@ export function ConstitutionPage() {
                                     Proposed Changes (Markdown diff) <span className="text-red-500">*</span>
                                 </label>
                                 <textarea
-                                    value={proposalDiff}
-                                    onChange={e => setProposalDiff(e.target.value)}
+                                    value={proposalForm.diff}
+                                    onChange={e => setProposalForm(f => ({ ...f, diff: e.target.value }))}
                                     rows={6}
                                     placeholder={`- Old text to remove\n+ New text to add\n\nUse +/- prefix per line for diff format.`}
                                     className="w-full px-4 py-2.5 text-sm font-mono bg-white dark:bg-[#0f1117] border border-gray-200 dark:border-[#1e2535] rounded-lg text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500 resize-none transition-colors"
@@ -1075,8 +1066,8 @@ export function ConstitutionPage() {
                                     Rationale
                                 </label>
                                 <textarea
-                                    value={proposalRationale}
-                                    onChange={e => setProposalRationale(e.target.value)}
+                                    value={proposalForm.rationale}
+                                    onChange={e => setProposalForm(f => ({ ...f, rationale: e.target.value }))}
                                     rows={3}
                                     placeholder="Why is this amendment necessary?"
                                     className="w-full px-4 py-2.5 text-sm bg-white dark:bg-[#0f1117] border border-gray-200 dark:border-[#1e2535] rounded-lg text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500 resize-none transition-colors"
@@ -1092,14 +1083,14 @@ export function ConstitutionPage() {
                             {/* Footer buttons */}
                             <div className="flex gap-3 pt-1">
                                 <button
-                                    onClick={() => setShowProposalModal(false)}
+                                    onClick={() => { setShowProposalModal(false); setProposalForm(EMPTY_PROPOSAL); }}
                                     className="flex-1 px-4 py-2.5 border border-gray-200 dark:border-[#1e2535] text-gray-700 dark:text-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-[#1e2535] transition-all"
                                 >
                                     Cancel
                                 </button>
                                 <button
                                     onClick={handleProposalSubmit}
-                                    disabled={isSubmittingProposal || !proposalTitle.trim() || !proposalDiff.trim()}
+                                    disabled={isSubmittingProposal || !proposalForm.title.trim() || !proposalForm.diff.trim()}
                                     className="flex-1 px-4 py-2.5 bg-violet-600 hover:bg-violet-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                                 >
                                     {isSubmittingProposal

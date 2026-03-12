@@ -67,8 +67,13 @@ export const preferencesService = {
     if (filters?.category) params.append('category', filters.category);
     if (filters?.search)   params.append('search', filters.search);
     const query = params.toString() ? `?${params.toString()}` : '';
-    const response = await api.get<UserPreference[]>(`/api/v1/preferences${query}`);
-    return response.data;
+    // Backend returns { user_id, count, preferences: UserPreference[] }
+    const response = await api.get<{ preferences: UserPreference[]; count: number; user_id: string } | UserPreference[]>(
+      `/api/v1/preferences${query}`,
+    );
+    const data = response.data;
+    // Unwrap envelope if present; fall back gracefully if backend ever returns a plain array
+    return Array.isArray(data) ? data : ((data as { preferences: UserPreference[] }).preferences ?? []);
   },
 
   getPreference: async (
@@ -91,31 +96,32 @@ export const preferencesService = {
     description?: string;
     data_type?: string;
   }): Promise<UserPreference> => {
-    const response = await api.post<UserPreference>('/api/v1/preferences/', data);
-    return response.data;
+    // Backend returns { status: "created", preference: UserPreference }
+    const response = await api.post<{ status: string; preference: UserPreference }>('/api/v1/preferences/', data);
+    return response.data.preference;
   },
 
   updatePreference: async (
     key: string,
     value: unknown,
   ): Promise<UserPreference> => {
-    const response = await api.put<UserPreference>(
+    // Backend returns { status: "updated", preference: UserPreference }
+    const response = await api.put<{ status: string; preference: UserPreference }>(
       `/api/v1/preferences/${encodeURIComponent(key)}`,
       { value },
     );
-    return response.data;
+    return response.data.preference;
   },
 
   /**
    * Delete a user preference by key.
-   *
-   * Previously missing from the frontend service layer.
    * Maps to: DELETE /api/v1/preferences/{key}
+   * Backend returns { status: "deleted", key: string }
    */
   deletePreference: async (
     key: string,
-  ): Promise<{ success: boolean; message: string }> => {
-    const response = await api.delete<{ success: boolean; message: string }>(
+  ): Promise<{ status: string; key: string }> => {
+    const response = await api.delete<{ status: string; key: string }>(
       `/api/v1/preferences/${encodeURIComponent(key)}`,
     );
     return response.data;
@@ -166,15 +172,21 @@ export const preferencesService = {
   // ── System / Admin preferences ────────────────────────────────────────────────
 
   admin: {
-    getDefaults: async (): Promise<UserPreference[]> => {
-      const response = await api.get<UserPreference[]>('/api/v1/preferences/system/defaults');
-      return response.data;
+    getDefaults: async (): Promise<Record<string, unknown>> => {
+      // Backend returns { defaults: Record<string, unknown>, categories: {...} }
+      const response = await api.get<{ defaults: Record<string, unknown>; categories: Record<string, string> }>(
+        '/api/v1/preferences/system/defaults',
+      );
+      return response.data.defaults ?? {};
     },
 
-    /** Alias for getDefaults — used by TasksPage */
-    getSystemDefaults: async (): Promise<{ defaults: UserPreference[] }> => {
-      const response = await api.get<UserPreference[]>('/api/v1/preferences/system/defaults');
-      return { defaults: response.data };
+    /** Alias for getDefaults — used by TasksPage to render the defaults panel */
+    getSystemDefaults: async (): Promise<{ defaults: Record<string, unknown> }> => {
+      // Backend: { defaults: Record<string, unknown>, categories: {...} }
+      const response = await api.get<{ defaults: Record<string, unknown>; categories: Record<string, string> }>(
+        '/api/v1/preferences/system/defaults',
+      );
+      return { defaults: response.data.defaults ?? {} };
     },
 
     initializeSystem: async (): Promise<void> => {

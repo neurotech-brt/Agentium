@@ -1452,7 +1452,7 @@ const PreferencesTab: React.FC = () => {
     const [categoryFilter, setCategoryFilter] = useState<string>('');
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [showDefaults, setShowDefaults] = useState(false);
-    const [defaults, setDefaults] = useState<Record<string, any>>({});
+    const [defaults, setDefaults] = useState<Record<string, unknown>>({});
     const [optimizing, setOptimizing] = useState(false);
     const [optimizationResult, setOptimizationResult] = useState<any>(null);
 
@@ -1476,7 +1476,11 @@ const PreferencesTab: React.FC = () => {
             );
             setPreferences(data);
         } catch (err: any) {
-            const msg = err?.response?.data?.detail || 'Failed to load preferences';
+            // Network errors (ERR_CONNECTION_REFUSED) have no .response object
+            const isNetworkError = !err?.response;
+            const msg = isNetworkError
+                ? 'Cannot reach the server — make sure the backend is running on port 8000.'
+                : (err?.response?.data?.detail || 'Failed to load preferences');
             console.error('Failed to load preferences:', err);
             setLoadError(msg);
         } finally {

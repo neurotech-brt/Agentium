@@ -1,17 +1,18 @@
-# Scalability Strategy — 50K → 50M+ Agents
+# Scalability Strategy — 50K → 50M+ Agents [Not Implemented]
 
 ## 1. Distributed ChromaDB Sharding
 
 ### Current State
+
 Single ChromaDB instance with four collections: `constitution_articles`, `agent_ethos`, `task_learnings`, `domain_knowledge`.
 
 ### Sharding Strategy
 
-| Collection           | Shard Key             | Rationale                              |
-|----------------------|-----------------------|----------------------------------------|
-| `agent_ethos`        | `agent_id` hash       | Distributes ethos evenly across shards |
-| `task_learnings`     | `created_at` range    | Time-based partitioning for decay      |
-| `domain_knowledge`   | `knowledge_type` hash | Groups similar domains together        |
+| Collection              | Shard Key             | Rationale                              |
+| ----------------------- | --------------------- | -------------------------------------- |
+| `agent_ethos`           | `agent_id` hash       | Distributes ethos evenly across shards |
+| `task_learnings`        | `created_at` range    | Time-based partitioning for decay      |
+| `domain_knowledge`      | `knowledge_type` hash | Groups similar domains together        |
 | `constitution_articles` | Replicated (no shard) | Small dataset, read-heavy              |
 
 ### Implementation Approach
@@ -44,18 +45,19 @@ services:
 ## 2. PostgreSQL Partitioning for Agent Hierarchies
 
 ### Current State
+
 Single `agents` table with `agentium_id` column for hierarchy (0xxxx / 1xxxx / 2xxxx / 3xxxx).
 
 ### Partitioning Strategy
 
 **Range partitioning on `agent_type`:**
 
-| Partition       | Agent Type     | ID Range   | Estimated Size     |
-|-----------------|----------------|------------|--------------------|
-| `agents_head`   | Head of Council | 0xxxx      | < 10 rows          |
-| `agents_council`| Council Members | 1xxxx      | < 100 rows         |
-| `agents_lead`   | Lead Agents     | 2xxxx      | < 10,000 rows      |
-| `agents_task`   | Task Agents     | 3xxxx      | 50K → 50M+ rows    |
+| Partition        | Agent Type      | ID Range | Estimated Size  |
+| ---------------- | --------------- | -------- | --------------- |
+| `agents_head`    | Head of Council | 0xxxx    | < 10 rows       |
+| `agents_council` | Council Members | 1xxxx    | < 100 rows      |
+| `agents_lead`    | Lead Agents     | 2xxxx    | < 10,000 rows   |
+| `agents_task`    | Task Agents     | 3xxxx    | 50K → 50M+ rows |
 
 ```sql
 -- Partition the agents table by type
@@ -96,6 +98,7 @@ reserve_pool_size = 20
 ## 3. Frontend Virtual List for Large Hierarchies
 
 ### Problem
+
 Rendering 50K+ agents in `AgentTree.tsx` causes browser freezing.
 
 ### Solution: Windowed Rendering
@@ -103,7 +106,7 @@ Rendering 50K+ agents in `AgentTree.tsx` causes browser freezing.
 Use `react-window` or `@tanstack/react-virtual` to render only visible nodes:
 
 ```tsx
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { useVirtualizer } from "@tanstack/react-virtual";
 
 function AgentTreeVirtual({ agents }: { agents: Agent[] }) {
   const parentRef = useRef<HTMLDivElement>(null);
@@ -115,9 +118,9 @@ function AgentTreeVirtual({ agents }: { agents: Agent[] }) {
   });
 
   return (
-    <div ref={parentRef} style={{ height: '80vh', overflow: 'auto' }}>
+    <div ref={parentRef} style={{ height: "80vh", overflow: "auto" }}>
       <div style={{ height: virtualizer.getTotalSize() }}>
-        {virtualizer.getVirtualItems().map(item => (
+        {virtualizer.getVirtualItems().map((item) => (
           <AgentRow key={item.key} agent={agents[item.index]} />
         ))}
       </div>
@@ -134,9 +137,9 @@ The existing `/api/v1/mobile/agents` endpoint returns a paginated agent list. Th
 
 ## 4. Capacity Planning
 
-| Scale          | Agents    | PostgreSQL     | ChromaDB      | Redis    |
-|----------------|-----------|----------------|---------------|----------|
-| Current        | < 1K      | 1 node, 16 GB  | 1 node, 8 GB  | 1 node   |
-| Medium (10K)   | 10K       | 1 node, 64 GB  | 2 replicas    | 1 node   |
-| Large (100K)   | 100K      | Citus 3-node   | 4 shards      | Sentinel |
-| Enterprise (50M+) | 50M+  | Citus 10-node  | 16 shards     | Cluster  |
+| Scale             | Agents | PostgreSQL    | ChromaDB     | Redis    |
+| ----------------- | ------ | ------------- | ------------ | -------- |
+| Current           | < 1K   | 1 node, 16 GB | 1 node, 8 GB | 1 node   |
+| Medium (10K)      | 10K    | 1 node, 64 GB | 2 replicas   | 1 node   |
+| Large (100K)      | 100K   | Citus 3-node  | 4 shards     | Sentinel |
+| Enterprise (50M+) | 50M+   | Citus 10-node | 16 shards    | Cluster  |

@@ -1,18 +1,18 @@
-# Agentium — Android Client (Kotlin)
+# Agentium — Android Client (Kotlin) [Not Implemented]
 
 > **Status:** Stub project — architecture + API contract defined, native build not yet started.
 
 ## Architecture
 
-| Layer       | Technology          | Notes                                             |
-|-------------|---------------------|---------------------------------------------------|
-| UI          | Jetpack Compose      | Declarative, Material 3 theming                  |
-| Navigation  | Navigation Compose   | Single-activity, type-safe routes                |
-| Networking  | Retrofit + OkHttp    | All HTTP via `AgentiumApiService`                |
-| Push        | FCM (Firebase Cloud Messaging) | Token registered via `/api/v1/mobile/register-device` |
-| Auth        | EncryptedSharedPreferences + JWT | Secure token storage, auto-refresh     |
-| Offline     | Room Database        | Constitution + task queue cached locally          |
-| Voice       | Android SpeechRecognizer | On-device STT, routed to `/api/v1/mobile/voice-command` |
+| Layer      | Technology                       | Notes                                                   |
+| ---------- | -------------------------------- | ------------------------------------------------------- |
+| UI         | Jetpack Compose                  | Declarative, Material 3 theming                         |
+| Navigation | Navigation Compose               | Single-activity, type-safe routes                       |
+| Networking | Retrofit + OkHttp                | All HTTP via `AgentiumApiService`                       |
+| Push       | FCM (Firebase Cloud Messaging)   | Token registered via `/api/v1/mobile/register-device`   |
+| Auth       | EncryptedSharedPreferences + JWT | Secure token storage, auto-refresh                      |
+| Offline    | Room Database                    | Constitution + task queue cached locally                |
+| Voice      | Android SpeechRecognizer         | On-device STT, routed to `/api/v1/mobile/voice-command` |
 
 ## API Contract (Backend Endpoints)
 

@@ -1,18 +1,18 @@
-# Agentium — iOS Client (Swift)
+# Agentium — iOS Client (Swift) [Not Implemented]
 
 > **Status:** Stub project — architecture + API contract defined, native build not yet started.
 
 ## Architecture
 
-| Layer       | Technology          | Notes                                             |
-|-------------|---------------------|---------------------------------------------------|
-| UI          | SwiftUI             | Declarative, composable views                     |
-| Navigation  | NavigationStack      | iOS 16+ push / modal routing                     |
-| Networking  | URLSession + async/await | All HTTP via `AgentiumAPIClient`             |
-| Push        | APNs + UserNotifications | Token registered via `/api/v1/mobile/register-device` |
-| Auth        | Keychain + JWT       | Secure token storage, auto-refresh               |
-| Offline     | Core Data            | Constitution + task queue cached locally          |
-| Voice       | SFSpeechRecognizer   | On-device STT, routed to `/api/v1/mobile/voice-command` |
+| Layer      | Technology               | Notes                                                   |
+| ---------- | ------------------------ | ------------------------------------------------------- |
+| UI         | SwiftUI                  | Declarative, composable views                           |
+| Navigation | NavigationStack          | iOS 16+ push / modal routing                            |
+| Networking | URLSession + async/await | All HTTP via `AgentiumAPIClient`                        |
+| Push       | APNs + UserNotifications | Token registered via `/api/v1/mobile/register-device`   |
+| Auth       | Keychain + JWT           | Secure token storage, auto-refresh                      |
+| Offline    | Core Data                | Constitution + task queue cached locally                |
+| Voice      | SFSpeechRecognizer       | On-device STT, routed to `/api/v1/mobile/voice-command` |
 
 ## API Contract (Backend Endpoints)
 

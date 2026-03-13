@@ -8,6 +8,7 @@ for voice messages on external platforms.
 """
 
 import io
+from dataclasses import dataclass, field
 import logging
 import tempfile
 from pathlib import Path

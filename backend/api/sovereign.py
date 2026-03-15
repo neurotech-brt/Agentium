@@ -9,6 +9,7 @@ from typing import List, Optional
 from datetime import datetime
 import asyncio
 import json
+import os
 import psutil  # FIX: added for reliable system metrics (replaces fragile sudo subprocess chain)
 
 from backend.models.database import get_db
@@ -67,8 +68,10 @@ async def get_system_status(
     Also fixed: the old single-snapshot /proc/stat CPU formula is mathematically
     incorrect — it computes cumulative ticks since boot, not current usage.
 
-    Solution: use psutil directly. It reads kernel data without subprocess or
-    sudo and correctly samples CPU usage over a short interval.
+    Disk fix: psutil.disk_usage("/") reads the container overlay filesystem
+    (showing wrong free space). We now use /host which is a bind-mount of the
+    real host "/" defined in docker-compose (volumes: - /:/host:rw).
+    Falls back to "/" when running outside Docker (local dev).
     """
 
     # ── CPU ────────────────────────────────────────────────────────────────────
@@ -81,6 +84,8 @@ async def get_system_status(
     # ── Memory ─────────────────────────────────────────────────────────────────
     # All psutil memory values are in bytes — consistent with the frontend
     # divisor (1_073_741_824 = 1 GiB) to display correct GB values.
+    # /proc is bind-mounted from the host (volumes: - /proc:/proc:rw) so psutil
+    # reads real host memory figures.
     vm              = psutil.virtual_memory()
     mem_total:  int = vm.total
     mem_used:   int = vm.used
@@ -88,8 +93,13 @@ async def get_system_status(
     mem_pct:  float = round(vm.percent, 1)
 
     # ── Disk ───────────────────────────────────────────────────────────────────
+    # FIX: use /host (bind-mount of host "/" defined in docker-compose volumes:
+    #   - /:/host:rw) so we report the real host disk instead of the container
+    #   overlay filesystem. os.path.ismount("/host") is False in local dev,
+    #   so we fall back to "/" automatically — zero breaking change.
+    _disk_path = "/host" if os.path.ismount("/host") else "/"
     try:
-        disk            = psutil.disk_usage("/")
+        disk            = psutil.disk_usage(_disk_path)
         disk_total: int = disk.total
         disk_used:  int = disk.used
         disk_free:  int = disk.free

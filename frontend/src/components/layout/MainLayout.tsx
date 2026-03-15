@@ -180,7 +180,7 @@ export function MainLayout() {
         <div className="h-screen bg-gray-50 dark:bg-[#0f1117] flex">
             <aside className="w-64 bg-white dark:bg-[#161b27] border-r border-gray-200 dark:border-[#1e2535] flex flex-col">
                 {/* Header */}
-                <div className="p-6 border-b border-gray-200 dark:border-[#1e2535] flex-shrink-0">
+                <div className="px-4 py-3 border-b border-gray-200 dark:border-[#1e2535] flex-shrink-0">
                     <div className="flex items-center gap-2">
                         <button
                             onClick={toggleTheme}
@@ -199,17 +199,17 @@ export function MainLayout() {
                 </div>
 
                 {/* Navigation */}
-                <nav className="flex-1 p-3 space-y-0.5 overflow-y-auto">
+                <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-hidden">
                     {visibleNavItems.map((item) => (
                         <div key={item.path}>
                             {item.variant === 'danger' && (
-                                <div className="my-2 border-t border-gray-200 dark:border-[#1e2535]" />
+                                <div className="my-1.5 border-t border-gray-200 dark:border-[#1e2535]" />
                             )}
                             <NavLink
                                 to={item.path}
                                 end={item.path === '/'}
                                 className={({ isActive }) =>
-                                    `flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all duration-200 ${
+                                    `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                                         item.variant === 'danger'
                                             ? isActive
                                                 ? 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300 border border-red-200 dark:border-red-500/20'
@@ -220,7 +220,7 @@ export function MainLayout() {
                                     }`
                                 }
                             >
-                                <item.icon className={`w-4 h-4 flex-shrink-0 ${item.variant === 'danger' ? 'text-red-500' : ''}`} />
+                                <item.icon className={`w-[18px] h-[18px] flex-shrink-0 ${item.variant === 'danger' ? 'text-red-500' : ''}`} />
                                 <span className="flex-1">{item.label}</span>
                                 {item.badge !== undefined && (
                                     <span className="bg-red-500 text-white text-xs font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center">
@@ -233,8 +233,8 @@ export function MainLayout() {
                 </nav>
 
                 {/* User section */}
-                <div className="p-4 border-t border-gray-200 dark:border-[#1e2535]">
-                    <div className="flex items-center gap-3 mb-3">
+                <div className="px-4 py-3 border-t border-gray-200 dark:border-[#1e2535]">
+                    <div className="flex items-center gap-3 mb-2">
                         <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center text-white text-sm font-bold">
                             {user?.username?.charAt(0).toUpperCase() || 'U'}
                         </div>
@@ -252,7 +252,7 @@ export function MainLayout() {
 
                     <button
                         onClick={handleLogout}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors"
+                        className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors"
                     >
                         <LogOut className="w-4 h-4" />
                         Logout

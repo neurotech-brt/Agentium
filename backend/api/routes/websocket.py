@@ -464,17 +464,23 @@ async def websocket_chat_endpoint(
                     continue
 
                 with get_fresh_db() as db:
-                    chat_service = ChatService(db)
-                    response = await chat_service.process_message(
-                        user_message=content,
-                        head_agent_id=user_info["head_agent_id"],
-                        user_id=user_info.get("user_id"),
-                    )
+                    head = db.query(HeadOfCouncil).filter_by(agentium_id="00001").first()
+                    if not head:
+                        await websocket.send_json({
+                            "type":      "error",
+                            "content":   "Head of Council is unavailable. Check system status.",
+                            "timestamp": datetime.utcnow().isoformat(),
+                        })
+                        continue
+                    # FIX: ChatService has no __init__ — all methods are @staticmethod.
+                    # Correct call: ChatService.process_message(head, message, db)
+                    # FIX: response key is "content", not "response"
+                    response = await ChatService.process_message(head, content, db)
 
                 await websocket.send_json({
                     "type":      "message",
                     "role":      "head_of_council",
-                    "content":   response.get("response", ""),
+                    "content":   response.get("content", ""),
                     "metadata":  response.get("metadata", {}),
                     "timestamp": datetime.utcnow().isoformat(),
                 })

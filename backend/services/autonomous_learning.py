@@ -1,5 +1,5 @@
 """
-Autonomous Learning Engine — Phase 10.4.
+Autonomous Learning Engine 
 
 Background daemon that polls CritiqueReview outcomes and extracts
 structured "Best Practices" from highly successful tasks and
@@ -13,6 +13,7 @@ Scheduling:
 """
 
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -415,8 +416,6 @@ class AutonomousLearningEngine:
 # ---------------------------------------------------------------------------
 # Singleton
 # ---------------------------------------------------------------------------
-
-import os
 
 _learning_engine: Optional[AutonomousLearningEngine] = None
 

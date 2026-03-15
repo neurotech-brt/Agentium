@@ -42,6 +42,12 @@ export interface MessageLogResponse {
   stats: {
     total_in_filter: number;
     has_more: boolean;
+    /**
+     * Total failed messages matching the current filters across the full dataset,
+     * not just the current page. Populated by the updated backend; may be undefined
+     * on older builds — callers should fall back to page-slice counting in that case.
+     */
+    failed_total?: number;
   };
 }
 
@@ -63,43 +69,56 @@ export interface BulkReplayResponse {
 export const channelMessagesApi = {
   /**
    * Fetch cross-channel message log with optional filters.
+   *
+   * @param signal - Optional AbortSignal. Pass one from an AbortController to
+   *   cancel the request when filters change rapidly (prevents stale-data races).
    */
-  getLog: async (filters: MessageLogFilters = {}): Promise<MessageLogResponse> => {
+  getLog: async (
+    filters: MessageLogFilters = {},
+    signal?: AbortSignal,
+  ): Promise<MessageLogResponse> => {
     const params = new URLSearchParams();
-    if (filters.channel_id)   params.set('channel_id', filters.channel_id);
-    if (filters.channel_type) params.set('channel_type', filters.channel_type);
-    if (filters.agent_id)     params.set('agent_id', filters.agent_id);
-    if (filters.status)       params.set('status', filters.status);
-    if (filters.success !== undefined) params.set('success', String(filters.success));
-    if (filters.date_from)    params.set('date_from', filters.date_from);
-    if (filters.date_to)      params.set('date_to', filters.date_to);
-    if (filters.search)       params.set('search', filters.search);
+    if (filters.channel_id)            params.set('channel_id',   filters.channel_id);
+    if (filters.channel_type)          params.set('channel_type', filters.channel_type);
+    if (filters.agent_id)              params.set('agent_id',     filters.agent_id);
+    if (filters.status)                params.set('status',       filters.status);
+    if (filters.success !== undefined) params.set('success',      String(filters.success));
+    if (filters.date_from)             params.set('date_from',    filters.date_from);
+    if (filters.date_to)               params.set('date_to',      filters.date_to);
+    if (filters.search)                params.set('search',       filters.search);
     params.set('limit',  String(filters.limit  ?? 50));
     params.set('offset', String(filters.offset ?? 0));
 
     const { data } = await api.get<MessageLogResponse>(
-      `/api/v1/channels/messages/log?${params.toString()}`
+      `/api/v1/channels/messages/log?${params.toString()}`,
+      { signal },
     );
     return data;
   },
 
   /**
    * Replay a single failed message.
+   *
+   * FIX: aligned to /api/v1 prefix to match the axios base-URL configuration
+   * used by getLog (was /channels/... without the prefix, causing 404s on some
+   * deployments where the base URL does not include /api/v1).
    */
   replayMessage: async (messageId: string): Promise<ReplayResponse> => {
     const { data } = await api.post<ReplayResponse>(
-      `/channels/messages/${messageId}/replay`
+      `/api/v1/channels/messages/${messageId}/replay`,
     );
     return data;
   },
 
   /**
    * Bulk replay all failed messages, optionally for a single channel.
+   *
+   * FIX: aligned to /api/v1 prefix (same reason as replayMessage above).
    */
   replayFailed: async (channelId?: string, limit = 50): Promise<BulkReplayResponse> => {
     const { data } = await api.post<BulkReplayResponse>(
-      '/channels/messages/replay-failed',
-      { channel_id: channelId ?? null, limit }
+      '/api/v1/channels/messages/replay-failed',
+      { channel_id: channelId ?? null, limit },
     );
     return data;
   },

@@ -9,47 +9,47 @@
  *   - Pagination
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { memo, useMemo } from 'react';
 import {
   Search, Filter, RefreshCw, RotateCcw, ChevronLeft, ChevronRight,
   CheckCircle2, XCircle, Clock, Loader2, AlertTriangle, Inbox,
   MessageSquare, Calendar, User, Hash, LayoutGrid,
-  ChevronDown, X, Play, AlertCircle, Zap
+  ChevronDown, X, Play, AlertCircle, Zap,
 } from 'lucide-react';
-import { api } from '@/services/api';
-import { channelMessagesApi, ChannelMessage, MessageLogFilters } from '@/services/channelMessages';
-import toast from 'react-hot-toast';
+import { useMessageLog, DEFAULT_FILTERS } from '@/hooks/useMessageLog';
+import { getRelativeTime } from '@/utils/time';
+import { ChannelMessage, MessageLogFilters } from '@/services/channelMessages';
 
 // ─── Channel icons (emoji fallback) ──────────────────────────────────────────
 
 const CHANNEL_ICONS: Record<string, string> = {
-  whatsapp: '💬',
-  slack: '🔷',
-  telegram: '✈️',
-  email: '✉️',
-  discord: '🎮',
-  signal: '🔒',
+  whatsapp:    '💬',
+  slack:       '🔷',
+  telegram:    '✈️',
+  email:       '✉️',
+  discord:     '🎮',
+  signal:      '🔒',
   google_chat: '💠',
-  teams: '🟦',
-  zalo: '🟩',
-  matrix: '🔳',
-  imessage: '🍎',
-  custom: '🔗',
+  teams:       '🟦',
+  zalo:        '🟩',
+  matrix:      '🔳',
+  imessage:    '🍎',
+  custom:      '🔗',
 };
 
 const STATUS_CONFIG = {
-  received:   { label: 'Received',   color: 'text-blue-600 dark:text-blue-400',   bg: 'bg-blue-100 dark:bg-blue-500/10',   icon: Clock },
-  processing: { label: 'Processing', color: 'text-yellow-600 dark:text-yellow-400', bg: 'bg-yellow-100 dark:bg-yellow-500/10', icon: Loader2 },
-  responded:  { label: 'Responded',  color: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-100 dark:bg-emerald-500/10', icon: CheckCircle2 },
-  failed:     { label: 'Failed',     color: 'text-red-600 dark:text-red-400',    bg: 'bg-red-100 dark:bg-red-500/10',    icon: XCircle },
+  received:   { label: 'Received',   color: 'text-blue-600 dark:text-blue-400',      bg: 'bg-blue-100 dark:bg-blue-500/10',      icon: Clock       },
+  processing: { label: 'Processing', color: 'text-yellow-600 dark:text-yellow-400',  bg: 'bg-yellow-100 dark:bg-yellow-500/10',  icon: Loader2     },
+  responded:  { label: 'Responded',  color: 'text-emerald-600 dark:text-emerald-400',bg: 'bg-emerald-100 dark:bg-emerald-500/10',icon: CheckCircle2 },
+  failed:     { label: 'Failed',     color: 'text-red-600 dark:text-red-400',        bg: 'bg-red-100 dark:bg-red-500/10',        icon: XCircle     },
 };
 
 const CHANNEL_TYPE_OPTIONS = [
   'whatsapp','slack','telegram','email','discord',
-  'signal','google_chat','teams','zalo','matrix','imessage','custom'
+  'signal','google_chat','teams','zalo','matrix','imessage','custom',
 ];
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+// ─── Atoms ────────────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS_CONFIG[status as keyof typeof STATUS_CONFIG] ?? STATUS_CONFIG.received;
@@ -65,11 +65,27 @@ function StatusBadge({ status }: { status: string }) {
 function ChannelBadge({ type, name }: { type: string; name: string }) {
   return (
     <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-700/50 text-slate-700 dark:text-slate-300 text-xs font-medium border border-slate-200 dark:border-slate-600/40">
-      <span className="text-sm leading-none">{CHANNEL_ICONS[type] ?? '📡'}</span>
+      {/* aria-hidden prevents screen readers from announcing the emoji glyph name */}
+      <span aria-hidden="true" className="text-sm leading-none">
+        {CHANNEL_ICONS[type] ?? '📡'}
+      </span>
       {name}
     </span>
   );
 }
+
+function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/25 text-blue-700 dark:text-blue-300 text-xs">
+      {label}
+      <button onClick={onRemove} className="hover:text-slate-900 dark:hover:text-white transition-colors">
+        <X className="w-3 h-3" />
+      </button>
+    </span>
+  );
+}
+
+// ─── Filter bar ───────────────────────────────────────────────────────────────
 
 interface FilterBarProps {
   filters: MessageLogFilters;
@@ -86,9 +102,15 @@ function FilterBar({ filters, channels, onChange, onReset }: FilterBarProps) {
     filters.date_from, filters.date_to,
   ].filter(Boolean).length;
 
+  const panelId = 'message-log-filter-panel';
+
   return (
     <div className="relative">
+      {/* Toggle button — accessible: announces expand state and controls target */}
       <button
+        aria-expanded={open}
+        aria-controls={panelId}
+        aria-label="Toggle advanced filters"
         onClick={() => setOpen(o => !o)}
         className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-sm font-medium transition-colors
           ${activeCount > 0
@@ -107,18 +129,26 @@ function FilterBar({ filters, channels, onChange, onReset }: FilterBarProps) {
       </button>
 
       {open && (
-        <div className="absolute top-full right-0 mt-2 w-96 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600/50 rounded-xl shadow-xl shadow-slate-200/50 dark:shadow-black/50 z-30 p-4 space-y-3">
+        // role="region" + aria-label lets assistive technology navigate to this panel
+        <div
+          id={panelId}
+          role="region"
+          aria-label="Advanced filters"
+          className="absolute top-full right-0 mt-2 w-96 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600/50 rounded-xl shadow-xl shadow-slate-200/50 dark:shadow-black/50 z-30 p-4 space-y-3"
+        >
           {/* Channel */}
           <div>
             <label className="text-xs text-slate-500 dark:text-slate-400 font-medium mb-1 block">Channel</label>
-            <select 
+            <select
               value={filters.channel_id ?? ''}
               onChange={e => onChange({ channel_id: e.target.value || undefined })}
               className="w-full bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600/50 rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
               <option value="">All channels</option>
               {channels.map(c => (
-                <option key={c.id} value={c.id}>{CHANNEL_ICONS[c.type] ?? '📡'} {c.name}</option>
+                <option key={c.id} value={c.id}>
+                  {CHANNEL_ICONS[c.type] ?? '📡'} {c.name}
+                </option>
               ))}
             </select>
           </div>
@@ -158,14 +188,14 @@ function FilterBar({ filters, channels, onChange, onReset }: FilterBarProps) {
             </div>
           </div>
 
-          {/* Success / Failure quick filters */}
+          {/* Outcome quick filters */}
           <div>
             <label className="text-xs text-slate-500 dark:text-slate-400 font-medium mb-1 block">Outcome</label>
             <div className="flex gap-1.5">
               {[
-                { label: 'Any', value: undefined },
-                { label: '✅ Success', value: true },
-                { label: '❌ Failures', value: false },
+                { label: 'Any',         value: undefined },
+                { label: '✅ Success',  value: true      },
+                { label: '❌ Failures', value: false     },
               ].map(opt => (
                 <button
                   key={String(opt.value)}
@@ -204,7 +234,7 @@ function FilterBar({ filters, channels, onChange, onReset }: FilterBarProps) {
             </div>
           </div>
 
-          {/* Agent */}
+          {/* Agent ID */}
           <div>
             <label className="text-xs text-slate-500 dark:text-slate-400 font-medium mb-1 block">Agent ID</label>
             <input
@@ -230,7 +260,7 @@ function FilterBar({ filters, channels, onChange, onReset }: FilterBarProps) {
   );
 }
 
-// ─── Message Row ──────────────────────────────────────────────────────────────
+// ─── Message row ──────────────────────────────────────────────────────────────
 
 interface MessageRowProps {
   msg: ChannelMessage;
@@ -238,19 +268,21 @@ interface MessageRowProps {
   replayingId: string | null;
 }
 
-function MessageRow({ msg, onReplay, replayingId }: MessageRowProps) {
+/**
+ * React.memo: skips re-render when the parent re-renders for unrelated reasons
+ * (e.g. loading spinner toggle, other messages updating).
+ * Only re-renders when msg, replayingId, or onReplay reference changes.
+ */
+const MessageRow = memo(function MessageRow({ msg, onReplay, replayingId }: MessageRowProps) {
   const [expanded, setExpanded] = useState(false);
   const isReplaying = replayingId === msg.id;
-  const canReplay = msg.status === 'failed' || msg.error_count > 0;
+  const canReplay   = msg.status === 'failed' || msg.error_count > 0;
 
   const ts = new Date(msg.created_at);
-  const relativeTime = (() => {
-    const diff = (Date.now() - ts.getTime()) / 1000;
-    if (diff < 60) return `${Math.floor(diff)}s ago`;
-    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-    return ts.toLocaleDateString();
-  })();
+
+  // useMemo: avoids recomputing the relative time string on every render.
+  // getRelativeTime is a pure function so the result is stable for the same input.
+  const relativeTime = useMemo(() => getRelativeTime(msg.created_at), [msg.created_at]);
 
   return (
     <div
@@ -265,8 +297,8 @@ function MessageRow({ msg, onReplay, replayingId }: MessageRowProps) {
         className="flex items-center gap-3 px-4 py-3 cursor-pointer"
         onClick={() => setExpanded(e => !e)}
       >
-        {/* Channel icon */}
-        <span className="text-xl flex-shrink-0 w-7 text-center">
+        {/* Channel icon — aria-hidden so screen readers announce channel name, not emoji */}
+        <span aria-hidden="true" className="text-xl flex-shrink-0 w-7 text-center">
           {CHANNEL_ICONS[msg.channel_type] ?? '📡'}
         </span>
 
@@ -296,7 +328,9 @@ function MessageRow({ msg, onReplay, replayingId }: MessageRowProps) {
         {/* Right side */}
         <div className="flex items-center gap-3 flex-shrink-0">
           <StatusBadge status={msg.status} />
-          <span className="text-xs text-slate-500 dark:text-slate-500 w-16 text-right">{relativeTime}</span>
+          <span className="text-xs text-slate-500 dark:text-slate-500 w-16 text-right">
+            {relativeTime}
+          </span>
 
           {canReplay && (
             <button
@@ -321,12 +355,12 @@ function MessageRow({ msg, onReplay, replayingId }: MessageRowProps) {
         <div className="border-t border-slate-200 dark:border-slate-700/50 px-4 py-3 bg-slate-50 dark:bg-slate-900/30 space-y-3">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
-              { icon: Hash, label: 'Message ID', value: msg.id },
-              { icon: MessageSquare, label: 'Type', value: msg.message_type },
-              { icon: User, label: 'Sender ID', value: msg.sender_id },
-              { icon: Calendar, label: 'Received', value: ts.toLocaleString() },
-              ...(msg.assigned_agent_id ? [{ icon: Zap, label: 'Agent', value: msg.assigned_agent_id }] : []),
-              ...(msg.task_id ? [{ icon: LayoutGrid, label: 'Task', value: msg.task_id }] : []),
+              { icon: Hash,        label: 'Message ID', value: msg.id           },
+              { icon: MessageSquare, label: 'Type',     value: msg.message_type },
+              { icon: User,        label: 'Sender ID',  value: msg.sender_id    },
+              { icon: Calendar,    label: 'Received',   value: ts.toLocaleString() },
+              ...(msg.assigned_agent_id ? [{ icon: Zap,        label: 'Agent', value: msg.assigned_agent_id }] : []),
+              ...(msg.task_id           ? [{ icon: LayoutGrid, label: 'Task',  value: msg.task_id           }] : []),
             ].map(({ icon: Icon, label, value }) => (
               <div key={label}>
                 <span className="text-xs text-slate-500 dark:text-slate-500 flex items-center gap-1 mb-0.5">
@@ -359,109 +393,40 @@ function MessageRow({ msg, onReplay, replayingId }: MessageRowProps) {
       )}
     </div>
   );
-}
+});
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+// ─── Main page ────────────────────────────────────────────────────────────────
 
-const DEFAULT_FILTERS: MessageLogFilters = {
-  limit: 50,
-  offset: 0,
-};
+// useState is still needed locally by FilterBar; import it here so the file
+// compiles without importing from React at the top (memo + useMemo already pull it in).
+import { useState } from 'react';
 
 export function MessageLogPage() {
-  const [messages, setMessages] = useState<ChannelMessage[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState<MessageLogFilters>(DEFAULT_FILTERS);
-  const [search, setSearch] = useState('');
-  const [channels, setChannels] = useState<Array<{ id: string; name: string; type: string }>>([]);
-  const [replayingId, setReplayingId] = useState<string | null>(null);
-  const [bulkReplaying, setBulkReplaying] = useState(false);
-  const searchDebounce = useRef<ReturnType<typeof setTimeout>>();
-
-  // Load channels for filter dropdown
-  useEffect(() => {
-    api.get('/channels/').then(r => {
-      setChannels(
-        (r.data.channels ?? []).map((c: any) => ({
-          id: c.id,
-          name: c.name,
-          type: c.type,
-        }))
-      );
-    }).catch(() => {});
-  }, []);
-
-  const fetchMessages = useCallback(async (f: MessageLogFilters) => {
-    setLoading(true);
-    try {
-      const data = await channelMessagesApi.getLog(f);
-      setMessages(data.messages);
-      setTotal(data.total);
-    } catch {
-      toast.error('Failed to load message log');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchMessages(filters);
-  }, [filters, fetchMessages]);
-
-  const handleFilterChange = (patch: Partial<MessageLogFilters>) => {
-    setFilters(prev => ({ ...prev, ...patch, offset: 0 }));
-  };
-
-  const handleSearchChange = (value: string) => {
-    setSearch(value);
-    clearTimeout(searchDebounce.current);
-    searchDebounce.current = setTimeout(() => {
-      setFilters(prev => ({ ...prev, search: value || undefined, offset: 0 }));
-    }, 400);
-  };
-
-  const handleReset = () => {
-    setSearch('');
-    setFilters(DEFAULT_FILTERS);
-  };
-
-  const handleReplay = async (messageId: string) => {
-    setReplayingId(messageId);
-    try {
-      await channelMessagesApi.replayMessage(messageId);
-      toast.success('Message re-queued for processing');
-      fetchMessages(filters);
-    } catch {
-      toast.error('Replay failed');
-    } finally {
-      setReplayingId(null);
-    }
-  };
-
-  const handleBulkReplay = async () => {
-    setBulkReplaying(true);
-    try {
-      const res = await channelMessagesApi.replayFailed(filters.channel_id);
-      toast.success(`Replaying ${res.queued} failed message(s)`);
-      setTimeout(() => fetchMessages(filters), 1500);
-    } catch {
-      toast.error('Bulk replay failed');
-    } finally {
-      setBulkReplaying(false);
-    }
-  };
-
-  const failedCount = messages.filter(m => m.status === 'failed' || m.error_count > 0).length;
-  const currentPage = Math.floor((filters.offset ?? 0) / (filters.limit ?? 50)) + 1;
-  const totalPages = Math.ceil(total / (filters.limit ?? 50));
-
-  const hasActiveFilters = Object.keys(filters).some(
-    k => k !== 'limit' && k !== 'offset' && filters[k as keyof MessageLogFilters] !== undefined
-  ) || !!search;
+  const {
+    messages,
+    total,
+    failedTotal,
+    loading,
+    filters,
+    search,
+    channels,
+    replayingId,
+    bulkReplaying,
+    currentPage,
+    totalPages,
+    hasActiveFilters,
+    fetchMessages,
+    handleFilterChange,
+    handleSearchChange,
+    handleReset,
+    handleReplay,
+    handleBulkReplay,
+    setFilters,
+  } = useMessageLog();
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-white dark:bg-[#0f1117] text-slate-900 dark:text-slate-100 transition-colors duration-200">
+
       {/* Header */}
       <div className="flex-shrink-0 px-6 py-4 border-b border-slate-200 dark:border-slate-700/50 bg-white/80 dark:bg-[#0f1117]/80 backdrop-blur-sm transition-colors duration-200">
         <div className="flex items-center justify-between flex-wrap gap-3">
@@ -478,7 +443,8 @@ export function MessageLogPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            {failedCount > 0 && (
+            {/* failedTotal: counts across the full dataset, not just the visible page */}
+            {failedTotal > 0 && (
               <button
                 onClick={handleBulkReplay}
                 disabled={bulkReplaying}
@@ -488,12 +454,13 @@ export function MessageLogPage() {
                   ? <Loader2 className="w-4 h-4 animate-spin" />
                   : <RotateCcw className="w-4 h-4" />
                 }
-                Replay {failedCount} Failed
+                Replay {failedTotal} Failed
               </button>
             )}
             <button
               onClick={() => fetchMessages(filters)}
               className="p-2 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600/50 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 transition-colors"
+              aria-label="Refresh message log"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
@@ -541,25 +508,46 @@ export function MessageLogPage() {
               />
             )}
             {filters.channel_type && (
-              <FilterChip label={`Type: ${filters.channel_type}`} onRemove={() => handleFilterChange({ channel_type: undefined })} />
+              <FilterChip
+                label={`Type: ${filters.channel_type}`}
+                onRemove={() => handleFilterChange({ channel_type: undefined })}
+              />
             )}
             {filters.status && (
-              <FilterChip label={`Status: ${filters.status}`} onRemove={() => handleFilterChange({ status: undefined })} />
+              <FilterChip
+                label={`Status: ${filters.status}`}
+                onRemove={() => handleFilterChange({ status: undefined })}
+              />
             )}
             {filters.success !== undefined && (
-              <FilterChip label={filters.success ? 'Successes only' : 'Failures only'} onRemove={() => handleFilterChange({ success: undefined })} />
+              <FilterChip
+                label={filters.success ? 'Successes only' : 'Failures only'}
+                onRemove={() => handleFilterChange({ success: undefined })}
+              />
             )}
             {filters.date_from && (
-              <FilterChip label={`From: ${new Date(filters.date_from).toLocaleDateString()}`} onRemove={() => handleFilterChange({ date_from: undefined })} />
+              <FilterChip
+                label={`From: ${new Date(filters.date_from).toLocaleDateString()}`}
+                onRemove={() => handleFilterChange({ date_from: undefined })}
+              />
             )}
             {filters.date_to && (
-              <FilterChip label={`To: ${new Date(filters.date_to).toLocaleDateString()}`} onRemove={() => handleFilterChange({ date_to: undefined })} />
+              <FilterChip
+                label={`To: ${new Date(filters.date_to).toLocaleDateString()}`}
+                onRemove={() => handleFilterChange({ date_to: undefined })}
+              />
             )}
             {filters.agent_id && (
-              <FilterChip label={`Agent: ${filters.agent_id}`} onRemove={() => handleFilterChange({ agent_id: undefined })} />
+              <FilterChip
+                label={`Agent: ${filters.agent_id}`}
+                onRemove={() => handleFilterChange({ agent_id: undefined })}
+              />
             )}
             {search && (
-              <FilterChip label={`Search: "${search}"`} onRemove={() => handleSearchChange('')} />
+              <FilterChip
+                label={`Search: "${search}"`}
+                onRemove={() => handleSearchChange('')}
+              />
             )}
           </div>
         )}
@@ -577,7 +565,9 @@ export function MessageLogPage() {
             <Inbox className="w-10 h-10 mb-3 opacity-30" />
             <p className="text-sm font-medium text-slate-500 dark:text-slate-400">No messages found</p>
             {hasActiveFilters && (
-              <p className="text-xs mt-1 text-slate-400 dark:text-slate-600">Try adjusting or clearing your filters</p>
+              <p className="text-xs mt-1 text-slate-400 dark:text-slate-600">
+                Try adjusting or clearing your filters
+              </p>
             )}
           </div>
         ) : (
@@ -603,6 +593,7 @@ export function MessageLogPage() {
               disabled={(filters.offset ?? 0) === 0}
               onClick={() => setFilters(p => ({ ...p, offset: Math.max(0, (p.offset ?? 0) - (p.limit ?? 50)) }))}
               className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600/50 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              aria-label="Previous page"
             >
               <ChevronLeft className="w-4 h-4" />
             </button>
@@ -613,6 +604,7 @@ export function MessageLogPage() {
               disabled={currentPage >= totalPages}
               onClick={() => setFilters(p => ({ ...p, offset: (p.offset ?? 0) + (p.limit ?? 50) }))}
               className="p-1.5 rounded-lg bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600/50 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              aria-label="Next page"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -620,18 +612,5 @@ export function MessageLogPage() {
         </div>
       )}
     </div>
-  );
-}
-
-// ─── Filter chip ──────────────────────────────────────────────────────────────
-
-function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
-  return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/25 text-blue-700 dark:text-blue-300 text-xs">
-      {label}
-      <button onClick={onRemove} className="hover:text-slate-900 dark:hover:text-white transition-colors">
-        <X className="w-3 h-3" />
-      </button>
-    </span>
   );
 }

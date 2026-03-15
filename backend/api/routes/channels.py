@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status, Query, B
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, subqueryload  # FIX: added subqueryload
 
 from backend.models.database import get_db
 from backend.models.entities.channels import ExternalChannel, ExternalMessage, ChannelType, ChannelStatus
@@ -251,12 +251,6 @@ def get_all_channels_metrics(
     """Get metrics for all channels (for dashboard widget)."""
     channels = db.query(ExternalChannel).all()
     
-    # Fix #8 (corrected): Ensure all new ChannelMetrics rows are flushed — and
-    # therefore have DB-assigned IDs — BEFORE metrics.to_dict() is called.
-    # Previous version called to_dict() inside the loop before the flush, which
-    # meant newly-created objects serialised with id=None.
-    #
-    # Pass 1: create any missing ChannelMetrics rows and collect them.
     new_metrics_objs: list = []
     for channel in channels:
         metrics = db.query(ChannelMetrics).filter_by(channel_id=channel.id).first()
@@ -265,13 +259,10 @@ def get_all_channels_metrics(
             db.add(metrics)
             new_metrics_objs.append(metrics)
 
-    # Flush once so every new object gets its DB-generated ID, then commit
-    # atomically.  Existing rows are unaffected by the flush.
     if new_metrics_objs:
-        db.flush()   # assigns IDs within the current transaction
-        db.commit()  # single commit for all new rows
+        db.flush()
+        db.commit()
 
-    # Pass 2: now safe to call to_dict() — all IDs are populated.
     results = []
     for channel in channels:
         metrics = db.query(ChannelMetrics).filter_by(channel_id=channel.id).first()
@@ -325,10 +316,8 @@ def update_channel(
         channel.name = request.name
     
     if request.config is not None:
-        # Preserve system-generated fields
         merged = dict(channel.config or {})
         merged.update(request.config)
-        # Don't overwrite webhook_url_display
         if 'webhook_url_display' in channel.config:
             merged['webhook_url_display'] = channel.config['webhook_url_display']
         channel.config = merged
@@ -345,7 +334,6 @@ def update_channel(
     if request.status is not None:
         try:
             new_status = ChannelStatus(request.status)
-            # If resetting from error, also reset circuit breaker
             if channel.status == ChannelStatus.ERROR and new_status == ChannelStatus.ACTIVE:
                 circuit_breaker._metrics[channel_id].circuit_state = CircuitState.CLOSED
                 circuit_breaker._metrics[channel_id].consecutive_failures = 0
@@ -368,10 +356,8 @@ def delete_channel(
     """Permanently remove a channel and cleanup resources."""
     channel = _get_channel_or_404(channel_id, db)
     
-    # Cleanup resources
     background_tasks.add_task(ChannelManager.shutdown_channel, channel_id, db)
     
-    # Delete messages and channel
     db.query(ExternalMessage).filter_by(channel_id=channel_id).delete()
     db.delete(channel)
     db.commit()
@@ -437,7 +423,6 @@ async def test_channel(
             test_details["provider"] = provider
 
             if provider == "web_bridge":
-                # Test Web Bridge connection via unified adapter
                 adapter = UnifiedWhatsAppAdapter(channel)
                 status = await adapter.get_status()
                 success = status.get("connected", False)
@@ -453,7 +438,6 @@ async def test_channel(
                     test_details["bridge_url"] = cfg.get("bridge_url")
                     test_details["qr_available"] = status.get("qr_code") is not None
             else:
-                # Test Cloud API — validate phone number via Meta Graph API
                 import httpx
                 access_token = cfg.get("access_token")
                 phone_number_id = cfg.get("phone_number_id")
@@ -531,9 +515,7 @@ async def test_channel(
                 test_details['device_id'] = data.get('device_id')
 
         elif ct == ChannelType.TEAMS:
-            # Check if webhook or bot credentials provided
             if cfg.get('webhook_url'):
-                # Test webhook with simple request
                 import httpx
                 async with httpx.AsyncClient() as client:
                     r = await client.post(
@@ -542,7 +524,6 @@ async def test_channel(
                     )
                 success = r.status_code == 200
             elif cfg.get('client_id') and cfg.get('client_secret'):
-                # Test bot token acquisition
                 token = await TeamsAdapter._get_bot_token(cfg)
                 success = bool(token)
                 test_details['auth_method'] = 'bot_framework'
@@ -566,14 +547,12 @@ async def test_channel(
                 raise ValueError("Missing webhook_url or service_account_json")
 
         elif ct == ChannelType.SIGNAL:
-            # Check if signal-cli daemon is reachable
-            import httpx  # FIXED: Added missing import
+            import httpx
             try:
-                async with httpx.AsyncClient() as client:  # FIXED: Added async with
+                async with httpx.AsyncClient() as client:
                     r = await client.get(SignalAdapter._rpc_url(cfg))
-                    success = r.status_code in (200, 405)  # 405 is expected for GET
+                    success = r.status_code in (200, 405)
             except:
-                # Try subprocess as fallback
                 success = bool(cfg.get('number'))
 
         elif ct == ChannelType.ZALO:
@@ -589,14 +568,13 @@ async def test_channel(
                 test_details['oa_name'] = data.get('data', {}).get('name')
 
         elif ct == ChannelType.IMESSAGE:
-            success = iMessageAdapter.is_available()  # This is correct (not async)
+            success = iMessageAdapter.is_available()
             if not success:
                 error_msg = "iMessage not available (requires macOS + Messages.app)"
             else:
                 test_details['backend'] = cfg.get('backend', 'applescript')
 
         elif ct == ChannelType.EMAIL:
-            # Test SMTP
             import asyncio
             import aiosmtplib
             try:
@@ -614,7 +592,6 @@ async def test_channel(
                 error_msg = f"SMTP: {str(smtp_err)}"
                 success = False
             
-            # Test IMAP if configured
             if cfg.get('imap_host') or cfg.get('enable_imap'):
                 imap_ok = await EmailAdapter.verify_imap(cfg)
                 test_details['imap'] = 'connected' if imap_ok else 'failed'
@@ -626,7 +603,6 @@ async def test_channel(
         error_msg = str(e)
         success = False
 
-    # Update channel status
     def _update_status():
         old_stat = channel.status
         channel.status = ChannelStatus.ACTIVE if success else ChannelStatus.ERROR
@@ -726,7 +702,6 @@ async def get_channel_qr(
     provider = (channel.config or {}).get("provider", "cloud_api")
 
     if provider != "web_bridge":
-        # Cloud API channels do not use QR codes
         return {
             "status": channel.status.value,
             "provider": "cloud_api",
@@ -735,7 +710,6 @@ async def get_channel_qr(
             "message": "QR codes are only used for the web_bridge provider.",
         }
 
-    # Delegate to the unified adapter for live bridge state
     adapter = UnifiedWhatsAppAdapter(channel)
     bridge_status = await adapter.get_status()
 
@@ -800,12 +774,6 @@ async def switch_whatsapp_provider(
 ):
     """
     Switch a WhatsApp channel between ``cloud_api`` and ``web_bridge`` providers.
-
-    .. warning::
-        This tears down the current provider session before initialising the new one.
-        Any in-flight messages may be lost.
-
-    Query param ``new_provider``: ``"cloud_api"`` or ``"web_bridge"``.
     """
     channel = await run_in_threadpool(_get_channel_or_404, channel_id, db)
 
@@ -827,14 +795,12 @@ async def switch_whatsapp_provider(
             "provider": new_provider,
         }
 
-    # Gracefully shut down the existing adapter
     try:
         old_adapter = UnifiedWhatsAppAdapter(channel)
         await old_adapter.shutdown()
     except Exception:
-        pass  # Best-effort; continue regardless
+        pass
 
-    # Persist the new provider choice and reset status
     def _update_channel():
         merged_config = dict(channel.config or {})
         merged_config["provider"] = new_provider
@@ -844,7 +810,6 @@ async def switch_whatsapp_provider(
         db.commit()
     await run_in_threadpool(_update_channel)
 
-    # Initialise the new adapter (starts bridge handshake if web_bridge)
     new_adapter = UnifiedWhatsAppAdapter(channel)
     await new_adapter.initialize()
 
@@ -873,7 +838,6 @@ def get_channel_health(
     
     health = ChannelManager.get_channel_health(channel_id)
     
-    # Add message statistics
     message_stats = db.query(ExternalMessage).filter_by(channel_id=channel_id)
     
     return {
@@ -908,12 +872,10 @@ def reset_channel(
     """Reset circuit breaker and error state for a channel."""
     channel = _get_channel_or_404(channel_id, db)
     
-    # Reset circuit breaker
     circuit_breaker._metrics[channel_id].circuit_state = CircuitState.CLOSED
     circuit_breaker._metrics[channel_id].consecutive_failures = 0
     circuit_breaker._metrics[channel_id].half_open_calls = 0
     
-    # Reset channel status
     channel.status = ChannelStatus.PENDING
     channel.error_message = None
     db.commit()
@@ -926,7 +888,7 @@ def reset_channel(
     }
 
 # ═══════════════════════════════════════════════════════════
-# METRICS ENDPOINTS (Phase 4 + Phase 7)
+# METRICS ENDPOINTS
 # ═══════════════════════════════════════════════════════════
 
 @router.get("/channels/{channel_id}/metrics")
@@ -938,7 +900,6 @@ def get_channel_metrics(
     """Get detailed health metrics for a specific channel."""
     channel = _get_channel_or_404(channel_id, db)
     
-    # Get or create metrics
     metrics = db.query(ChannelMetrics).filter_by(channel_id=channel_id).first()
     if not metrics:
         metrics = ChannelMetrics(channel_id=channel_id)
@@ -992,7 +953,7 @@ def get_message_log(
     Cross-channel message log with rich filtering.
     Returns messages across all channels with audit context.
     """
-    from sqlalchemy import or_, and_
+    from sqlalchemy import or_
 
     query = db.query(ExternalMessage)
 
@@ -1009,7 +970,7 @@ def get_message_log(
         except ValueError:
             pass
 
-    # Agent filter (messages assigned to a task handled by agent)
+    # Agent filter
     if agent_id:
         query = query.filter(ExternalMessage.assigned_agent_id == agent_id)
 
@@ -1056,39 +1017,33 @@ def get_message_log(
 
     total = query.count()
 
+    # FIX: count failed messages using the already-filtered query rather than
+    # a secondary full-table scan of ExternalChannel. filter() returns a new
+    # query object without mutating the original, so `query` is still usable
+    # for the pagination fetch below.
+    failed_total = query.filter(ExternalMessage.status == "failed").count()
+
+    # FIX: use subqueryload to resolve channel metadata in a single extra
+    # SQL query (one IN-clause for all distinct channel_ids) instead of the
+    # previous Python-level loop that issued up to N individual SELECTs.
+    # subqueryload is safe here even when channel_type already added an
+    # explicit JOIN, because it runs as a separate query, not a join.
     messages = (
         query
+        .options(subqueryload(ExternalMessage.channel))
         .order_by(ExternalMessage.created_at.desc())
         .offset(offset)
         .limit(limit)
         .all()
     )
 
-    # Enrich with channel metadata
-    channel_cache: dict = {}
     result = []
     for msg in messages:
-        if msg.channel_id not in channel_cache:
-            ch = db.query(ExternalChannel).filter_by(id=msg.channel_id).first()
-            channel_cache[msg.channel_id] = ch
-
-        ch = channel_cache.get(msg.channel_id)
+        ch = msg.channel  # populated by subqueryload — no extra DB hit
         msg_dict = msg.to_dict()
         msg_dict["channel_name"] = ch.name if ch else "Unknown"
         msg_dict["channel_type"] = ch.channel_type.value if ch else "unknown"
         result.append(msg_dict)
-
-    # Aggregate stats for the current filter
-    all_for_stats = query  # re-use filtered query before pagination
-    failed_count = (
-        db.query(ExternalMessage)
-        .filter(
-            ExternalMessage.channel_id.in_([c.id for c in db.query(ExternalChannel).all()])
-            if not channel_id else ExternalMessage.channel_id == channel_id
-        )
-        .filter(ExternalMessage.status == "failed")
-        .count()
-    )
 
     return {
         "messages": result,
@@ -1098,6 +1053,9 @@ def get_message_log(
         "stats": {
             "total_in_filter": total,
             "has_more": (offset + limit) < total,
+            # FIX: exposed so the frontend can show an accurate failed-message
+            # count across the full dataset rather than just the current page.
+            "failed_total": failed_total,
         }
     }
 

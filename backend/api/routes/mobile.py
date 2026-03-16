@@ -9,16 +9,24 @@ Endpoints:
 - Offline sync (constitution cache, task queue)
 - Active votes for push alerts
 """
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel
+import logging
+from datetime import datetime, timezone
+from typing import Dict, Any, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from backend.models.database import get_db
-from backend.services.push_notification_service import PushNotificationService
 from backend.api.routes.rbac import get_current_user_from_token
+from backend.models.database import get_db
+from backend.models.entities.agents import Agent
+from backend.models.entities.constitution import Constitution
+from backend.models.entities.task import Task
 from backend.models.entities.user import User
+from backend.models.entities.voting import AmendmentVoting
+from backend.services.push_notification_service import PushNotificationService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/mobile", tags=["Mobile API"])
 
@@ -26,7 +34,9 @@ router = APIRouter(prefix="/mobile", tags=["Mobile API"])
 # ── Schemas ────────────────────────────────────────────────────────────────────
 
 class DeviceRegistrationRequest(BaseModel):
-    platform: str  # "ios" or "android"
+    # Literal enforces the valid values at the Pydantic validation layer,
+    # producing a clean 422 before the request ever reaches the service.
+    platform: Literal["ios", "android"]
     token: str
 
 class DeviceRegistrationResponse(BaseModel):
@@ -59,6 +69,7 @@ def register_device(
     )
     return {"id": device.id, "status": "active"}
 
+
 @router.delete("/register-device/{token}")
 def unregister_device(
     token: str,
@@ -68,6 +79,39 @@ def unregister_device(
     """Unregister a push notification token."""
     PushNotificationService.unregister_device(db, current_user, token)
     return {"success": True}
+
+
+# ── Device List ───────────────────────────────────────────────────────────────
+
+@router.get("/devices")
+def get_devices(
+    current_user: User = Depends(get_current_user_from_token),
+    db: Session = Depends(get_db)
+):
+    """
+    Return all active registered device tokens for the current user.
+    Used by the Mobile page Devices tab to populate the device list.
+    """
+    from backend.models.entities.mobile import DeviceToken
+
+    devices = (
+        db.query(DeviceToken)
+        .filter(
+            DeviceToken.user_id == current_user.id,
+            DeviceToken.is_active == True,  # noqa: E712
+        )
+        .order_by(DeviceToken.registered_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": d.id,
+            "platform": d.platform,
+            "token": d.token,
+            "registered_at": d.registered_at.isoformat() if d.registered_at else None,
+        }
+        for d in devices
+    ]
 
 
 # ── Notification Preferences ──────────────────────────────────────────────────
@@ -87,6 +131,7 @@ def get_notification_preferences(
         "quiet_hours_start": pref.quiet_hours_start,
         "quiet_hours_end": pref.quiet_hours_end,
     }
+
 
 @router.put("/notifications/preferences")
 def update_notification_preferences(
@@ -126,10 +171,6 @@ def get_mobile_dashboard(
     Condensed dashboard summary optimised for mobile.
     Returns raw counts and high-level statuses to minimise payload size.
     """
-    from backend.models.entities.agents import Agent
-    from backend.models.entities.task import Task
-    from backend.models.entities.voting import AmendmentVoting
-
     active_agents = db.query(Agent).filter(Agent.status == 'active').count()
     pending_tasks = db.query(Task).filter(Task.status == 'pending').count()
     failed_tasks = db.query(Task).filter(Task.status == 'failed').count()
@@ -160,8 +201,6 @@ def get_mobile_tasks(
     db: Session = Depends(get_db)
 ):
     """Paginated task list returning only essential fields for mobile list views."""
-    from backend.models.entities.task import Task
-
     query = db.query(Task)
 
     # User isolation: only return tasks created by this user
@@ -195,8 +234,6 @@ def get_mobile_agents(
     db: Session = Depends(get_db)
 ):
     """Condensed agent list for mobile views (type, status, name only)."""
-    from backend.models.entities.agents import Agent
-
     agents = db.query(Agent).filter(Agent.status == 'active').all()
     return [
         {
@@ -217,8 +254,6 @@ def get_active_votes(
     db: Session = Depends(get_db)
 ):
     """Return active votes with basic metadata for mobile push alert badges."""
-    from backend.models.entities.voting import AmendmentVoting
-
     votes = db.query(AmendmentVoting).filter(
         AmendmentVoting.status == 'voting'
     ).order_by(AmendmentVoting.created_at.desc()).all()
@@ -245,10 +280,8 @@ def get_offline_constitution(
     Return the active constitution text for offline caching.
     Mobile clients should periodically refresh this and store locally.
     """
-    from backend.models.entities.constitution import Constitution
-
     constitution = db.query(Constitution).filter(
-        Constitution.is_active == True
+        Constitution.is_active == True  # noqa: E712
     ).order_by(Constitution.version.desc()).first()
 
     if not constitution:
@@ -258,11 +291,9 @@ def get_offline_constitution(
         "version": constitution.version,
         "preamble": constitution.preamble if hasattr(constitution, 'preamble') else "",
         "articles": constitution.articles if hasattr(constitution, 'articles') else {},
-        "cached_at": datetime.utcnow().isoformat(),
+        "cached_at": datetime.now(timezone.utc).isoformat(),
     }
 
-# Need datetime for the cached_at field
-from datetime import datetime
 
 @router.get("/offline/task-queue")
 def get_offline_task_queue(
@@ -273,8 +304,6 @@ def get_offline_task_queue(
     Return queued/pending tasks for offline viewing.
     Mobile clients can display these when connectivity is lost.
     """
-    from backend.models.entities.task import Task
-
     tasks = db.query(Task).filter(
         Task.status.in_(['pending', 'in_progress'])
     ).order_by(Task.created_at.desc()).limit(50).all()
@@ -289,7 +318,7 @@ def get_offline_task_queue(
                 "created_at": t.created_at.isoformat() if t.created_at else None,
             } for t in tasks
         ],
-        "synced_at": datetime.utcnow().isoformat(),
+        "synced_at": datetime.now(timezone.utc).isoformat(),
         "total_queued": len(tasks),
     }
 
@@ -301,6 +330,7 @@ class OfflineSyncRequest(BaseModel):
     cached_constitution_version: Optional[int] = None
     cached_task_ids: Optional[List[str]] = None
 
+
 @router.post("/offline/sync")
 def offline_delta_sync(
     request: OfflineSyncRequest,
@@ -311,10 +341,7 @@ def offline_delta_sync(
     Receives a client-side sync manifest and returns only data that has
     changed since the client's last sync timestamp.
     """
-    from backend.models.entities.constitution import Constitution
-    from backend.models.entities.task import Task
-
-    result: Dict[str, Any] = {"synced_at": datetime.utcnow().isoformat()}
+    result: Dict[str, Any] = {"synced_at": datetime.now(timezone.utc).isoformat()}
 
     # Parse last sync time
     last_sync = None
@@ -326,11 +353,14 @@ def offline_delta_sync(
 
     # Constitution delta
     constitution = db.query(Constitution).filter(
-        Constitution.is_active == True
+        Constitution.is_active == True  # noqa: E712
     ).order_by(Constitution.version.desc()).first()
-    
+
     if constitution:
-        if request.cached_constitution_version is None or constitution.version != request.cached_constitution_version:
+        if (
+            request.cached_constitution_version is None
+            or constitution.version != request.cached_constitution_version
+        ):
             result["constitution"] = {
                 "version": constitution.version,
                 "preamble": constitution.preamble if hasattr(constitution, 'preamble') else "",
@@ -365,6 +395,7 @@ class VoiceCommandRequest(BaseModel):
     transcribed_text: str
     language: str = "en"
 
+
 @router.post("/voice-command")
 async def voice_command(
     request: VoiceCommandRequest,
@@ -393,8 +424,7 @@ async def voice_command(
             "source": "voice_command"
         }
     except Exception as e:
-        import logging
-        logging.getLogger(__name__).error(f"Voice command error: {e}")
+        logger.error(f"Voice command error: {e}")
         return {
             "status": "error",
             "response": "Sorry, I couldn't process your voice command at this time.",

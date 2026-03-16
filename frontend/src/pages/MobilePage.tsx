@@ -1,6 +1,6 @@
 // src/pages/MobilePage.tsx
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
     Smartphone,
     Bell,
@@ -24,9 +24,11 @@ import { useAuthStore } from '@/store/authStore';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+type Platform = 'ios' | 'android';
+
 interface Device {
     id: string;
-    platform: string;
+    platform: Platform;
     token: string;
     registered_at: string;
 }
@@ -54,6 +56,16 @@ interface MobileDashboard {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/**
+ * Safely extracts a human-readable error message from an Axios error response.
+ * Falls back to the provided default message if the response does not contain
+ * a FastAPI `detail` field.
+ */
+const getErrorMessage = (error: unknown, fallback: string): string => {
+    const axiosError = error as { response?: { data?: { detail?: string } } };
+    return axiosError?.response?.data?.detail ?? fallback;
+};
+
 const getPlatformClasses = (platform: string) => {
     switch (platform) {
         case 'ios':
@@ -75,6 +87,11 @@ const formatDate = (dateString?: string) => {
         minute: '2-digit',
     });
 };
+
+// Badge is hidden 90 days after launch to avoid "New" persisting indefinitely.
+const MOBILE_LAUNCH_DATE = new Date('2025-03-01');
+const SHOW_NEW_BADGE =
+    Date.now() - MOBILE_LAUNCH_DATE.getTime() < 90 * 24 * 60 * 60 * 1000;
 
 // ── Toggle component ─────────────────────────────────────────────────────────
 
@@ -99,6 +116,9 @@ function Toggle({
             </div>
             <button
                 type="button"
+                role="switch"
+                aria-checked={checked}
+                aria-label={label}
                 onClick={() => onChange(!checked)}
                 className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 dark:focus:ring-offset-[#161b27] ${
                     checked ? 'bg-emerald-600' : 'bg-gray-200 dark:bg-[#2a3347]'
@@ -122,14 +142,26 @@ export function MobilePage() {
     const [devices, setDevices] = useState<Device[]>([]);
     const [preferences, setPreferences] = useState<NotificationPreferences | null>(null);
     const [dashboard, setDashboard] = useState<MobileDashboard | null>(null);
-    const [loading, setLoading] = useState(true);
+
+    // Per-resource loading flags — each section shows its own skeleton
+    // rather than a single global spinner blocking the whole page.
+    const [dashboardLoading, setDashboardLoading] = useState(true);
+    const [devicesLoading, setDevicesLoading] = useState(true);
+    const [prefsLoading, setPrefsLoading] = useState(true);
+
     const [activeTab, setActiveTab] = useState<
         'dashboard' | 'devices' | 'preferences' | 'offline'
     >('dashboard');
     const [showAddDeviceModal, setShowAddDeviceModal] = useState(false);
     const [savingPrefs, setSavingPrefs] = useState(false);
 
-    const [newDevice, setNewDevice] = useState({ platform: 'ios', token: '' });
+    // Token pending inline confirmation — replaces window.confirm().
+    const [confirmDeleteToken, setConfirmDeleteToken] = useState<string | null>(null);
+
+    const [newDevice, setNewDevice] = useState<{ platform: Platform; token: string }>({
+        platform: 'ios',
+        token: '',
+    });
     const [editingPrefs, setEditingPrefs] = useState<NotificationPreferences>({
         votes_enabled: true,
         alerts_enabled: true,
@@ -139,36 +171,43 @@ export function MobilePage() {
         quiet_hours_end: '',
     });
 
-    // ── Effects ─────────────────────────────────────────────────────────────
-
-    useEffect(() => {
-        fetchDashboard();
-        fetchDevices();
-        fetchPreferences();
-    }, []);
+    // True when the user has made unsaved changes to notification preferences.
+    const hasUnsavedChanges =
+        preferences !== null &&
+        JSON.stringify(editingPrefs) !== JSON.stringify(preferences);
 
     // ── Data fetching ────────────────────────────────────────────────────
+    // useCallback ensures stable references so they can be safely listed in
+    // the useEffect dependency array and called from mutation handlers without
+    // creating stale closures.
 
-    const fetchDashboard = async () => {
+    const fetchDashboard = useCallback(async () => {
+        setDashboardLoading(true);
         try {
             const response = await api.get('/api/v1/mobile/dashboard');
             setDashboard(response.data);
         } catch (error) {
             console.error('Failed to fetch mobile dashboard:', error);
+        } finally {
+            setDashboardLoading(false);
         }
-    };
+    }, []);
 
-    const fetchDevices = async () => {
+    const fetchDevices = useCallback(async () => {
+        setDevicesLoading(true);
         try {
             const response = await api.get('/api/v1/mobile/devices');
             setDevices(response.data ?? []);
         } catch (error) {
             console.error('Failed to fetch devices:', error);
             setDevices([]);
+        } finally {
+            setDevicesLoading(false);
         }
-    };
+    }, []);
 
-    const fetchPreferences = async () => {
+    const fetchPreferences = useCallback(async () => {
+        setPrefsLoading(true);
         try {
             const response = await api.get('/api/v1/mobile/notifications/preferences');
             setPreferences(response.data);
@@ -176,9 +215,17 @@ export function MobilePage() {
         } catch (error) {
             console.error('Failed to fetch preferences:', error);
         } finally {
-            setLoading(false);
+            setPrefsLoading(false);
         }
-    };
+    }, []);
+
+    // ── Effects ─────────────────────────────────────────────────────────────
+
+    useEffect(() => {
+        fetchDashboard();
+        fetchDevices();
+        fetchPreferences();
+    }, [fetchDashboard, fetchDevices, fetchPreferences]);
 
     // ── Handlers ─────────────────────────────────────────────────────────
 
@@ -193,19 +240,19 @@ export function MobilePage() {
             setShowAddDeviceModal(false);
             setNewDevice({ platform: 'ios', token: '' });
             fetchDevices();
-        } catch (error: any) {
-            toast.error(error.response?.data?.detail || 'Failed to register device');
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to register device'));
         }
     };
 
     const handleUnregisterDevice = async (token: string) => {
-        if (!confirm('Are you sure you want to unregister this device?')) return;
         try {
             await api.delete(`/api/v1/mobile/register-device/${token}`);
             toast.success('Device unregistered');
+            setConfirmDeleteToken(null);
             fetchDevices();
-        } catch (error: any) {
-            toast.error(error.response?.data?.detail || 'Failed to unregister device');
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to unregister device'));
         }
     };
 
@@ -215,8 +262,8 @@ export function MobilePage() {
             await api.put('/api/v1/mobile/notifications/preferences', editingPrefs);
             toast.success('Preferences saved');
             setPreferences(editingPrefs);
-        } catch (error: any) {
-            toast.error(error.response?.data?.detail || 'Failed to save preferences');
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to save preferences'));
         } finally {
             setSavingPrefs(false);
         }
@@ -234,8 +281,8 @@ export function MobilePage() {
             } else {
                 toast.success(`${response.data.total_queued} tasks queued for offline`);
             }
-        } catch (error: any) {
-            toast.error(error.response?.data?.detail || 'Failed to sync');
+        } catch (error) {
+            toast.error(getErrorMessage(error, 'Failed to sync'));
         }
     };
 
@@ -247,7 +294,7 @@ export function MobilePage() {
 
     if (!user) {
         return (
-            <div className="min-h-screen bg-gray-50 dark:bg-[#0f1117] flex items-center justify-center p-6 transition-colors duration-200">
+            <div className="bg-gray-50 dark:bg-[#0f1117] flex items-center justify-center p-6 transition-colors duration-200">
                 <div className="bg-white dark:bg-[#161b27] rounded-2xl shadow-xl dark:shadow-[0_8px_40px_rgba(0,0,0,0.5)] border border-gray-200 dark:border-[#1e2535] p-8 text-center max-w-md">
                     <div className="w-16 h-16 rounded-xl bg-red-100 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 flex items-center justify-center mx-auto mb-5">
                         <Shield className="w-8 h-8 text-red-600 dark:text-red-400" />
@@ -264,7 +311,7 @@ export function MobilePage() {
     }
 
     return (
-        <div className="min-h-screen bg-gray-50 dark:bg-[#0f1117] p-6 transition-colors duration-200">
+        <div className="bg-gray-50 dark:bg-[#0f1117] p-6 transition-colors duration-200">
             <div className="max-w-6xl mx-auto">
 
                 {/* ── Page Header ─────────────────────────────────────────────── */}
@@ -273,9 +320,11 @@ export function MobilePage() {
                         <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
                             Mobile App
                         </h1>
-                        <span className="px-2.5 py-0.5 bg-emerald-100 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-xs font-semibold rounded-full border border-emerald-200 dark:border-emerald-500/20">
-                            New
-                        </span>
+                        {SHOW_NEW_BADGE && (
+                            <span className="px-2.5 py-0.5 bg-emerald-100 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 text-xs font-semibold rounded-full border border-emerald-200 dark:border-emerald-500/20">
+                                New
+                            </span>
+                        )}
                     </div>
                     <p className="text-gray-500 dark:text-gray-400 text-sm">
                         Configure mobile app settings, devices, and offline sync.
@@ -357,7 +406,7 @@ export function MobilePage() {
                 </div>
 
                 {/* ── Tabs ───────────────────────────────────────────────────── */}
-                <div className="flex flex-wrap gap-2 mb-6">
+                <div className="flex flex-wrap gap-2 mb-6" role="tablist" aria-label="Mobile page sections">
                     {(
                         [
                             { id: 'dashboard', label: 'Dashboard', icon: Activity },
@@ -368,6 +417,8 @@ export function MobilePage() {
                     ).map(({ id, label, icon: Icon }) => (
                         <button
                             key={id}
+                            role="tab"
+                            aria-selected={activeTab === id}
                             onClick={() => setActiveTab(id)}
                             className={`px-5 py-2.5 rounded-lg text-sm font-semibold transition-all duration-150 flex items-center gap-2 ${
                                 activeTab === id
@@ -400,7 +451,7 @@ export function MobilePage() {
                             </div>
                         </div>
 
-                        {loading ? (
+                        {dashboardLoading ? (
                             <div className="p-16 text-center">
                                 <Loader2 className="w-8 h-8 animate-spin text-emerald-600 dark:text-emerald-400 mx-auto mb-4" />
                                 <p className="text-sm text-gray-500 dark:text-gray-400">Loading...</p>
@@ -509,13 +560,19 @@ export function MobilePage() {
                                         onClick={fetchDevices}
                                         className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-[#1e2535] rounded-lg transition-colors duration-150"
                                         title="Refresh"
+                                        aria-label="Refresh device list"
                                     >
-                                        <RefreshCw className="w-4 h-4" />
+                                        <RefreshCw className={`w-4 h-4 ${devicesLoading ? 'animate-spin' : ''}`} />
                                     </button>
                                 </div>
                             </div>
 
-                            {devices.length === 0 ? (
+                            {devicesLoading ? (
+                                <div className="p-16 text-center">
+                                    <Loader2 className="w-8 h-8 animate-spin text-blue-600 dark:text-blue-400 mx-auto mb-4" />
+                                    <p className="text-sm text-gray-500 dark:text-gray-400">Loading devices...</p>
+                                </div>
+                            ) : devices.length === 0 ? (
                                 <div className="p-16 text-center">
                                     <div className="w-14 h-14 rounded-xl bg-gray-100 dark:bg-[#1e2535] border border-gray-200 dark:border-[#2a3347] flex items-center justify-center mx-auto mb-4">
                                         <Smartphone className="w-6 h-6 text-gray-400 dark:text-gray-500" />
@@ -555,13 +612,36 @@ export function MobilePage() {
                                                         </p>
                                                     </div>
                                                 </div>
-                                                <button
-                                                    onClick={() => handleUnregisterDevice(device.token)}
-                                                    className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors duration-150"
-                                                    title="Unregister device"
-                                                >
-                                                    <Trash2 className="w-4 h-4" />
-                                                </button>
+
+                                                {/* Inline confirmation replaces window.confirm() */}
+                                                {confirmDeleteToken === device.token ? (
+                                                    <div className="flex items-center gap-2 shrink-0">
+                                                        <span className="text-xs text-gray-500 dark:text-gray-400 mr-1">
+                                                            Remove?
+                                                        </span>
+                                                        <button
+                                                            onClick={() => handleUnregisterDevice(device.token)}
+                                                            className="px-3 py-1.5 bg-red-600 hover:bg-red-700 text-white text-xs font-medium rounded-lg transition-colors duration-150"
+                                                        >
+                                                            Confirm
+                                                        </button>
+                                                        <button
+                                                            onClick={() => setConfirmDeleteToken(null)}
+                                                            className="px-3 py-1.5 border border-gray-200 dark:border-[#1e2535] text-gray-600 dark:text-gray-400 text-xs font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-[#1e2535] transition-colors duration-150"
+                                                        >
+                                                            Cancel
+                                                        </button>
+                                                    </div>
+                                                ) : (
+                                                    <button
+                                                        onClick={() => setConfirmDeleteToken(device.token)}
+                                                        className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors duration-150"
+                                                        title="Unregister device"
+                                                        aria-label={`Unregister ${device.platform} device`}
+                                                    >
+                                                        <Trash2 className="w-4 h-4" />
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                     ))}
@@ -590,81 +670,94 @@ export function MobilePage() {
                             </div>
                         </div>
 
-                        <div className="p-6 space-y-3">
-                            <Toggle
-                                checked={editingPrefs.votes_enabled}
-                                onChange={(v) => updatePref('votes_enabled', v)}
-                                label="Vote Notifications"
-                                description="Get notified when a Council vote is initiated"
-                            />
-                            <Toggle
-                                checked={editingPrefs.alerts_enabled}
-                                onChange={(v) => updatePref('alerts_enabled', v)}
-                                label="System Alerts"
-                                description="Critical system alerts and warnings"
-                            />
-                            <Toggle
-                                checked={editingPrefs.tasks_enabled}
-                                onChange={(v) => updatePref('tasks_enabled', v)}
-                                label="Task Updates"
-                                description="Task completion, failure, and escalation events"
-                            />
-                            <Toggle
-                                checked={editingPrefs.constitutional_enabled}
-                                onChange={(v) => updatePref('constitutional_enabled', v)}
-                                label="Constitutional Events"
-                                description="Violations, amendments, and governance decisions"
-                            />
+                        {prefsLoading ? (
+                            <div className="p-16 text-center">
+                                <Loader2 className="w-8 h-8 animate-spin text-purple-600 dark:text-purple-400 mx-auto mb-4" />
+                                <p className="text-sm text-gray-500 dark:text-gray-400">Loading preferences...</p>
+                            </div>
+                        ) : (
+                            <div className="p-6 space-y-3">
+                                <Toggle
+                                    checked={editingPrefs.votes_enabled}
+                                    onChange={(v) => updatePref('votes_enabled', v)}
+                                    label="Vote Notifications"
+                                    description="Get notified when a Council vote is initiated"
+                                />
+                                <Toggle
+                                    checked={editingPrefs.alerts_enabled}
+                                    onChange={(v) => updatePref('alerts_enabled', v)}
+                                    label="System Alerts"
+                                    description="Critical system alerts and warnings"
+                                />
+                                <Toggle
+                                    checked={editingPrefs.tasks_enabled}
+                                    onChange={(v) => updatePref('tasks_enabled', v)}
+                                    label="Task Updates"
+                                    description="Task completion, failure, and escalation events"
+                                />
+                                <Toggle
+                                    checked={editingPrefs.constitutional_enabled}
+                                    onChange={(v) => updatePref('constitutional_enabled', v)}
+                                    label="Constitutional Events"
+                                    description="Violations, amendments, and governance decisions"
+                                />
 
-                            {/* Quiet hours */}
-                            <div className="pt-2">
-                                <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-                                    Quiet Hours
-                                    <span className="text-xs font-normal text-gray-400 dark:text-gray-500 ml-1">
-                                        (suppress notifications during these hours)
-                                    </span>
-                                </p>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1.5">
-                                            Start
-                                        </label>
-                                        <input
-                                            type="time"
-                                            value={editingPrefs.quiet_hours_start ?? ''}
-                                            onChange={(e) =>
-                                                updatePref('quiet_hours_start', e.target.value)
-                                            }
-                                            className="w-full px-4 py-2.5 border border-gray-200 dark:border-[#1e2535] rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white dark:bg-[#0f1117] text-gray-900 dark:text-white text-sm transition-colors duration-150"
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1.5">
-                                            End
-                                        </label>
-                                        <input
-                                            type="time"
-                                            value={editingPrefs.quiet_hours_end ?? ''}
-                                            onChange={(e) =>
-                                                updatePref('quiet_hours_end', e.target.value)
-                                            }
-                                            className="w-full px-4 py-2.5 border border-gray-200 dark:border-[#1e2535] rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white dark:bg-[#0f1117] text-gray-900 dark:text-white text-sm transition-colors duration-150"
-                                        />
+                                {/* Quiet hours */}
+                                <div className="pt-2">
+                                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
+                                        Quiet Hours
+                                        <span className="text-xs font-normal text-gray-400 dark:text-gray-500 ml-1">
+                                            (suppress notifications during these hours)
+                                        </span>
+                                    </p>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1.5">
+                                                Start
+                                            </label>
+                                            <input
+                                                type="time"
+                                                value={editingPrefs.quiet_hours_start ?? ''}
+                                                onChange={(e) =>
+                                                    updatePref('quiet_hours_start', e.target.value)
+                                                }
+                                                className="w-full px-4 py-2.5 border border-gray-200 dark:border-[#1e2535] rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white dark:bg-[#0f1117] text-gray-900 dark:text-white text-sm transition-colors duration-150"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1.5">
+                                                End
+                                            </label>
+                                            <input
+                                                type="time"
+                                                value={editingPrefs.quiet_hours_end ?? ''}
+                                                onChange={(e) =>
+                                                    updatePref('quiet_hours_end', e.target.value)
+                                                }
+                                                className="w-full px-4 py-2.5 border border-gray-200 dark:border-[#1e2535] rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 bg-white dark:bg-[#0f1117] text-gray-900 dark:text-white text-sm transition-colors duration-150"
+                                            />
+                                        </div>
                                     </div>
                                 </div>
-                            </div>
 
-                            <div className="pt-4">
-                                <button
-                                    onClick={handleSavePreferences}
-                                    disabled={savingPrefs}
-                                    className="w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors duration-150 shadow-sm flex items-center justify-center gap-2"
-                                >
-                                    {savingPrefs && <Loader2 className="w-4 h-4 animate-spin" />}
-                                    Save Preferences
-                                </button>
+                                <div className="pt-4">
+                                    {hasUnsavedChanges && (
+                                        <p className="text-xs text-amber-600 dark:text-amber-400 mb-2 flex items-center gap-1.5">
+                                            <AlertTriangle className="w-3.5 h-3.5" />
+                                            You have unsaved changes
+                                        </p>
+                                    )}
+                                    <button
+                                        onClick={handleSavePreferences}
+                                        disabled={savingPrefs || !hasUnsavedChanges}
+                                        className="w-full px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors duration-150 shadow-sm flex items-center justify-center gap-2"
+                                    >
+                                        {savingPrefs && <Loader2 className="w-4 h-4 animate-spin" />}
+                                        {savingPrefs ? 'Saving…' : 'Save Preferences'}
+                                    </button>
+                                </div>
                             </div>
-                        </div>
+                        )}
                     </div>
                 )}
 
@@ -786,7 +879,10 @@ export function MobilePage() {
                                 <select
                                     value={newDevice.platform}
                                     onChange={(e) =>
-                                        setNewDevice({ ...newDevice, platform: e.target.value })
+                                        setNewDevice({
+                                            ...newDevice,
+                                            platform: e.target.value as Platform,
+                                        })
                                     }
                                     className="w-full px-4 py-2.5 border border-gray-200 dark:border-[#1e2535] rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white dark:bg-[#0f1117] text-gray-900 dark:text-white text-sm transition-colors duration-150"
                                 >

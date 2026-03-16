@@ -1,18 +1,28 @@
 """
 API routes for model configuration.
 Supports ANY provider (OpenAI, Anthropic, Groq, Mistral, Gemini, Copilot, Local, etc.)
+
 """
 
+import logging
 from typing import List, Optional, Dict, Any
+
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel, SecretStr, Field, field_validator
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from backend.models.database import get_db
-from backend.models.entities.user_config import UserModelConfig, ProviderType, ConnectionStatus, ModelUsageLog
+from backend.models.entities.user_config import (
+    UserModelConfig,
+    ProviderType,
+    ConnectionStatus,
+    ModelUsageLog,
+)
 from backend.services.model_provider import ModelService
 from backend.core.security import encrypt_api_key, decrypt_api_key
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/models", tags=["Model Configuration"])
 
@@ -35,10 +45,10 @@ class ModelConfigCreate(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=2.0)
     top_p: Optional[float] = Field(default=1.0, ge=0.0, le=1.0)
     timeout_seconds: int = Field(default=60, ge=5, le=300)
-    
+
     @field_validator('api_base_url', 'local_server_url')
     @classmethod
-    def validate_url(cls, v):
+    def validate_url(cls, v: Optional[str]) -> Optional[str]:
         if v and not v.startswith(('http://', 'https://')):
             raise ValueError('URL must start with http:// or https://')
         return v
@@ -68,10 +78,12 @@ class ModelConfigResponse(BaseModel):
     available_models: List[str] = Field(default_factory=list)
     status: str
     is_default: bool
+    # api_key_masked was missing from original — frontend ModelConfig type expects it
+    api_key_masked: Optional[str] = None
     settings: Dict[str, Any] = Field(default_factory=dict)
     last_tested: Optional[str] = None
     total_usage: Dict[str, Any] = Field(default_factory=dict)
-    
+
     class Config:
         from_attributes = True
 
@@ -117,6 +129,50 @@ class FetchModelsResponse(BaseModel):
     models: List[str]
     count: int
     default_recommended: Optional[str] = None
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Serialisation helper
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+def _serialize_config(config: UserModelConfig) -> Dict[str, Any]:
+    """
+    Serialize a UserModelConfig ORM object to a response dict.
+
+    Kept as an explicit helper rather than relying purely on Pydantic
+    from_attributes because SQLAlchemy Enum columns may return either
+    a Python Enum member or a plain string depending on the engine
+    dialect and session state. Explicit .value extraction is safer.
+    """
+    return {
+        'id':             str(config.id),
+        'provider':       config.provider.value if hasattr(config.provider, 'value') else str(config.provider),
+        'provider_name':  config.provider_name,
+        'config_name':    config.config_name,
+        'default_model':  config.default_model,
+        'api_base_url':   config.api_base_url,
+        'available_models': config.available_models or [],
+        'status':         config.status.value if hasattr(config.status, 'value') else str(config.status),
+        'is_default':     config.is_default,
+        # Previously missing — frontend expects this field to show masked key on cards
+        'api_key_masked': config.api_key_masked,
+        'settings': {
+            'max_tokens':  config.max_tokens,
+            'temperature': config.temperature,
+            'top_p':       config.top_p,
+            'timeout':     config.timeout_seconds,
+        },
+        'last_tested': (
+            config.last_tested_at.isoformat()
+            if getattr(config, 'last_tested_at', None)
+            else None
+        ),
+        'total_usage': {
+            'requests': config.total_requests or 0,
+            'tokens':   config.total_tokens   or 0,
+            'cost_usd': round(config.estimated_cost_usd or 0, 4),
+        },
+    }
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -245,47 +301,43 @@ async def list_providers():
 async def create_config(
     config: ModelConfigCreate,
     db: Session = Depends(get_db),
-    user_id: str = "sovereign"
+    user_id: str = "sovereign",
 ):
     """Create a new model configuration."""
-    
-    # If setting as default, unset other defaults
     if config.is_default:
         db.query(UserModelConfig).filter_by(user_id=user_id, is_default=True).update({"is_default": False})
-    
-    # Encrypt API key if provided
+
     api_key_encrypted = None
-    api_key_masked = None
+    api_key_masked    = None
     if config.api_key:
         raw_key = config.api_key.get_secret_value()
         if raw_key:
             api_key_encrypted = encrypt_api_key(raw_key)
-            api_key_masked = f"...{raw_key[-4:]}"
-    
-    # Create config
+            api_key_masked    = f"...{raw_key[-4:]}"
+
     db_config = UserModelConfig(
-        user_id=user_id,
-        provider=config.provider,
-        provider_name=config.provider_name,
-        config_name=config.config_name,
-        api_key_encrypted=api_key_encrypted,
-        api_key_masked=api_key_masked,
-        api_base_url=config.api_base_url,
-        local_server_url=config.local_server_url,
-        default_model=config.default_model,
-        available_models=config.available_models,
-        is_default=config.is_default,
-        max_tokens=config.max_tokens,
-        temperature=config.temperature,
-        top_p=config.top_p,
-        timeout_seconds=config.timeout_seconds,
-        status=ConnectionStatus.ACTIVE
+        user_id           = user_id,
+        provider          = config.provider,
+        provider_name     = config.provider_name,
+        config_name       = config.config_name,
+        api_key_encrypted = api_key_encrypted,
+        api_key_masked    = api_key_masked,
+        api_base_url      = config.api_base_url,
+        local_server_url  = config.local_server_url,
+        default_model     = config.default_model,
+        available_models  = config.available_models,
+        is_default        = config.is_default,
+        max_tokens        = config.max_tokens,
+        temperature       = config.temperature,
+        top_p             = config.top_p,
+        timeout_seconds   = config.timeout_seconds,
+        status            = ConnectionStatus.ACTIVE,
     )
-    
+
     db.add(db_config)
     db.commit()
     db.refresh(db_config)
-    
+
     return _serialize_config(db_config)
 
 
@@ -293,74 +345,46 @@ async def create_config(
 async def create_universal_config(
     input: UniversalProviderCreate,
     db: Session = Depends(get_db),
-    user_id: str = "sovereign"
+    user_id: str = "sovereign",
 ):
     """Create configuration for ANY custom OpenAI-compatible provider."""
-    
     if input.is_default:
         db.query(UserModelConfig).filter_by(user_id=user_id, is_default=True).update({"is_default": False})
-    
+
     api_key_encrypted = None
-    api_key_masked = None
+    api_key_masked    = None
     if input.api_key:
         raw_key = input.api_key.get_secret_value()
         if raw_key:
             api_key_encrypted = encrypt_api_key(raw_key)
-            api_key_masked = f"...{raw_key[-4:]}"
-    
+            api_key_masked    = f"...{raw_key[-4:]}"
+
     config_name = input.config_name or f"{input.provider_name} Config"
-    
+
     db_config = UserModelConfig(
-        user_id=user_id,
-        provider=ProviderType.CUSTOM,
-        provider_name=input.provider_name,
-        config_name=config_name,
-        api_key_encrypted=api_key_encrypted,
-        api_key_masked=api_key_masked,
-        api_base_url=input.api_base_url,
-        default_model=input.default_model,
-        is_default=input.is_default,
-        status=ConnectionStatus.ACTIVE
+        user_id           = user_id,
+        provider          = ProviderType.CUSTOM,
+        provider_name     = input.provider_name,
+        config_name       = config_name,
+        api_key_encrypted = api_key_encrypted,
+        api_key_masked    = api_key_masked,
+        api_base_url      = input.api_base_url,
+        default_model     = input.default_model,
+        is_default        = input.is_default,
+        status            = ConnectionStatus.ACTIVE,
     )
-    
+
     db.add(db_config)
     db.commit()
     db.refresh(db_config)
-    
+
     return _serialize_config(db_config)
-
-
-def _serialize_config(config: UserModelConfig) -> Dict[str, Any]:
-    """Serialize config to response format with safe defaults."""
-    return {
-        'id': str(config.id),
-        'provider': config.provider.value if hasattr(config.provider, 'value') else str(config.provider),
-        'provider_name': config.provider_name,
-        'config_name': config.config_name,
-        'default_model': config.default_model,
-        'api_base_url': config.api_base_url,
-        'available_models': config.available_models or [],
-        'status': config.status.value if hasattr(config.status, 'value') else str(config.status),
-        'is_default': config.is_default,
-        'settings': {
-            'max_tokens': config.max_tokens,
-            'temperature': config.temperature,
-            'top_p': config.top_p,
-            'timeout': config.timeout_seconds
-        },
-        'last_tested': config.last_tested_at.isoformat() if hasattr(config, 'last_tested_at') and config.last_tested_at else None,
-        'total_usage': {
-            'requests': config.total_requests or 0,
-            'tokens': config.total_tokens or 0,
-            'cost_usd': round(config.estimated_cost_usd or 0, 4)
-        }
-    }
 
 
 @router.get("/configs", response_model=List[ModelConfigResponse])
 async def list_configs(
     db: Session = Depends(get_db),
-    user_id: str = "sovereign"
+    user_id: str = "sovereign",
 ):
     """List user's model configurations."""
     configs = db.query(UserModelConfig).filter_by(user_id=user_id).all()
@@ -368,12 +392,16 @@ async def list_configs(
 
 
 @router.get("/configs/{config_id}", response_model=ModelConfigResponse)
-async def get_config(config_id: str, db: Session = Depends(get_db), user_id: str = "sovereign"):
+async def get_config(
+    config_id: str,
+    db: Session = Depends(get_db),
+    user_id: str = "sovereign",
+):
     """Get specific configuration."""
     config = db.query(UserModelConfig).filter_by(id=config_id, user_id=user_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Configuration not found")
-    
+
     return _serialize_config(config)
 
 
@@ -382,51 +410,55 @@ async def update_config(
     config_id: str,
     updates: ModelConfigUpdate,
     db: Session = Depends(get_db),
-    user_id: str = "sovereign"
+    user_id: str = "sovereign",
 ):
     """Update configuration."""
     config = db.query(UserModelConfig).filter_by(id=config_id, user_id=user_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Configuration not found")
-    
+
     if updates.is_default and not config.is_default:
         db.query(UserModelConfig).filter_by(user_id=user_id, is_default=True).update({"is_default": False})
-    
+
     update_data = updates.model_dump(exclude_unset=True)
-    
+
     if "api_key" in update_data and update_data["api_key"]:
         raw_key = update_data["api_key"].get_secret_value()
         if raw_key:
             config.api_key_encrypted = encrypt_api_key(raw_key)
-            config.api_key_masked = f"...{raw_key[-4:]}"
+            config.api_key_masked    = f"...{raw_key[-4:]}"
         del update_data["api_key"]
-    
+
     for field, value in update_data.items():
-        if field in ['api_base_url', 'local_server_url'] and value:
+        if field in ('api_base_url', 'local_server_url') and value:
             if not value.startswith(('http://', 'https://')):
                 raise HTTPException(status_code=400, detail=f"Invalid URL: {value}")
         setattr(config, field, value)
-    
+
     if "api_key_encrypted" in update_data:
         config.status = ConnectionStatus.TESTING
-    
+
     db.commit()
     db.refresh(config)
-    
+
     return _serialize_config(config)
 
 
 @router.delete("/configs/{config_id}")
-async def delete_config(config_id: str, db: Session = Depends(get_db), user_id: str = "sovereign"):
+async def delete_config(
+    config_id: str,
+    db: Session = Depends(get_db),
+    user_id: str = "sovereign",
+):
     """Delete configuration."""
     config = db.query(UserModelConfig).filter_by(id=config_id, user_id=user_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Configuration not found")
-    
+
     remaining = db.query(UserModelConfig).filter_by(user_id=user_id).count()
     if remaining <= 1:
         raise HTTPException(status_code=400, detail="Cannot delete the only configuration")
-    
+
     db.delete(config)
     db.commit()
     return {"message": "Configuration deleted"}
@@ -436,21 +468,21 @@ async def delete_config(config_id: str, db: Session = Depends(get_db), user_id: 
 async def test_config(
     config_id: str,
     db: Session = Depends(get_db),
-    user_id: str = "sovereign"
+    user_id: str = "sovereign",
 ):
     """Test specific configuration."""
     config = db.query(UserModelConfig).filter_by(id=config_id, user_id=user_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Configuration not found")
-    
+
     result = await ModelService.test_connection(config)
     return TestResult(
-        success=result["success"],
-        message="Connection successful" if result["success"] else "Connection failed",
-        latency_ms=result.get("latency_ms"),
-        model=result.get("model"),
-        tokens=result.get("tokens"),
-        error=result.get("error")
+        success    = result["success"],
+        message    = "Connection successful" if result["success"] else "Connection failed",
+        latency_ms = result.get("latency_ms"),
+        model      = result.get("model"),
+        tokens     = result.get("tokens"),
+        error      = result.get("error"),
     )
 
 
@@ -458,85 +490,97 @@ async def test_config(
 async def fetch_models(
     config_id: str,
     db: Session = Depends(get_db),
-    user_id: str = "sovereign"
+    user_id: str = "sovereign",
 ):
     """Dynamically fetch available models from provider API."""
     config = db.query(UserModelConfig).filter_by(id=config_id, user_id=user_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Configuration not found")
-    
+
+    api_key: Optional[str] = None
+    if config.api_key_encrypted:
+        api_key = decrypt_api_key(config.api_key_encrypted)
+
     try:
-        api_key = None
-        if config.api_key_encrypted:
-            api_key = decrypt_api_key(config.api_key_encrypted)
-        
         models = await ModelService.list_models_for_provider(
             config.provider,
             api_key,
-            config.get_effective_base_url()
+            config.get_effective_base_url(),
         )
-        
-        config.available_models = models
-        flag_modified(config, "available_models")  # required: SQLAlchemy won't detect JSON column reassignment without this
-        db.commit()
-        
-        return {
-            "provider": config.provider.value,
-            "base_url": config.get_effective_base_url(),
-            "models": models,
-            "count": len(models)
-        }
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch models: {str(e)}")
+    except Exception as exc:
+        logger.error("fetch_models failed for config %s: %s", config_id, exc, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch models: {exc}",
+        ) from exc
+
+    config.available_models = models
+    flag_modified(config, "available_models")  # Required: SQLAlchemy won't detect JSON column reassignment
+    db.commit()
+
+    return {
+        "provider": config.provider.value,
+        "base_url": config.get_effective_base_url(),
+        "models":   models,
+        "count":    len(models),
+    }
 
 
 @router.post("/providers/fetch-models-direct", response_model=FetchModelsResponse)
 async def fetch_provider_models_direct(request: FetchModelsRequest):
     """
-    Fetch available models from provider WITHOUT requiring a config.
-    This is used during the configuration setup flow.
+    Fetch available models from a provider WITHOUT requiring an existing config.
+    Used during the configuration setup wizard.
     """
     try:
         models = await ModelService.list_models_for_provider(
-            provider=request.provider,
-            api_key=request.api_key,
-            base_url=request.api_base_url or request.local_server_url
+            provider = request.provider,
+            api_key  = request.api_key,
+            base_url = request.api_base_url or request.local_server_url,
         )
-        
-        if not models:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No models found for provider {request.provider.value}"
-            )
-        
-        return FetchModelsResponse(
-            provider=request.provider.value,
-            models=models,
-            count=len(models),
-            default_recommended=models[0] if models else None
-        )
-        
     except HTTPException:
         raise
-    except Exception as e:
+    except Exception as exc:
+        logger.error(
+            "fetch_provider_models_direct failed for provider %s: %s",
+            request.provider,
+            exc,
+            exc_info=True,
+        )
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch models from {request.provider.value}: {str(e)}"
+            detail=f"Failed to fetch models from {request.provider.value}: {exc}",
+        ) from exc
+
+    if not models:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No models found for provider {request.provider.value}",
         )
+
+    return FetchModelsResponse(
+        provider             = request.provider.value,
+        models               = models,
+        count                = len(models),
+        default_recommended  = models[0] if models else None,
+    )
 
 
 @router.post("/configs/{config_id}/set-default")
-async def set_default(config_id: str, db: Session = Depends(get_db), user_id: str = "sovereign"):
-    """Set as default."""
+async def set_default(
+    config_id: str,
+    db: Session = Depends(get_db),
+    user_id: str = "sovereign",
+):
+    """Set a configuration as the default."""
     config = db.query(UserModelConfig).filter_by(id=config_id, user_id=user_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Configuration not found")
-    
+
     db.query(UserModelConfig).filter_by(user_id=user_id, is_default=True).update({"is_default": False})
     config.is_default = True
     db.commit()
-    
+
     return {"message": "Configuration set as default", "config_id": config_id}
 
 
@@ -545,39 +589,39 @@ async def get_usage(
     config_id: str,
     days: int = 7,
     db: Session = Depends(get_db),
-    user_id: str = "sovereign"
+    user_id: str = "sovereign",
 ):
-    """Get usage statistics."""
+    """Get usage statistics for a configuration."""
     config = db.query(UserModelConfig).filter_by(id=config_id, user_id=user_id).first()
     if not config:
         raise HTTPException(status_code=404, detail="Configuration not found")
-    
+
     from datetime import datetime, timedelta
-    
+
     since = datetime.utcnow() - timedelta(days=days)
-    logs = db.query(ModelUsageLog).filter(
-        ModelUsageLog.config_id == config_id,
-        ModelUsageLog.created_at >= since
+    logs  = db.query(ModelUsageLog).filter(
+        ModelUsageLog.config_id  == config_id,
+        ModelUsageLog.created_at >= since,
     ).all()
-    
+
     total_tokens = sum(log.total_tokens for log in logs)
-    total_cost = sum(float(log.cost_usd or 0) for log in logs)
-    
-    daily = {}
+    total_cost   = sum(float(log.cost_usd or 0) for log in logs)
+
+    daily: Dict[str, Dict[str, Any]] = {}
     for log in logs:
         day = log.created_at.strftime("%Y-%m-%d")
         if day not in daily:
             daily[day] = {"tokens": 0, "requests": 0, "cost": 0.0}
-        daily[day]["tokens"] += log.total_tokens
+        daily[day]["tokens"]   += log.total_tokens
         daily[day]["requests"] += 1
-        daily[day]["cost"] += float(log.cost_usd or 0)
-    
+        daily[day]["cost"]     += float(log.cost_usd or 0)
+
     return {
-        "period_days": days,
-        "total_tokens": total_tokens,
-        "total_requests": len(logs),
-        "total_cost_usd": round(total_cost, 4),
-        "success_rate": sum(1 for log in logs if log.success) / max(len(logs), 1) * 100,
-        "daily_breakdown": daily,
-        "by_model": {}
+        "period_days":      days,
+        "total_tokens":     total_tokens,
+        "total_requests":   len(logs),
+        "total_cost_usd":   round(total_cost, 4),
+        "success_rate":     sum(1 for log in logs if log.success) / max(len(logs), 1) * 100,
+        "daily_breakdown":  daily,
+        "by_model":         {},
     }

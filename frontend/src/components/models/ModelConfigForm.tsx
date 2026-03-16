@@ -1,3 +1,16 @@
+/**
+ * frontend/src/components/models/ModelConfigForm.tsx
+ *
+ * Two-step wizard for creating / editing a model configuration.
+ *
+ * Changes from original:
+ *  ✓ Removed local normaliseId, ProviderIcon, getProviderGradient — now imported
+ *    from @/constants/providerMeta (single source of truth shared with ModelCard)
+ *  ✓ Removed console.log debug line from provider grid map
+ *  ✓ Replaced catch (err: any) with typed getErrorMessage
+ *  ✓ handleTestConnection payload typed explicitly (removed `any`)
+ */
+
 import React, { useState, useEffect } from 'react';
 import {
     AlertCircle,
@@ -9,25 +22,16 @@ import {
     Settings,
     TestTube,
     ChevronLeft,
-    Sparkles,
-    Zap,
     CheckCircle,
     XCircle,
     Download,
-    Brain,
-    BrainCircuit,
-    Cpu,
-    Bot,
-    Atom,
-    Wand2,
-    Network,
-    Layers3,
-    DatabaseZap,
-    Workflow,
-    SlidersHorizontal,
 } from 'lucide-react';
-import { modelsApi } from '../../services/models';
-import type { ModelConfig, ProviderInfo, ProviderType } from '../../types';
+import { modelsApi } from '@/services/models';
+import { getProviderFormGradient, ProviderFormIcon } from '@/constants/providerMeta';
+import { getErrorMessage } from '@/utils/errors';
+import type { ModelConfig, ProviderInfo, ProviderType } from '@/types';
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ModelConfigFormProps {
     initialConfig?: ModelConfig;
@@ -35,7 +39,13 @@ interface ModelConfigFormProps {
     onCancel: () => void;
 }
 
-export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig, onSave, onCancel }) => {
+// ─── Component ────────────────────────────────────────────────────────────────
+
+export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({
+    initialConfig,
+    onSave,
+    onCancel,
+}) => {
     const [step, setStep] = useState<'provider' | 'configure'>('provider');
     const [providers, setProviders] = useState<ProviderInfo[]>([]);
     const [selectedProvider, setSelectedProvider] = useState<ProviderInfo | null>(null);
@@ -61,8 +71,14 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
     const [isLoading, setIsLoading] = useState(false);
     const [testing, setTesting] = useState(false);
     const [fetchingModels, setFetchingModels] = useState(false);
-    const [testResult, setTestResult] = useState<{ success: boolean; message: string; error?: string } | null>(null);
+    const [testResult, setTestResult] = useState<{
+        success: boolean;
+        message: string;
+        error?: string;
+    } | null>(null);
     const [error, setError] = useState<string | null>(null);
+
+    // ── Load providers on mount ────────────────────────────────────────────
 
     useEffect(() => {
         const loadProviders = async () => {
@@ -74,14 +90,16 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                 } else {
                     setError('Invalid providers data received');
                 }
-            } catch (err: any) {
-                setError(err.message || 'Failed to load providers');
+            } catch (err: unknown) {
+                setError(getErrorMessage(err) || 'Failed to load providers');
             } finally {
                 setIsLoadingProviders(false);
             }
         };
         loadProviders();
     }, []);
+
+    // ── Pre-populate form when editing an existing config ─────────────────
 
     useEffect(() => {
         if (initialConfig && providers.length > 0) {
@@ -106,6 +124,8 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
             });
         }
     }, [initialConfig, providers]);
+
+    // ── Handlers ──────────────────────────────────────────────────────────
 
     const selectProvider = (provider: ProviderInfo) => {
         setSelectedProvider(provider);
@@ -138,14 +158,23 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
         const { name, value, type } = e.target;
         setFormData(prev => ({
             ...prev,
-            [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked :
-                type === 'number' ? parseFloat(value) : value,
+            [name]: type === 'checkbox'
+                ? (e.target as HTMLInputElement).checked
+                : type === 'number'
+                    ? parseFloat(value)
+                    : value,
         }));
     };
 
     const fetchAvailableModels = async () => {
-        if (!formData.provider) { setError('Please select a provider first'); return; }
-        if (selectedProvider?.requires_api_key && !formData.api_key) { setError('API key required to fetch models'); return; }
+        if (!formData.provider) {
+            setError('Please select a provider first');
+            return;
+        }
+        if (selectedProvider?.requires_api_key && !formData.api_key) {
+            setError('API key required to fetch models');
+            return;
+        }
 
         setFetchingModels(true);
         setError(null);
@@ -160,13 +189,19 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
             setFormData(prev => ({
                 ...prev,
                 available_models: result.models || [],
-                default_model: prev.default_model || result.default_recommended || result.models?.[0] || '',
+                default_model: prev.default_model
+                    || result.default_recommended
+                    || result.models?.[0]
+                    || '',
             }));
-            setTestResult({ success: true, message: `✓ Found ${result.count} available models from ${result.provider}` });
-        } catch (err: any) {
-            const errorMsg = err.response?.data?.detail || err.message || 'Unknown error';
-            setError(`Failed to fetch models: ${errorMsg}`);
-            setTestResult({ success: false, message: 'Failed to fetch models', error: errorMsg });
+            setTestResult({
+                success: true,
+                message: `✓ Found ${result.count} available models from ${result.provider}`,
+            });
+        } catch (err: unknown) {
+            const msg = getErrorMessage(err);
+            setError(`Failed to fetch models: ${msg}`);
+            setTestResult({ success: false, message: 'Failed to fetch models', error: msg });
         } finally {
             setFetchingModels(false);
         }
@@ -177,28 +212,37 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
         setTestResult(null);
         setError(null);
         try {
-            const payload: any = {
+            const payload: Parameters<typeof modelsApi.createConfig>[0] = {
                 provider: formData.provider,
                 config_name: 'Test Config',
                 default_model: formData.default_model,
                 api_key: formData.api_key || undefined,
                 max_tokens: formData.max_tokens,
                 temperature: formData.temperature,
+                ...(formData.provider === 'local'
+                    ? { local_server_url: formData.local_server_url }
+                    : formData.api_base_url
+                        ? { api_base_url: formData.api_base_url }
+                        : {}),
+                ...(isUniversal ? { provider_name: formData.custom_provider_name } : {}),
             };
-            if (formData.provider === 'local') payload.local_server_url = formData.local_server_url;
-            else if (formData.api_base_url) payload.api_base_url = formData.api_base_url;
-            if (isUniversal) payload.provider_name = formData.custom_provider_name;
 
             const tempConfig = await modelsApi.createConfig(payload);
             const result = await modelsApi.testConfig(tempConfig.id);
             setTestResult({
                 success: result.success,
-                message: result.success ? `✓ Connection successful! (${result.latency_ms}ms)` : '✗ Connection failed',
+                message: result.success
+                    ? `✓ Connection successful! (${result.latency_ms}ms)`
+                    : '✗ Connection failed',
                 error: result.error,
             });
             await modelsApi.deleteConfig(tempConfig.id);
-        } catch (err: any) {
-            setTestResult({ success: false, message: 'Connection failed', error: err.response?.data?.detail || err.message });
+        } catch (err: unknown) {
+            setTestResult({
+                success: false,
+                message: 'Connection failed',
+                error: getErrorMessage(err),
+            });
         } finally {
             setTesting(false);
         }
@@ -209,7 +253,7 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
         setIsLoading(true);
         setError(null);
         try {
-            const payload: any = {
+            const base = {
                 provider: formData.provider,
                 config_name: formData.config_name,
                 default_model: formData.default_model,
@@ -219,74 +263,47 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                 top_p: formData.top_p,
                 timeout_seconds: formData.timeout,
                 is_default: formData.is_default,
+                ...(formData.api_key ? { api_key: formData.api_key } : {}),
+                ...(formData.provider === 'local'
+                    ? { local_server_url: formData.local_server_url }
+                    : formData.api_base_url
+                        ? { api_base_url: formData.api_base_url }
+                        : {}),
+                ...((isUniversal || formData.provider === 'custom')
+                    ? { provider_name: formData.custom_provider_name }
+                    : {}),
             };
-            if (formData.api_key) payload.api_key = formData.api_key;
-            if (formData.provider === 'local') payload.local_server_url = formData.local_server_url;
-            else if (formData.api_base_url) payload.api_base_url = formData.api_base_url;
-            if (isUniversal || formData.provider === 'custom') payload.provider_name = formData.custom_provider_name;
 
             const result = initialConfig
-                ? await modelsApi.updateConfig(initialConfig.id, payload)
-                : await modelsApi.createConfig(payload);
+                ? await modelsApi.updateConfig(initialConfig.id, base)
+                : await modelsApi.createConfig(base);
+
             onSave(result);
-        } catch (err: any) {
-            setError(err.response?.data?.detail || err.message || 'Failed to save configuration');
+        } catch (err: unknown) {
+            setError(getErrorMessage(err) || 'Failed to save configuration');
         } finally {
             setIsLoading(false);
         }
     };
 
-    // Normalise provider ID for fuzzy matching — handles any casing or separator style
-    const normaliseId = (id: string) => (id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-
-    const ProviderIcon = ({ providerId, className = "w-5 h-5 text-white" }: { providerId: string; className?: string }) => {
-        const id = normaliseId(providerId);
-        if (id.includes('openai')   || id.includes('gpt'))      return <Sparkles     className={className} />;
-        if (id.includes('anthropic')|| id.includes('claude'))   return <Brain        className={className} />;
-        if (id.includes('gemini')   || id.includes('google'))   return <Atom         className={className} />;
-        if (id.includes('groq'))                                 return <Zap          className={className} />;
-        if (id.includes('mistral'))                              return <BrainCircuit className={className} />;
-        if (id.includes('together'))                             return <Layers3      className={className} />;
-        if (id.includes('moonshot'))                             return <Wand2        className={className} />;
-        if (id.includes('deepseek'))                             return <DatabaseZap  className={className} />;
-        if (id.includes('local')    || id.includes('ollama'))   return <Server       className={className} />;
-        if (id.includes('custom')   || id.includes('universal'))return <Globe        className={className} />;
-        console.warn(`⚠️ No icon match for provider id: "${providerId}" (normalised: "${id}")`);
-        return <Cpu className={className} />;
-    };
-
-    const getProviderGradient = (provider: string) => {
-        const id = normaliseId(provider);
-        if (id.includes('openai')   || id.includes('gpt'))      return 'from-emerald-400 to-teal-600';
-        if (id.includes('anthropic')|| id.includes('claude'))   return 'from-amber-400 to-orange-600';
-        if (id.includes('gemini')   || id.includes('google'))   return 'from-blue-400 to-violet-600';
-        if (id.includes('groq'))                                 return 'from-fuchsia-500 to-purple-700';
-        if (id.includes('mistral'))                              return 'from-sky-400 to-cyan-600';
-        if (id.includes('together'))                             return 'from-rose-400 to-pink-600';
-        if (id.includes('moonshot'))                             return 'from-indigo-400 to-blue-700';
-        if (id.includes('deepseek'))                             return 'from-red-400 to-rose-700';
-        if (id.includes('local')    || id.includes('ollama'))   return 'from-slate-400 to-gray-600';
-        if (id.includes('custom')   || id.includes('universal'))return 'from-yellow-400 to-orange-500';
-        return 'from-gray-500 to-slate-600';
-    };
-
-    /* ── Shared input class ── */
+    /* ── Shared input class ───────────────────────────────────────────────── */
     const inputCls = 'w-full px-4 py-2.5 text-sm bg-white dark:bg-[#0f1117] border border-gray-200 dark:border-[#1e2535] rounded-lg text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500 transition-colors duration-150';
 
-    /* ══════════════════════════════════════════════════════════════════
-       STEP 1 — Provider Selection
-    ══════════════════════════════════════════════════════════════════ */
+    /* ══════════════════════════════════════════════════════════════════════
+       STEP 1 — Provider selection
+    ══════════════════════════════════════════════════════════════════════ */
     if (step === 'provider') {
         return (
             <div className="min-h-screen bg-gray-50 dark:bg-[#0f1117] p-6 md:p-8 transition-colors duration-200">
                 <div className="max-w-6xl mx-auto">
 
-                    {/* Back button */}
+                    {/* Back */}
                     <button
                         onClick={onCancel}
                         className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mb-8 transition-colors duration-150 group"
+                        aria-label="Back to configurations"
                     >
-                        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform duration-150" />
+                        <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform duration-150" aria-hidden="true" />
                         Back to Configurations
                     </button>
 
@@ -302,8 +319,8 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
 
                     {/* Error */}
                     {error && (
-                        <div className="mb-6 p-4 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl flex items-start gap-3">
-                            <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                        <div className="mb-6 p-4 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl flex items-start gap-3" role="alert">
+                            <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
                             <div>
                                 <p className="text-sm font-medium text-red-900 dark:text-red-300">Error</p>
                                 <p className="text-sm text-red-700 dark:text-red-400/80 mt-0.5">{error}</p>
@@ -311,58 +328,64 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                         </div>
                     )}
 
-                    {/* Loading */}
+                    {/* Provider grid */}
                     {isLoadingProviders ? (
-                        <div className="flex items-center justify-center py-24">
-                            <Loader2 className="w-7 h-7 animate-spin text-blue-600 dark:text-blue-400" />
+                        <div className="flex items-center justify-center py-24" aria-live="polite" aria-busy="true">
+                            <Loader2 className="w-7 h-7 animate-spin text-blue-600 dark:text-blue-400" aria-hidden="true" />
                             <span className="ml-3 text-sm text-gray-500 dark:text-gray-400">Loading providers…</span>
                         </div>
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
                             {providers && providers.length > 0 ? (
-                                providers.filter(p => {
-                                    if (!p) return false;
-                                    const nid = normaliseId(p.id);
-                                    return !nid.includes('custom') && !nid.includes('universal');
-                                }).map((provider) => {
-                                    console.log(`🔍 provider.id="${provider.id}"  normalised="${normaliseId(provider.id)}"  display="${provider.display_name}"`);
-                                    return (
-                                    <button
-                                        key={provider.id}
-                                        onClick={() => selectProvider(provider)}
-                                        data-provider-id={provider.id}
-                                        className="group relative bg-white dark:bg-[#161b27] rounded-xl p-5 border border-gray-200 dark:border-[#1e2535] hover:border-gray-300 dark:hover:border-[#2a3347] hover:shadow-md dark:hover:shadow-[0_4px_20px_rgba(0,0,0,0.35)] transition-all duration-150 text-left overflow-hidden"
-                                    >
-                                        {/* Subtle gradient glow on hover */}
-                                        <div className={`absolute inset-0 bg-gradient-to-br ${getProviderGradient(provider.id)} opacity-0 group-hover:opacity-[0.04] transition-opacity duration-300 pointer-events-none`} />
+                                providers
+                                    .filter(p => {
+                                        if (!p) return false;
+                                        const nid = (p.id || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+                                        return !nid.includes('custom') && !nid.includes('universal');
+                                    })
+                                    .map((provider) => (
+                                        <button
+                                            key={provider.id}
+                                            onClick={() => selectProvider(provider)}
+                                            data-provider-id={provider.id}
+                                            aria-label={`Select ${provider.display_name}`}
+                                            className="group relative bg-white dark:bg-[#161b27] rounded-xl p-5 border border-gray-200 dark:border-[#1e2535] hover:border-gray-300 dark:hover:border-[#2a3347] hover:shadow-md dark:hover:shadow-[0_4px_20px_rgba(0,0,0,0.35)] transition-all duration-150 text-left overflow-hidden"
+                                        >
+                                            {/* Hover glow */}
+                                            <div
+                                                className={`absolute inset-0 bg-gradient-to-br ${getProviderFormGradient(provider.id)} opacity-0 group-hover:opacity-[0.04] transition-opacity duration-300 pointer-events-none`}
+                                                aria-hidden="true"
+                                            />
 
-                                        {/* Provider icon */}
-                                        <div className={`w-11 h-11 rounded-lg bg-gradient-to-br ${getProviderGradient(provider.id)} flex items-center justify-center mb-4 shadow-lg`}>
-                                            <ProviderIcon providerId={provider.id} />
-                                        </div>
-
-                                        <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">
-                                            {provider.display_name}
-                                        </h3>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 leading-relaxed">
-                                            {provider.description}
-                                        </p>
-
-                                        {provider.popular_models && provider.popular_models.length > 0 && (
-                                            <div className="flex flex-wrap gap-1.5">
-                                                {provider.popular_models.slice(0, 3).map((model, idx) => (
-                                                    <span
-                                                        key={idx}
-                                                        className="px-2 py-0.5 bg-gray-100 dark:bg-[#0f1117] border border-gray-200 dark:border-[#2a3347] text-gray-600 dark:text-gray-400 rounded-md text-xs font-mono"
-                                                    >
-                                                        {model?.split('/')?.pop() || model}
-                                                    </span>
-                                                ))}
+                                            {/* Provider icon */}
+                                            <div
+                                                className={`w-11 h-11 rounded-lg bg-gradient-to-br ${getProviderFormGradient(provider.id)} flex items-center justify-center mb-4 shadow-lg`}
+                                                aria-hidden="true"
+                                            >
+                                                <ProviderFormIcon providerId={provider.id} />
                                             </div>
-                                        )}
-                                    </button>
-                                    );
-                                })
+
+                                            <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">
+                                                {provider.display_name}
+                                            </h3>
+                                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 leading-relaxed">
+                                                {provider.description}
+                                            </p>
+
+                                            {provider.popular_models && provider.popular_models.length > 0 && (
+                                                <div className="flex flex-wrap gap-1.5" aria-label={`Popular models for ${provider.display_name}`}>
+                                                    {provider.popular_models.slice(0, 3).map((model, idx) => (
+                                                        <span
+                                                            key={idx}
+                                                            className="px-2 py-0.5 bg-gray-100 dark:bg-[#0f1117] border border-gray-200 dark:border-[#2a3347] text-gray-600 dark:text-gray-400 rounded-md text-xs font-mono"
+                                                        >
+                                                            {model?.split('/')?.pop() || model}
+                                                        </span>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </button>
+                                    ))
                             ) : (
                                 <div className="col-span-full text-center py-16 text-sm text-gray-500 dark:text-gray-400">
                                     No providers available. Please check your connection.
@@ -372,11 +395,11 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                             {/* Custom Provider card */}
                             <button
                                 onClick={handleUniversalSelect}
+                                aria-label="Select custom OpenAI-compatible provider"
                                 className="group bg-white dark:bg-[#161b27] rounded-xl p-5 border border-gray-200 dark:border-[#1e2535] hover:border-yellow-300 dark:hover:border-yellow-500/30 hover:shadow-md dark:hover:shadow-[0_4px_20px_rgba(0,0,0,0.35)] transition-all duration-150 text-left overflow-hidden relative"
                             >
-                                <div className="absolute inset-0 bg-gradient-to-br from-yellow-500 to-orange-600 opacity-0 group-hover:opacity-[0.04] transition-opacity duration-300 pointer-events-none" />
-
-                                <div className="w-11 h-11 rounded-lg bg-gradient-to-br from-yellow-500 to-orange-600 flex items-center justify-center mb-4">
+                                <div className="absolute inset-0 bg-gradient-to-br from-yellow-500 to-orange-600 opacity-0 group-hover:opacity-[0.04] transition-opacity duration-300 pointer-events-none" aria-hidden="true" />
+                                <div className="w-11 h-11 rounded-lg bg-gradient-to-br from-yellow-500 to-orange-600 flex items-center justify-center mb-4" aria-hidden="true">
                                     <Globe className="w-5 h-5 text-white" />
                                 </div>
                                 <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-1">
@@ -393,27 +416,31 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
         );
     }
 
-    /* ══════════════════════════════════════════════════════════════════
+    /* ══════════════════════════════════════════════════════════════════════
        STEP 2 — Configure
-    ══════════════════════════════════════════════════════════════════ */
+    ══════════════════════════════════════════════════════════════════════ */
     return (
         <div className="min-h-screen bg-gray-50 dark:bg-[#0f1117] p-6 md:p-8 transition-colors duration-200">
             <div className="max-w-3xl mx-auto">
 
-                {/* Back button */}
+                {/* Back */}
                 <button
                     onClick={() => setStep('provider')}
+                    aria-label="Back to provider selection"
                     className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white mb-8 transition-colors duration-150 group"
                 >
-                    <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform duration-150" />
+                    <ChevronLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform duration-150" aria-hidden="true" />
                     Change Provider
                 </button>
 
                 {/* Header */}
                 <div className="mb-8 flex items-center gap-4">
                     {(selectedProvider || isUniversal) && (
-                        <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${getProviderGradient(selectedProvider?.id || 'custom')} flex items-center justify-center shadow-lg flex-shrink-0`}>
-                            <ProviderIcon providerId={selectedProvider?.id || 'custom'} />
+                        <div
+                            className={`w-12 h-12 rounded-xl bg-gradient-to-br ${getProviderFormGradient(selectedProvider?.id || 'custom')} flex items-center justify-center shadow-lg flex-shrink-0`}
+                            aria-hidden="true"
+                        >
+                            <ProviderFormIcon providerId={selectedProvider?.id || 'custom'} />
                         </div>
                     )}
                     <div>
@@ -428,12 +455,12 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
 
                 {/* Form card */}
                 <div className="bg-white dark:bg-[#161b27] rounded-2xl border border-gray-200 dark:border-[#1e2535] shadow-sm dark:shadow-[0_2px_16px_rgba(0,0,0,0.25)] overflow-hidden transition-colors duration-200">
-                    <form onSubmit={handleSubmit} className="p-6 md:p-8 space-y-6">
+                    <form onSubmit={handleSubmit} className="p-6 md:p-8 space-y-6" noValidate>
 
-                        {/* ── Error banner ── */}
+                        {/* Error banner */}
                         {error && (
-                            <div className="p-4 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl flex items-start gap-3">
-                                <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                            <div className="p-4 bg-red-50 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 rounded-xl flex items-start gap-3" role="alert">
+                                <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
                                 <div>
                                     <p className="text-sm font-medium text-red-900 dark:text-red-300">Error</p>
                                     <p className="text-sm text-red-700 dark:text-red-400/80 mt-0.5">{error}</p>
@@ -441,22 +468,19 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                             </div>
                         )}
 
-                        {/* ── Test result banner ── */}
+                        {/* Test result banner */}
                         {testResult && (
-                            <div className={`p-4 rounded-xl flex items-start gap-3 border ${
-                                testResult.success
+                            <div className={`p-4 rounded-xl flex items-start gap-3 border ${testResult.success
                                     ? 'bg-green-50 dark:bg-green-500/10 border-green-200 dark:border-green-500/20'
                                     : 'bg-red-50 dark:bg-red-500/10 border-red-200 dark:border-red-500/20'
-                            }`}>
-                                {testResult.success ? (
-                                    <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
-                                ) : (
-                                    <XCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
-                                )}
+                                }`} role="status">
+                                {testResult.success
+                                    ? <CheckCircle className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                                    : <XCircle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" aria-hidden="true" />
+                                }
                                 <div>
-                                    <p className={`text-sm font-medium ${
-                                        testResult.success ? 'text-green-900 dark:text-green-300' : 'text-red-900 dark:text-red-300'
-                                    }`}>
+                                    <p className={`text-sm font-medium ${testResult.success ? 'text-green-900 dark:text-green-300' : 'text-red-900 dark:text-red-300'
+                                        }`}>
                                         {testResult.message}
                                     </p>
                                     {testResult.error && (
@@ -466,12 +490,13 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                             </div>
                         )}
 
-                        {/* ── Configuration Name ── */}
+                        {/* Configuration Name */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                                Configuration Name <span className="text-red-500">*</span>
+                            <label htmlFor="config_name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                                Configuration Name <span className="text-red-500" aria-hidden="true">*</span>
                             </label>
                             <input
+                                id="config_name"
                                 type="text"
                                 name="config_name"
                                 value={formData.config_name}
@@ -479,16 +504,18 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                                 className={inputCls}
                                 placeholder="My OpenAI Config"
                                 required
+                                aria-required="true"
                             />
                         </div>
 
-                        {/* ── Custom Provider Name ── */}
+                        {/* Custom Provider Name */}
                         {isUniversal && (
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                                    Provider Name <span className="text-red-500">*</span>
+                                <label htmlFor="custom_provider_name" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                                    Provider Name <span className="text-red-500" aria-hidden="true">*</span>
                                 </label>
                                 <input
+                                    id="custom_provider_name"
                                     type="text"
                                     name="custom_provider_name"
                                     value={formData.custom_provider_name}
@@ -496,18 +523,20 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                                     className={inputCls}
                                     placeholder="e.g. My Custom LLM"
                                     required
+                                    aria-required="true"
                                 />
                             </div>
                         )}
 
-                        {/* ── API Key ── */}
+                        {/* API Key */}
                         {selectedProvider?.requires_api_key && (
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 items-center gap-2">
-                                    <Key className="w-4 h-4" />
-                                    API Key <span className="text-red-500">*</span>
+                                <label htmlFor="api_key" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 flex items-center gap-2">
+                                    <Key className="w-4 h-4" aria-hidden="true" />
+                                    API Key <span className="text-red-500" aria-hidden="true">*</span>
                                 </label>
                                 <input
+                                    id="api_key"
                                     type="password"
                                     name="api_key"
                                     value={formData.api_key}
@@ -515,6 +544,8 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                                     className={`${inputCls} font-mono`}
                                     placeholder="sk-..."
                                     required={!initialConfig}
+                                    aria-required={!initialConfig}
+                                    autoComplete="new-password"
                                 />
                                 {initialConfig?.api_key_masked && !formData.api_key && (
                                     <p className="text-xs text-gray-400 dark:text-gray-500 mt-1.5">
@@ -524,34 +555,37 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                             </div>
                         )}
 
-                        {/* ── API Base URL ── */}
+                        {/* API Base URL */}
                         {(selectedProvider?.requires_base_url || isUniversal) && (
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 items-center gap-2">
-                                    <Globe className="w-4 h-4" />
-                                    API Base URL <span className="text-red-500">*</span>
+                                <label htmlFor="api_base_url" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 flex items-center gap-2">
+                                    <Globe className="w-4 h-4" aria-hidden="true" />
+                                    API Base URL <span className="text-red-500" aria-hidden="true">*</span>
                                 </label>
                                 <input
-                                    type="text"
+                                    id="api_base_url"
+                                    type="url"
                                     name="api_base_url"
                                     value={formData.api_base_url}
                                     onChange={handleChange}
                                     className={`${inputCls} font-mono`}
                                     placeholder="https://api.provider.com/v1"
                                     required
+                                    aria-required="true"
                                 />
                             </div>
                         )}
 
-                        {/* ── Local Server URL ── */}
+                        {/* Local Server URL */}
                         {formData.provider === 'local' && (
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 items-center gap-2">
-                                    <Server className="w-4 h-4" />
+                                <label htmlFor="local_server_url" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5 flex items-center gap-2">
+                                    <Server className="w-4 h-4" aria-hidden="true" />
                                     Local Server URL
                                 </label>
-                                <input aria-label="Local Server URL"
-                                    type="text"
+                                <input
+                                    id="local_server_url"
+                                    type="url"
                                     name="local_server_url"
                                     value={formData.local_server_url}
                                     onChange={handleChange}
@@ -563,19 +597,21 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                             </div>
                         )}
 
-                        {/* ── Model Selection ── */}
+                        {/* Model Selection */}
                         <div>
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                                Model <span className="text-red-500">*</span>
+                            <label htmlFor="default_model" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                                Model <span className="text-red-500" aria-hidden="true">*</span>
                             </label>
                             <div className="flex gap-2">
                                 {formData.available_models.length > 0 ? (
-                                    <select aria-label="Model"
+                                    <select
+                                        id="default_model"
                                         name="default_model"
                                         value={formData.default_model}
                                         onChange={handleChange}
                                         className={`${inputCls} flex-1 font-mono appearance-none cursor-pointer`}
                                         required
+                                        aria-required="true"
                                     >
                                         <option value="">Select a model…</option>
                                         {formData.available_models.map((m) => (
@@ -584,6 +620,7 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                                     </select>
                                 ) : (
                                     <input
+                                        id="default_model"
                                         type="text"
                                         name="default_model"
                                         value={formData.default_model}
@@ -591,6 +628,7 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                                         className={`${inputCls} flex-1 font-mono`}
                                         placeholder={isUniversal ? 'model-name' : 'Select or type model name'}
                                         required
+                                        aria-required="true"
                                     />
                                 )}
 
@@ -600,10 +638,14 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                                         type="button"
                                         onClick={fetchAvailableModels}
                                         disabled={fetchingModels || (!formData.api_key && selectedProvider?.requires_api_key === true)}
-                                        className="px-3 py-2.5 bg-blue-600 hover:bg-blue-700 dark:hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors duration-150 flex items-center gap-1.5 whitespace-nowrap shadow-sm"
+                                        aria-label="Fetch available models from provider"
                                         title={!formData.api_key && selectedProvider?.requires_api_key ? 'Enter API key first' : 'Fetch available models from provider'}
+                                        className="px-3 py-2.5 bg-blue-600 hover:bg-blue-700 dark:hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors duration-150 flex items-center gap-1.5 whitespace-nowrap shadow-sm"
                                     >
-                                        {fetchingModels ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                                        {fetchingModels
+                                            ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                                            : <Download className="w-4 h-4" aria-hidden="true" />
+                                        }
                                         {fetchingModels ? 'Fetching…' : 'Fetch'}
                                     </button>
                                 )}
@@ -612,18 +654,22 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                                         type="button"
                                         onClick={fetchAvailableModels}
                                         disabled={fetchingModels}
-                                        className="px-3 py-2.5 bg-blue-600 hover:bg-blue-700 dark:hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors duration-150 flex items-center gap-1.5 whitespace-nowrap shadow-sm"
+                                        aria-label="Fetch installed models from local server"
                                         title="Fetch installed models from local server"
+                                        className="px-3 py-2.5 bg-blue-600 hover:bg-blue-700 dark:hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors duration-150 flex items-center gap-1.5 whitespace-nowrap shadow-sm"
                                     >
-                                        {fetchingModels ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                                        {fetchingModels
+                                            ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                                            : <Download className="w-4 h-4" aria-hidden="true" />
+                                        }
                                         {fetchingModels ? 'Fetching…' : 'Fetch'}
                                     </button>
                                 )}
                             </div>
 
                             {formData.available_models.length > 0 ? (
-                                <p className="text-xs text-green-600 dark:text-green-400 mt-1.5 flex items-center gap-1">
-                                    <Check className="w-3 h-3" />
+                                <p className="text-xs text-green-600 dark:text-green-400 mt-1.5 flex items-center gap-1" role="status">
+                                    <Check className="w-3 h-3" aria-hidden="true" />
                                     {formData.available_models.length} models available from {formData.provider}
                                 </p>
                             ) : (
@@ -631,23 +677,26 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                                     {isUniversal
                                         ? 'Enter the exact model name as expected by the API'
                                         : selectedProvider?.requires_api_key && !formData.api_key
-                                        ? "Enter your API key and click 'Fetch' to see available options"
-                                        : "Click 'Fetch' to see available options, or type a model name manually"
+                                            ? "Enter your API key and click 'Fetch' to see available options"
+                                            : "Click 'Fetch' to see available options, or type a model name manually"
                                     }
                                 </p>
                             )}
                         </div>
 
-                        {/* ── Advanced Settings ── */}
+                        {/* Advanced Settings */}
                         <div className="bg-gray-50 dark:bg-[#0f1117] border border-gray-100 dark:border-[#1e2535] rounded-xl p-5">
                             <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-4 flex items-center gap-2">
-                                <Settings className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                                <Settings className="w-4 h-4 text-gray-500 dark:text-gray-400" aria-hidden="true" />
                                 Advanced Settings
                             </h4>
                             <div className="grid grid-cols-2 gap-4">
                                 <div>
-                                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">Max Tokens</label>
-                                    <input aria-label="Max Tokens"
+                                    <label htmlFor="max_tokens" className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">
+                                        Max Tokens
+                                    </label>
+                                    <input
+                                        id="max_tokens"
                                         type="number"
                                         name="max_tokens"
                                         value={formData.max_tokens}
@@ -658,8 +707,11 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                                     />
                                 </div>
                                 <div>
-                                    <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">Temperature</label>
-                                    <input aria-label="Temperature"
+                                    <label htmlFor="temperature" className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1.5">
+                                        Temperature
+                                    </label>
+                                    <input
+                                        id="temperature"
                                         type="number"
                                         name="temperature"
                                         value={formData.temperature}
@@ -673,9 +725,10 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                             </div>
                         </div>
 
-                        {/* ── Default checkbox ── */}
-                        <label className="flex items-center gap-3 cursor-pointer group">
+                        {/* Default checkbox */}
+                        <label htmlFor="is_default" className="flex items-center gap-3 cursor-pointer group">
                             <input
+                                id="is_default"
                                 type="checkbox"
                                 name="is_default"
                                 checked={formData.is_default}
@@ -687,21 +740,22 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                             </span>
                         </label>
 
-                        {/* ── Test Connection ── */}
+                        {/* Test Connection */}
                         <button
                             type="button"
                             onClick={handleTestConnection}
                             disabled={testing || !formData.default_model}
+                            aria-label="Test connection with current settings"
                             className="w-full py-2.5 bg-gray-100 dark:bg-[#1e2535] hover:bg-gray-200 dark:hover:bg-[#2a3347] text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-[#2a3347] rounded-lg text-sm font-medium flex items-center justify-center gap-2 transition-all duration-150 disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                             {testing ? (
-                                <><Loader2 className="w-4 h-4 animate-spin" />Testing Connection…</>
+                                <><Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />Testing Connection…</>
                             ) : (
-                                <><TestTube className="w-4 h-4" />Test Connection</>
+                                <><TestTube className="w-4 h-4" aria-hidden="true" />Test Connection</>
                             )}
                         </button>
 
-                        {/* ── Footer actions ── */}
+                        {/* Footer actions */}
                         <div className="flex gap-3 pt-2 border-t border-gray-100 dark:border-[#1e2535]">
                             <button
                                 type="button"
@@ -714,9 +768,10 @@ export const ModelConfigForm: React.FC<ModelConfigFormProps> = ({ initialConfig,
                             <button
                                 type="submit"
                                 disabled={isLoading}
+                                aria-label={initialConfig ? 'Update configuration' : 'Create configuration'}
                                 className="flex-1 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 dark:hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors duration-150 disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-sm"
                             >
-                                {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                                {isLoading && <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />}
                                 {initialConfig ? 'Update Configuration' : 'Create Configuration'}
                             </button>
                         </div>

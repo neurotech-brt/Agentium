@@ -1,6 +1,6 @@
 // src/pages/RBACManagement.tsx
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import {
     Shield,
     Users,
@@ -18,38 +18,48 @@ import {
     HandMetal,
     AlertTriangle,
     CheckCircle,
+    XCircle,
 } from 'lucide-react';
-import { api } from '@/services/api';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store/authStore';
 import { rbacService, Delegation, RBACUser } from '@/services/rbac';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-interface UserWithRole extends RBACUser {
-    created_at?: string;
-}
+// RBACUser (from services/rbac.ts) now carries created_at — no local alias needed.
 
 interface Capability {
     name: string;
     description: string;
     tier: string;
+    /** Whether this capability is valid for delegation (backed by the server). */
+    delegatable: boolean;
 }
 
+// Reference list — all capabilities displayed in the Capabilities tab.
+// The `delegatable` flag marks the four backend-enforced valid capabilities.
+// The modal filters to delegatable:true so users can never select a name
+// that the server would reject with a 400.
 const CAPABILITIES: Capability[] = [
-    { name: 'veto', description: 'Override Council decisions', tier: '0xxxx' },
-    { name: 'amendment', description: 'Propose constitutional amendments', tier: '0xxxx' },
-    { name: 'liquidate_any', description: 'Liquidate any agent', tier: '0xxxx' },
-    { name: 'admin_vector_db', description: 'Administer vector database', tier: '0xxxx' },
-    { name: 'propose_amendment', description: 'Propose amendments', tier: '1xxxx' },
-    { name: 'allocate_resources', description: 'Allocate system resources', tier: '1xxxx' },
-    { name: 'audit', description: 'View audit logs', tier: '1xxxx' },
-    { name: 'moderate_knowledge', description: 'Moderate knowledge base', tier: '1xxxx' },
-    { name: 'spawn_task_agent', description: 'Spawn task agents', tier: '2xxxx' },
-    { name: 'delegate_work', description: 'Delegate work to agents', tier: '2xxxx' },
-    { name: 'request_resources', description: 'Request resources', tier: '2xxxx' },
-    { name: 'submit_knowledge', description: 'Submit to knowledge base', tier: '2xxxx' },
+    { name: 'veto',               description: 'Override Council decisions',        tier: '0xxxx', delegatable: true  },
+    { name: 'configure_agents',   description: 'Configure agent settings',          tier: '0xxxx', delegatable: true  },
+    { name: 'execute_tasks',      description: 'Execute system-level tasks',        tier: '0xxxx', delegatable: true  },
+    { name: 'manage_users',       description: 'Manage users and access',           tier: '0xxxx', delegatable: true  },
+    { name: 'amendment',          description: 'Propose constitutional amendments', tier: '0xxxx', delegatable: false },
+    { name: 'liquidate_any',      description: 'Liquidate any agent',               tier: '0xxxx', delegatable: false },
+    { name: 'admin_vector_db',    description: 'Administer vector database',        tier: '0xxxx', delegatable: false },
+    { name: 'propose_amendment',  description: 'Propose amendments',                tier: '1xxxx', delegatable: false },
+    { name: 'allocate_resources', description: 'Allocate system resources',        tier: '1xxxx', delegatable: false },
+    { name: 'audit',              description: 'View audit logs',                   tier: '1xxxx', delegatable: false },
+    { name: 'moderate_knowledge', description: 'Moderate knowledge base',           tier: '1xxxx', delegatable: false },
+    { name: 'spawn_task_agent',   description: 'Spawn task agents',                tier: '2xxxx', delegatable: false },
+    { name: 'delegate_work',      description: 'Delegate work to agents',           tier: '2xxxx', delegatable: false },
+    { name: 'request_resources',  description: 'Request resources',                tier: '2xxxx', delegatable: false },
+    { name: 'submit_knowledge',   description: 'Submit to knowledge base',         tier: '2xxxx', delegatable: false },
 ];
+
+/** Capabilities that can actually be sent to the backend delegation endpoint. */
+const DELEGATABLE_CAPABILITIES = CAPABILITIES.filter((c) => c.delegatable);
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -93,6 +103,8 @@ const getTierClasses = (tier: string) => {
             return 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-500/10 dark:text-yellow-400 dark:border-yellow-500/20';
         case '1xxxx':
             return 'bg-purple-100 text-purple-700 border-purple-200 dark:bg-purple-500/10 dark:text-purple-400 dark:border-purple-500/20';
+        case '2xxxx':
+            return 'bg-green-100 text-green-700 border-green-200 dark:bg-green-500/10 dark:text-green-400 dark:border-green-500/20';
         default:
             return 'bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-500/10 dark:text-blue-400 dark:border-blue-500/20';
     }
@@ -107,12 +119,46 @@ const formatDate = (dateString?: string) => {
     });
 };
 
-// ── Component ───────────────────────────────────────────────────────────────
+// ── Access Denied screen (rendered outside the main component so no hooks run) ──
+
+function AccessDenied() {
+    return (
+        <div className="min-h-screen bg-gray-50 dark:bg-[#0f1117] flex items-center justify-center p-6 transition-colors duration-200">
+            <div className="bg-white dark:bg-[#161b27] rounded-2xl shadow-xl dark:shadow-[0_8px_40px_rgba(0,0,0,0.5)] border border-gray-200 dark:border-[#1e2535] p-8 text-center max-w-md">
+                <div className="w-16 h-16 rounded-xl bg-red-100 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 flex items-center justify-center mx-auto mb-5">
+                    <Shield className="w-8 h-8 text-red-600 dark:text-red-400" />
+                </div>
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
+                    Access Denied
+                </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Only Sovereign users can manage RBAC settings.
+                </p>
+            </div>
+        </div>
+    );
+}
+
+// ── Thin public wrapper — auth gate lives here, above all hooks ───────────────
 
 export function RBACManagementPage() {
     const { user } = useAuthStore();
 
-    const [users, setUsers] = useState<UserWithRole[]>([]);
+    // Guard fires before any hooks run in the inner component.
+    // This prevents unnecessary data fetching for non-admin users.
+    if (!user?.is_admin) {
+        return <AccessDenied />;
+    }
+
+    return <RBACManagementInner />;
+}
+
+// ── Inner component — all hooks live here, only mounted for admins ────────────
+
+function RBACManagementInner() {
+    const { user } = useAuthStore();
+
+    const [users, setUsers] = useState<RBACUser[]>([]);
     const [delegations, setDelegations] = useState<Delegation[]>([]);
     const [loading, setLoading] = useState(true);
     const [activeTab, setActiveTab] = useState<'users' | 'delegations' | 'capabilities'>('users');
@@ -126,43 +172,38 @@ export function RBACManagementPage() {
     const [delegationExpiry, setDelegationExpiry] = useState('');
     const [delegating, setDelegating] = useState(false);
 
+    // Per-row revoke confirmation — stores the delegation ID pending confirmation,
+    // or null when no confirmation is in progress.
+    const [confirmRevokeId, setConfirmRevokeId] = useState<string | null>(null);
+    const [revokingId, setRevokingId] = useState<string | null>(null);
+
     // ── Effects ─────────────────────────────────────────────────────────────
 
     useEffect(() => {
         fetchData();
-    }, []);
+    }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-    // ── Data fetching ────────────────────────────────────────────────────
+    // ── Data fetching ────────────────────────────────────────────────────────
+    // Wrapped in useCallback so it has a stable identity for useEffect
+    // and can be safely passed as a prop if this component is ever split.
 
-    const fetchData = async () => {
+    const fetchData = useCallback(async () => {
         setLoading(true);
         try {
-            const [usersRes, delegationsRes] = await Promise.allSettled([
-                rbacService.listUsersWithRoles(),
-                // /api/v1/rbac/delegations is not a route — delegations come
-                // embedded in each user's active_delegations field from /roles.
-                // We flatten them here as a convenience.
-                rbacService.listUsersWithRoles(),
-            ]);
-
-            const resolvedUsers =
-                usersRes.status === 'fulfilled' ? usersRes.value : [];
+            // Delegations are embedded in each user's active_delegations field
+            // from the /roles endpoint — no second API call is needed.
+            const resolvedUsers = await rbacService.listUsersWithRoles();
             setUsers(resolvedUsers);
-
-            // Flatten all active_delegations from all users into a single list
-            const allDelegations = resolvedUsers.flatMap(
-                (u) => u.active_delegations ?? [],
-            );
-            setDelegations(allDelegations);
+            setDelegations(resolvedUsers.flatMap((u) => u.active_delegations ?? []));
         } catch (error) {
             console.error('Failed to fetch RBAC data:', error);
             toast.error('Failed to load RBAC data');
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
-    // ── Handlers ─────────────────────────────────────────────────────────
+    // ── Handlers ─────────────────────────────────────────────────────────────
 
     const handleDelegate = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -189,16 +230,28 @@ export function RBACManagementPage() {
         }
     };
 
-    const handleRevokeDelegation = async (delegationId: string) => {
-        if (!confirm('Are you sure you want to revoke this delegation?')) return;
+    /** Step 1 — show inline confirmation row for this delegation. */
+    const requestRevoke = (delegationId: string) => {
+        setConfirmRevokeId(delegationId);
+    };
+
+    /** Step 2 — user confirmed; execute the revoke. */
+    const confirmRevoke = async (delegationId: string) => {
+        setConfirmRevokeId(null);
+        setRevokingId(delegationId);
         try {
             await rbacService.revokeDelegation(delegationId);
             toast.success('Delegation revoked');
             fetchData();
         } catch (error: any) {
             toast.error(error.response?.data?.detail || 'Failed to revoke delegation');
+        } finally {
+            setRevokingId(null);
         }
     };
+
+    /** Cancel inline confirmation without taking any action. */
+    const cancelRevoke = () => setConfirmRevokeId(null);
 
     const toggleCapability = (name: string, checked: boolean) => {
         setSelectedCapabilities((prev) =>
@@ -210,41 +263,17 @@ export function RBACManagementPage() {
         u.username.toLowerCase().includes(searchQuery.toLowerCase()),
     );
 
-    // ── Access Check ───────────────────────────────────────────────────
-
-    // is_admin is the sovereign gate (is_sovereign doesn't exist on User model)
-    if (!user?.is_admin) {
-        return (
-            <div className="min-h-screen bg-gray-50 dark:bg-[#0f1117] flex items-center justify-center p-6 transition-colors duration-200">
-                <div className="bg-white dark:bg-[#161b27] rounded-2xl shadow-xl dark:shadow-[0_8px_40px_rgba(0,0,0,0.5)] border border-gray-200 dark:border-[#1e2535] p-8 text-center max-w-md">
-                    <div className="w-16 h-16 rounded-xl bg-red-100 dark:bg-red-500/10 border border-red-200 dark:border-red-500/20 flex items-center justify-center mx-auto mb-5">
-                        <Shield className="w-8 h-8 text-red-600 dark:text-red-400" />
-                    </div>
-                    <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
-                        Access Denied
-                    </h2>
-                    <p className="text-sm text-gray-500 dark:text-gray-400">
-                        Only Sovereign users can manage RBAC settings.
-                    </p>
-                </div>
-            </div>
-        );
-    }
+    // ── Render ───────────────────────────────────────────────────────────────
 
     return (
         <div className="min-h-screen bg-gray-50 dark:bg-[#0f1117] p-6 transition-colors duration-200">
             <div className="max-w-6xl mx-auto">
 
-                {/* ── Page Header ─────────────────────────────────────────────── */}
+                {/* ── Page Header ───────────────────────────────────────────── */}
                 <div className="mb-8">
-                    <div className="flex items-center gap-3 mb-1">
-                        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-                            Access Control
-                        </h1>
-                        <span className="px-2.5 py-0.5 bg-purple-100 dark:bg-purple-500/10 text-purple-700 dark:text-purple-400 text-xs font-semibold rounded-full border border-purple-200 dark:border-purple-500/20">
-                            New
-                        </span>
-                    </div>
+                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-1">
+                        Access Control
+                    </h1>
                     <p className="text-gray-500 dark:text-gray-400 text-sm">
                         Manage user roles, capabilities, and delegation.
                     </p>
@@ -305,7 +334,7 @@ export function RBACManagementPage() {
                     </div>
                 </div>
 
-                {/* ── Tabs ───────────────────────────────────────────────────── */}
+                {/* ── Tabs ──────────────────────────────────────────────────── */}
                 <div className="flex gap-2 mb-6">
                     {(
                         [
@@ -329,7 +358,7 @@ export function RBACManagementPage() {
                     ))}
                 </div>
 
-                {/* ── Users Tab ──────────────────────────────────────────────── */}
+                {/* ── Users Tab ─────────────────────────────────────────────── */}
                 {activeTab === 'users' && (
                     <>
                         <div className="flex flex-col sm:flex-row gap-4 mb-6">
@@ -457,7 +486,7 @@ export function RBACManagementPage() {
                     </>
                 )}
 
-                {/* ── Delegations Tab ──────────────────────────────────────── */}
+                {/* ── Delegations Tab ───────────────────────────────────────── */}
                 {activeTab === 'delegations' && (
                     <>
                         <div className="flex justify-end mb-6">
@@ -500,11 +529,12 @@ export function RBACManagementPage() {
                                                             Delegation {delegation.id.substring(0, 8)}
                                                         </p>
                                                         <p className="text-xs text-gray-500 dark:text-gray-400">
-                                                            {delegation.capabilities.length} capabilities •
+                                                            {delegation.capabilities.length} capabilities •{' '}
                                                             Expires: {formatDate(delegation.expires_at)}
                                                         </p>
                                                     </div>
                                                 </div>
+
                                                 <div className="flex items-center gap-3">
                                                     {delegation.is_emergency && (
                                                         <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-red-100 text-red-700 border border-red-200 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/20">
@@ -521,19 +551,45 @@ export function RBACManagementPage() {
                                                     >
                                                         {delegation.is_active ? 'Active' : 'Revoked'}
                                                     </span>
+
+                                                    {/* ── Inline revoke confirmation ── */}
                                                     {delegation.is_active && (
-                                                        <button
-                                                            onClick={() =>
-                                                                handleRevokeDelegation(delegation.id)
-                                                            }
-                                                            className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors duration-150"
-                                                            title="Revoke delegation"
-                                                        >
-                                                            <Trash2 className="w-4 h-4" />
-                                                        </button>
+                                                        confirmRevokeId === delegation.id ? (
+                                                            <div className="flex items-center gap-2">
+                                                                <span className="text-xs text-gray-500 dark:text-gray-400">
+                                                                    Confirm revoke?
+                                                                </span>
+                                                                <button
+                                                                    onClick={() => confirmRevoke(delegation.id)}
+                                                                    disabled={revokingId === delegation.id}
+                                                                    className="px-2.5 py-1 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-xs font-medium rounded-lg transition-colors duration-150 flex items-center gap-1"
+                                                                >
+                                                                    {revokingId === delegation.id && (
+                                                                        <Loader2 className="w-3 h-3 animate-spin" />
+                                                                    )}
+                                                                    Yes, revoke
+                                                                </button>
+                                                                <button
+                                                                    onClick={cancelRevoke}
+                                                                    className="px-2.5 py-1 border border-gray-200 dark:border-[#1e2535] text-gray-600 dark:text-gray-400 text-xs font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-[#1e2535] transition-colors duration-150"
+                                                                >
+                                                                    Cancel
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => requestRevoke(delegation.id)}
+                                                                disabled={revokingId === delegation.id}
+                                                                className="p-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 rounded-lg transition-colors duration-150 disabled:opacity-50"
+                                                                title="Revoke delegation"
+                                                            >
+                                                                <Trash2 className="w-4 h-4" />
+                                                            </button>
+                                                        )
                                                     )}
                                                 </div>
                                             </div>
+
                                             <div className="mt-3 flex flex-wrap gap-1">
                                                 {delegation.capabilities.map((cap) => (
                                                     <span
@@ -547,6 +603,11 @@ export function RBACManagementPage() {
                                             {delegation.reason && (
                                                 <p className="mt-2 text-xs text-gray-400 dark:text-gray-500 italic">
                                                     Reason: {delegation.reason}
+                                                </p>
+                                            )}
+                                            {delegation.granted_at && (
+                                                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                                                    Granted: {formatDate(delegation.granted_at)}
                                                 </p>
                                             )}
                                         </div>
@@ -596,11 +657,19 @@ export function RBACManagementPage() {
                                                 </p>
                                             </div>
                                         </div>
-                                        <span
-                                            className={`inline-flex items-center px-2.5 py-0.5 text-xs font-medium rounded-full border ${getTierClasses(cap.tier)}`}
-                                        >
-                                            Tier {cap.tier}
-                                        </span>
+                                        <div className="flex items-center gap-2">
+                                            {cap.delegatable && (
+                                                <span className="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-700 border border-green-200 dark:bg-green-500/10 dark:text-green-400 dark:border-green-500/20">
+                                                    <CheckCircle className="w-3 h-3" />
+                                                    Delegatable
+                                                </span>
+                                            )}
+                                            <span
+                                                className={`inline-flex items-center px-2.5 py-0.5 text-xs font-medium rounded-full border ${getTierClasses(cap.tier)}`}
+                                            >
+                                                Tier {cap.tier}
+                                            </span>
+                                        </div>
                                     </div>
                                 </div>
                             ))}
@@ -609,7 +678,7 @@ export function RBACManagementPage() {
                 )}
             </div>
 
-            {/* ── Delegate Modal ───────────────────────────────────────────── */}
+            {/* ── Delegate Modal ────────────────────────────────────────────── */}
             {showDelegateModal && (
                 <div className="fixed inset-0 bg-black/50 dark:bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
                     <div className="bg-white dark:bg-[#161b27] rounded-2xl shadow-2xl dark:shadow-[0_24px_80px_rgba(0,0,0,0.7)] max-w-lg w-full border border-gray-200 dark:border-[#1e2535]">
@@ -655,8 +724,9 @@ export function RBACManagementPage() {
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
                                     Capabilities
                                 </label>
+                                {/* Modal only shows delegatable capabilities — ones the backend accepts. */}
                                 <div className="max-h-48 overflow-y-auto border border-gray-200 dark:border-[#1e2535] rounded-lg p-3 space-y-2">
-                                    {CAPABILITIES.map((cap) => (
+                                    {DELEGATABLE_CAPABILITIES.map((cap) => (
                                         <label
                                             key={cap.name}
                                             className="flex items-center gap-3 cursor-pointer group"

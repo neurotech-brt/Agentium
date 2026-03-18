@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.database import get_db
 from backend.models.entities.user import User
-from backend.services.rbac_service import RBACService
+from backend.services.rbac_service import RBACService, VALID_CAPABILITIES
 from backend.core.auth import security
 
 router = APIRouter(prefix="/rbac", tags=["Role-Based Access Control"])
@@ -71,13 +71,15 @@ def list_users_with_roles(
     current_user: User = Depends(get_current_user_from_token),
     db: Session = Depends(get_db),
 ):
-    """List all users and their roles (requires Sovereign or Observer)."""
-    # Only admins/sovereigns may see the full user list
-    if not (current_user.is_admin or getattr(current_user, "is_sovereign", current_user.is_admin)):
+    """List all users and their roles (requires Sovereign)."""
+    # Use is_sovereign property so role-expiry is respected, with is_admin
+    # as a backward-compat fallback for users that pre-date the RBAC system.
+    if not (current_user.is_sovereign or current_user.is_admin):
         raise HTTPException(status_code=403, detail="Insufficient permissions.")
 
     users = db.query(User).all()
-    include_delegations = current_user.is_admin  # include delegations for privileged users
+    # Include delegation details for sovereign/admin callers
+    include_delegations = current_user.is_sovereign or current_user.is_admin
 
     result = []
     for u in users:
@@ -95,14 +97,31 @@ def list_users_with_roles(
     return result
 
 
+@router.get("/capabilities")
+def list_capabilities(
+    current_user: User = Depends(get_current_user_from_token),
+):
+    """
+    Return the sorted list of capability strings that are valid for delegation.
+
+    This is the authoritative source for the frontend capability picker —
+    the UI should derive its selectable capabilities from this endpoint rather
+    than maintaining its own hardcoded list.
+    """
+    if not (current_user.is_sovereign or current_user.is_admin):
+        raise HTTPException(status_code=403, detail="Insufficient permissions.")
+    return sorted(VALID_CAPABILITIES)
+
+
 @router.post("/delegate")
 def delegate_capability(
     request: DelegateRequest,
     current_user: User = Depends(get_current_user_from_token),
     db: Session = Depends(get_db),
 ):
-    """Delegate capabilities to another user. Only Primary Sovereign / Admin."""
-    if not current_user.is_admin:
+    """Delegate capabilities to another user. Only Primary Sovereign."""
+    # Use is_sovereign (property, respects role expiry) for consistent guard
+    if not current_user.is_sovereign:
         raise HTTPException(status_code=403, detail="Only Sovereign can delegate capabilities.")
     try:
         delegation = RBACService.delegate_capabilities(
@@ -143,7 +162,7 @@ def emergency_override_transfer(
     db: Session = Depends(get_db),
 ):
     """Emergency transfer of Primary Sovereign role."""
-    if not current_user.is_admin:
+    if not current_user.is_sovereign:
         raise HTTPException(status_code=403, detail="Only Sovereign can initiate emergency transfer.")
     try:
         delegation = RBACService.transfer_emergency_override(

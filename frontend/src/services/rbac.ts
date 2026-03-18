@@ -8,6 +8,8 @@ export interface RBACUser {
     is_admin: boolean;
     /** Computed by backend — e.g. "primary_sovereign" | "deputy_sovereign" | "observer" */
     effective_role: string;
+    /** ISO date string — present in all backend to_dict() responses */
+    created_at?: string;
     active_delegations?: Delegation[];
 }
 
@@ -18,13 +20,23 @@ export interface Delegation {
     capabilities: string[];
     is_active: boolean;
     is_emergency: boolean;
+    /** ISO date string — when the delegation was granted */
+    granted_at?: string;
     expires_at?: string;
+    /** ISO date string if revoked, null/undefined if still active */
+    revoked_at?: string | null;
     reason?: string;
 }
 
 export const rbacService = {
     async listUsersWithRoles(): Promise<RBACUser[]> {
         const response = await api.get('/api/v1/rbac/roles');
+        return response.data;
+    },
+
+    /** Returns the list of capability strings that are valid for delegation. */
+    async listCapabilities(): Promise<string[]> {
+        const response = await api.get('/api/v1/rbac/capabilities');
         return response.data;
     },
 

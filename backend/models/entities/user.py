@@ -59,18 +59,22 @@ class User(Base):
         back_populates="user",
         order_by="Conversation.updated_at.desc()",
     )
+
     # Phase 11.1 — Delegation relationships
+    # lazy="select" (SQLAlchemy default) issues a single SELECT per relationship
+    # access rather than "dynamic" which returns an un-executed query object and
+    # causes an N+1 pattern when iterating inside RBACService.get_effective_permissions.
     delegations_granted = relationship(
         "Delegation",
         foreign_keys="Delegation.grantor_id",
         back_populates="grantor",
-        lazy="dynamic",
+        lazy="select",
     )
     delegations_received = relationship(
         "Delegation",
         foreign_keys="Delegation.grantee_id",
         back_populates="grantee",
-        lazy="dynamic",
+        lazy="select",
     )
     delegated_by = relationship(
         "User",

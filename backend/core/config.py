@@ -1,6 +1,7 @@
 """
 Application configuration management.
 Uses pydantic-settings for environment variable handling.
+
 """
 
 from functools import lru_cache
@@ -134,8 +135,6 @@ class Settings(BaseSettings):
     PUSH_NOTIFICATION_ENABLED: bool = Field(default=False, env="PUSH_NOTIFICATION_ENABLED")
 
     # ── Workflow Engine (006_workflow) ────────────────────────────────────────
-    # Celery broker / result backend (already set via Docker env; declared here
-    # so settings.CELERY_BROKER_URL is always available in Python code).
     CELERY_BROKER_URL: str = Field(
         default="redis://redis:6379/0",
         env="CELERY_BROKER_URL",
@@ -145,18 +144,51 @@ class Settings(BaseSettings):
         env="CELERY_RESULT_BACKEND",
     )
 
-    # Stock price tool — yfinance is used when installed (no key needed).
-    # Set STOCK_API_KEY to use Alpha Vantage as a fallback.
+    # Stock price tool
     STOCK_API_KEY: str = Field(default="", env="STOCK_API_KEY")
     STOCK_API_PROVIDER: str = Field(
-        default="yfinance",            # "yfinance" or "alpha_vantage"
+        default="yfinance",
         env="STOCK_API_PROVIDER",
     )
 
-    # Default broker email injected into send_email when the user has not
-    # specified a recipient in their message.
+    # Default broker email
     DEFAULT_BROKER_EMAIL: str = Field(default="", env="DEFAULT_BROKER_EMAIL")
-    
+
+    # ── File Processing ───────────────────────────────────────────────────────
+    # Controls how much text is extracted from uploaded files and injected
+    # into the AI prompt context. Tune these to balance AI comprehension
+    # against token cost and context window size.
+
+    FILE_EXTRACTION_MAX_CHARS: int = Field(
+        default=40_000,
+        env="FILE_EXTRACTION_MAX_CHARS",
+        description=(
+            "Maximum characters extracted per file for AI context injection. "
+            "~40K chars ≈ ~10K tokens. Reduce to save tokens; increase for "
+            "better comprehension of large documents."
+        ),
+    )
+
+    PDF_EXTRACTION_ENABLED: bool = Field(
+        default=True,
+        env="PDF_EXTRACTION_ENABLED",
+        description=(
+            "Enable pypdf text extraction at upload time. "
+            "Set to false to disable PDF parsing (e.g. if pypdf causes issues "
+            "with a particular PDF format or is too slow for large files)."
+        ),
+    )
+
+    VISION_ENABLED: bool = Field(
+        default=True,
+        env="VISION_ENABLED",
+        description=(
+            "Enable image metadata extraction and vision-model descriptions. "
+            "When True, image uploads include dimension/format metadata in the "
+            "AI context. Future: enables full vision API calls for capable models."
+        ),
+    )
+
     @property
     def cors_origins(self) -> list:
         """Parse CORS origins string to list."""

@@ -13,12 +13,19 @@ Broadcast events emitted:
   knowledge_submitted      — agent submitted knowledge to the KB
   knowledge_approved       — council approved a knowledge submission
   amendment_proposed       — constitutional amendment proposed
+
+Changes vs original:
+  - FIX: Chat message handler now reads 'attachments' from the incoming JSON.
+  - FIX: File content (extracted_text) is injected into the AI prompt via
+         build_file_context_for_ai() before ChatService.process_message().
+  - FIX: Empty-message guard now checks enriched_message, not bare content,
+         so a message with only an attachment (no text) is still processed.
 """
 
 import json
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
 from jose import JWTError, jwt
@@ -41,7 +48,7 @@ def get_fresh_db():
     Yield a brand-new SQLAlchemy session and always close it afterwards.
     Used inside the WebSocket message loop so every message gets a clean
     session — avoids stale-data and detached-instance bugs on long-lived
-    connections (FIX #4).
+    connections.
     """
     db: Session = SessionLocal()
     try:
@@ -68,6 +75,37 @@ def _decode_token(token: str) -> Optional[Dict[str, Any]]:
         return payload
     except JWTError:
         return None
+
+
+# ── File context helper ───────────────────────────────────────────────────────
+
+def _build_enriched_message(content: str, attachments: List[dict]) -> str:
+    """
+    Combine the user's text message with extracted file content.
+
+    Uses build_file_context_for_ai() from file_processor to assemble a
+    token-budgeted context block that is appended after the text.
+
+    Returns the enriched message string, or the original content if
+    there are no attachments or all attachments have no extracted text.
+    """
+    if not attachments:
+        return content
+
+    try:
+        from backend.services.file_processor import build_file_context_for_ai
+        file_context = build_file_context_for_ai(attachments, max_total_chars=30_000)
+    except Exception as exc:
+        # Non-fatal: log and fall back to text-only message
+        print(f"[WebSocket] file_processor import/call failed: {exc}")
+        file_context = ""
+
+    if not file_context:
+        return content
+
+    if content:
+        return f"{content}\n\n{file_context}"
+    return file_context
 
 
 # ═══════════════════════════════════════════════════════════
@@ -367,18 +405,32 @@ async def websocket_chat_endpoint(
     """
     Authenticated WebSocket endpoint for Sovereign ↔ Head of Council chat.
 
-    Preferred connection flow (FIX #11 — token NOT in URL):
+    Preferred connection flow:
       1. Client connects (no token in URL)
       2. Client immediately sends: {"type": "auth", "token": "<JWT>"}
       3. Server validates and replies with welcome message
       4. All subsequent messages are processed
 
-    Legacy flow (still supported, will be removed in a future version):
+    Legacy flow (still supported):
       1. Client connects with ?token=JWT query param
       2. Server validates immediately
 
     Heartbeat: Client sends {"type": "ping"} every 30 s.
-    Each chat message: {"type": "message", "content": "..."}
+
+    Chat message format:
+      {
+        "type": "message",
+        "content": "...",
+        "attachments": [          ← optional; populated by frontend after upload
+          {
+            "name": "report.pdf",
+            "type": "application/pdf",
+            "size": 123456,
+            "url": "/api/v1/files/download/.../...",
+            "extracted_text": "..."  ← server-extracted text content
+          }
+        ]
+      }
     """
     await websocket.accept()
 
@@ -459,8 +511,19 @@ async def websocket_chat_endpoint(
 
             # ── Chat message ──────────────────────────────────────────────
             if msg_type == "message":
-                content = data.get("content", "").strip()
-                if not content:
+                content     = data.get("content", "").strip()
+                # FIX: Read attachments from the incoming message.
+                # The frontend sends extracted_text inside each attachment dict
+                # after the file has been uploaded via POST /api/v1/files/upload.
+                attachments: List[dict] = data.get("attachments") or []
+
+                # Build enriched message: user text + file context
+                # This is the single line that was missing and caused total failure.
+                enriched_message = _build_enriched_message(content, attachments)
+
+                # Guard: skip if there is truly nothing to process
+                # (previously only checked `content`, blocking file-only messages)
+                if not enriched_message:
                     continue
 
                 with get_fresh_db() as db:
@@ -472,10 +535,9 @@ async def websocket_chat_endpoint(
                             "timestamp": datetime.utcnow().isoformat(),
                         })
                         continue
-                    # FIX: ChatService has no __init__ — all methods are @staticmethod.
-                    # Correct call: ChatService.process_message(head, message, db)
-                    # FIX: response key is "content", not "response"
-                    response = await ChatService.process_message(head, content, db)
+
+                    # Pass the enriched message (text + file content) to the AI
+                    response = await ChatService.process_message(head, enriched_message, db)
 
                 await websocket.send_json({
                     "type":      "message",

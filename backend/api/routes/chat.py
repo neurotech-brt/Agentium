@@ -2,13 +2,18 @@
 Chat API for Sovereign to communicate with Head of Council.
 Supports streaming responses for real-time communication.
 
+Changes vs original:
+  - FIX: ChatMessage Pydantic model now accepts optional 'attachments' field.
+  - FIX: _stream_response() accepts and injects file content into the prompt.
+  - FIX: Non-streaming send_message() path also injects file content.
+  - FIX: Persisted ChatMessage now stores attachment metadata for history reload.
 """
 import json
 import uuid
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
 
@@ -25,6 +30,9 @@ router = APIRouter(prefix="/chat", tags=["Chat"])
 class ChatMessage(BaseModel):
     message: str
     stream: bool = True
+    # NEW: optional attachments forwarded from the frontend after file upload.
+    # Each dict contains at minimum: name, type, size, url, extracted_text (optional).
+    attachments: Optional[List[dict]] = Field(default=None)
 
 
 class ChatResponse(BaseModel):
@@ -32,6 +40,33 @@ class ChatResponse(BaseModel):
     agent_id: str
     task_created: bool = False
     task_id: str = None
+
+
+def _build_enriched_message(message: str, attachments: Optional[List[dict]]) -> str:
+    """
+    Append extracted file content to the user message.
+
+    Uses build_file_context_for_ai() from file_processor so the same
+    token-budgeted, consistently formatted context is produced for both
+    the WebSocket and REST paths.
+
+    Returns the original message unchanged if attachments is None/empty
+    or file_processor is unavailable.
+    """
+    if not attachments:
+        return message
+
+    try:
+        from backend.services.file_processor import build_file_context_for_ai
+        file_context = build_file_context_for_ai(attachments, max_total_chars=30_000)
+    except Exception as exc:
+        print(f"[chat.py] file_processor unavailable: {exc}")
+        return message
+
+    if not file_context:
+        return message
+
+    return f"{message}\n\n{file_context}" if message else file_context
 
 
 # ═══════════════════════════════════════════════════════════
@@ -197,6 +232,7 @@ async def send_message(
     """
     Send message to Head of Council (00001).
     Returns streaming response for real-time updates.
+    Attachments are enriched with extracted file content before reaching the AI.
     """
     head = db.query(HeadOfCouncil).filter_by(agentium_id="00001").first()
 
@@ -214,7 +250,8 @@ async def send_message(
 
     if chat_msg.stream:
         return StreamingResponse(
-            _stream_response(head.agentium_id, chat_msg.message),
+            # FIX: pass attachments so the streaming path can inject file content
+            _stream_response(head.agentium_id, chat_msg.message, chat_msg.attachments),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
@@ -223,7 +260,9 @@ async def send_message(
             },
         )
 
-    response = await ChatService.process_message(head, chat_msg.message, db)
+    # FIX: non-streaming path also enriches the message with file content
+    enriched_message = _build_enriched_message(chat_msg.message, chat_msg.attachments)
+    response = await ChatService.process_message(head, enriched_message, db)
     return ChatResponse(
         response=response["content"],
         agent_id=head.agentium_id,
@@ -235,13 +274,13 @@ async def send_message(
 async def _stream_response(
     agent_id: str,
     message: str,
+    attachments: Optional[List[dict]] = None,
 ) -> AsyncGenerator[str, None]:
     """
     Stream response from Head of Council.
 
-    FIX #5: The session is opened here, used for the entire stream, then
-    closed.  The ChannelManager broadcast task captures only *primitive*
-    data before the session closes — it does NOT receive the db handle.
+    FIX: Accepts optional attachments and enriches the message with
+    extracted file content before calling stream_generate().
 
     FIX: A `_done_sent` flag prevents the finally block from emitting a
     second 'done' event when an early-return error path has already
@@ -263,9 +302,7 @@ async def _stream_response(
         config_id = config.id if config else None
         model_name = config.default_model if config else "default"
 
-        # FALLBACK: mirror process_message — if Head has no model_config_id
-        # (fresh deploy / unassigned agent) fall back to the system default
-        # so streaming doesn't silently fail with no provider.
+        # FALLBACK: if Head has no model_config_id fall back to the system default
         if not config_id:
             try:
                 from backend.models.entities import UserModelConfig
@@ -301,21 +338,24 @@ async def _stream_response(
             "Address them respectfully and provide clear, actionable responses."
         )
 
-        # Append the same deep_think hint that build_system_prompt() injects
-        # for task agents — keeps streaming and non-streaming paths consistent.
         from backend.services.prompt_template_manager import prompt_template_manager
         full_prompt += prompt_template_manager.DEEP_THINK_HINT
 
+        # FIX: Enrich message with extracted file content before streaming.
+        # This is the missing step that caused the AI to ignore all attachments.
+        enriched_message = _build_enriched_message(message, attachments)
+
         full_response: list[str] = []
-        async for chunk in provider.stream_generate(full_prompt, message):
+        async for chunk in provider.stream_generate(full_prompt, enriched_message):
             full_response.append(chunk)
             yield f"data: {json.dumps({'type': 'content', 'content': chunk})}\n\n"
 
         full_text = "".join(full_response)
+        # Use original message (without file content) for task analysis
+        # to avoid false-positive task creation from extracted PDF keywords
         task_info = await ChatService.analyze_for_task(head, message, full_text, db)
 
-        # ── 2–3 line response policy enforcement (Gap 3) ─────────────────────
-        # Only apply to plain chat turns, not task-confirmation responses.
+        # ── 2–3 line response policy enforcement ─────────────────────────────
         if not task_info.get("created", False):
             original_length = len(full_text)
             non_empty_lines = [ln for ln in full_text.split("\n") if ln.strip()]
@@ -335,25 +375,36 @@ async def _stream_response(
 
         sovereign_user = db.query(User).filter_by(is_admin=True, is_active=True).first()
 
-        # ── Persist both turns to ChatMessage so history survives navigation ──
+        # ── Persist both turns to ChatMessage ────────────────────────────────
         if sovereign_user:
             try:
                 from backend.models.entities.chat_message import ChatMessage as ChatMsg
                 user_str_id = str(sovereign_user.id)
+
+                # Store original message text + attachment metadata (not extracted content)
+                # The frontend uses attachment metadata (url, name, type) to render previews.
+                # We strip extracted_text from stored attachments to keep the DB lean.
+                stored_attachments = None
+                if attachments:
+                    stored_attachments = [
+                        {k: v for k, v in att.items() if k != "extracted_text"}
+                        for att in attachments
+                    ]
 
                 db.add(ChatMsg(
                     id=str(uuid.uuid4()),
                     user_id=user_str_id,
                     role="sovereign",
                     content=message,
-                    metadata={"source": "chat"},
+                    attachments=stored_attachments,
+                    message_metadata={"source": "chat"},
                 ))
                 db.add(ChatMsg(
                     id=message_id,
                     user_id=user_str_id,
                     role="head_of_council",
                     content=full_text,
-                    metadata={
+                    message_metadata={
                         "agent_id": agent_id,
                         "model": model_name,
                         "task_created": task_info.get("created", False),
@@ -362,7 +413,6 @@ async def _stream_response(
                 ))
                 db.commit()
             except Exception as _persist_err:
-                # Non-fatal — message already delivered to client
                 print(f"[chat.py] ChatMessage persist failed (non-fatal): {_persist_err}")
                 try:
                     db.rollback()
@@ -421,15 +471,9 @@ async def get_chat_history(
     """
     Get chat history for the current user.
 
-    FIX #3: Returns messages from the ChatMessage table (both sovereign and
-    head_of_council roles) ordered chronologically.  This single source of
-    truth prevents the frontend from merging API results with localStorage
-    and creating duplicate messages on reload.
-
-    FIX (500): The ChatMessage import is performed at the top of the try
-    block so an ImportError produces a clear 500 log rather than an opaque
-    SQLAlchemy failure.  The is_deleted filter uses isnot(True) so it
-    works correctly whether the column is a Boolean or a "Y"/"N" string.
+    Returns messages from the ChatMessage table ordered chronologically.
+    Attachment metadata (without extracted_text) is included so the frontend
+    can render file previews in history view.
     """
     try:
         from backend.models.entities.chat_message import ChatMessage as ChatMsg
@@ -442,13 +486,11 @@ async def get_chat_history(
         )
 
     try:
-        # Use isnot(True) / != True so the filter works for both Boolean
-        # columns (False) and "Y"/"N" string columns ("N" != True).
         messages = (
             db.query(ChatMsg)
             .filter(
                 ChatMsg.user_id == str(current_user.get("user_id", "")),
-                ChatMsg.is_deleted != True,   # noqa: E712 — intentional ORM expression
+                ChatMsg.is_deleted != True,   # noqa: E712
             )
             .order_by(desc(ChatMsg.created_at))
             .limit(limit)
@@ -472,7 +514,7 @@ async def get_chat_history(
                 "role":        msg.role,
                 "content":     msg.content,
                 "created_at":  msg.created_at.isoformat(),
-                "metadata":    msg.metadata or {},
+                "metadata":    msg.message_metadata or {},
                 "attachments": msg.attachments or [],
             }
             for msg in messages

@@ -1,5 +1,6 @@
 /**
  * File upload and download service for chat attachments.
+ *
  */
 
 import { api } from './api';
@@ -13,6 +14,17 @@ export interface UploadedFile {
     category: 'image' | 'video' | 'audio' | 'document' | 'code' | 'archive' | 'other';
     size: number;
     uploaded_at: string;
+    /**
+     * Server-extracted text content.
+     * - PDF files: plain text from pypdf
+     * - Image files: metadata string (format, dimensions, color mode)
+     * - Code/text files: raw file content (capped at 20K chars)
+     * - All other types: undefined / null
+     *
+     * This field is forwarded in the WebSocket attachment payload so the AI
+     * can read the file content without making a second request to storage.
+     */
+    extracted_text?: string | null;
 }
 
 export interface FileUploadResponse {
@@ -46,8 +58,15 @@ const API_BASE = '/api/v1/files';
 export const fileApi = {
     /**
      * Upload one or more files.
+     *
+     * @param files      Array of File objects to upload.
+     * @param onProgress Optional progress callback receiving 0–100 percentage.
+     *                   Call this to show a real progress bar in the UI.
      */
-    uploadFiles: async (files: File[]): Promise<FileUploadResponse> => {
+    uploadFiles: async (
+        files: File[],
+        onProgress?: (percent: number) => void,
+    ): Promise<FileUploadResponse> => {
         const formData = new FormData();
         files.forEach(file => {
             formData.append('files', file);
@@ -60,8 +79,19 @@ export const fileApi = {
                 headers: {
                     'Content-Type': 'multipart/form-data',
                 },
-                // Longer timeout for file uploads
-                timeout: 60000,
+                // Longer timeout for large file uploads
+                timeout: 120_000,
+                // NEW: thread upload progress through to the caller
+                onUploadProgress: onProgress
+                    ? (progressEvent) => {
+                          if (progressEvent.total) {
+                              const percent = Math.round(
+                                  (progressEvent.loaded * 100) / progressEvent.total
+                              );
+                              onProgress(Math.min(percent, 100));
+                          }
+                      }
+                    : undefined,
             }
         );
         return response.data;

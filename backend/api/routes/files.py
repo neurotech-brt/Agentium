@@ -1,6 +1,13 @@
 """
 File upload and download API for chat attachments.
 Handles multipart file uploads, storage, and retrieval.
+
+Changes vs original:
+  - FIX: Stream-read in chunks to avoid loading entire file into RAM before size check
+  - FIX: Magic-byte validation to prevent extension-spoofing attacks
+  - FIX: SVG removed from image allowlist (XSS risk via embedded <script>)
+  - NEW: PDF text extraction and image metadata extraction at upload time
+  - NEW: extracted_text field added to upload response for AI consumption
 """
 
 import os
@@ -13,7 +20,6 @@ from typing import List, Optional
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, status
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy.orm import Session
-import aiofiles
 
 from backend.models.database import get_db
 from backend.core.auth import get_current_active_user
@@ -24,7 +30,8 @@ router = APIRouter(prefix="/files", tags=["Files"])
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB max file size
 ALLOWED_EXTENSIONS = {
-    'image': ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp'],
+    # SVG removed — SVG files can contain embedded <script> tags (XSS risk)
+    'image': ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'],
     'video': ['.mp4', '.webm', '.mov', '.avi', '.mkv'],
     'audio': ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac', '.webm'],
     'document': ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt'],
@@ -91,6 +98,36 @@ def generate_safe_filename(original_filename: str) -> str:
     return f"{timestamp}_{unique_id}{ext}"
 
 
+async def _read_file_chunked(file: UploadFile, max_size: int) -> bytes:
+    """
+    Read an uploaded file in chunks, aborting early if max_size is exceeded.
+
+    This prevents loading the entire file into RAM before the size check fires,
+    which was a memory bomb vulnerability in the original implementation.
+
+    Raises HTTPException 413 if the file exceeds max_size.
+    """
+    chunks: list[bytes] = []
+    total = 0
+
+    while True:
+        chunk = await file.read(65536)  # 64KB chunks
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_size:
+            raise HTTPException(
+                status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                detail=(
+                    f"File '{file.filename}' exceeds the "
+                    f"{max_size // (1024 * 1024)}MB size limit"
+                ),
+            )
+        chunks.append(chunk)
+
+    return b"".join(chunks)
+
+
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
 async def upload_files(
     files: List[UploadFile] = File(...),
@@ -99,8 +136,15 @@ async def upload_files(
 ):
     """
     Upload one or more files.
-    Returns metadata for each uploaded file.
+    Returns metadata for each uploaded file, including extracted_text
+    for PDFs and image metadata that the AI can consume directly.
     """
+    from backend.services.file_processor import (
+        verify_magic_bytes,
+        extract_pdf_text,
+        extract_image_metadata,
+    )
+
     if not files:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -124,9 +168,16 @@ async def upload_files(
             })
             continue
 
-        # Read file content
+        # Read file content in chunks — aborts early if file is too large
+        # This replaces the old: content = await file.read() + size check after
         try:
-            content = await file.read()
+            content = await _read_file_chunked(file, MAX_FILE_SIZE)
+        except HTTPException:
+            errors.append({
+                "filename": file.filename,
+                "error": f"File exceeds {MAX_FILE_SIZE // (1024 * 1024)}MB limit"
+            })
+            continue
         except Exception as e:
             errors.append({
                 "filename": file.filename,
@@ -134,17 +185,21 @@ async def upload_files(
             })
             continue
 
-        # Check file size
-        if len(content) > MAX_FILE_SIZE:
-            errors.append({
-                "filename": file.filename,
-                "error": f"File exceeds {MAX_FILE_SIZE / (1024*1024):.0f}MB limit ({len(content) / (1024*1024):.1f}MB)"
-            })
-            continue
-
         # Determine MIME type
         mime_type = file.content_type or mimetypes.guess_type(file.filename)[0] or 'application/octet-stream'
         category = get_file_category(file.filename)
+
+        # Magic byte validation — detect extension spoofing
+        if not verify_magic_bytes(content, mime_type):
+            errors.append({
+                "filename": file.filename,
+                "error": (
+                    f"File content does not match declared type '{mime_type}'. "
+                    "Upload rejected for security reasons."
+                )
+            })
+            continue
+
         safe_filename = generate_safe_filename(file.filename)
 
         # Build S3 Object Key
@@ -167,6 +222,47 @@ async def upload_files(
             })
             continue
 
+        # ── Content extraction for AI consumption ─────────────────────────────
+        # Extract text/metadata at upload time so it travels with the file
+        # metadata and can be injected into the AI prompt without a second
+        # round-trip to storage.
+        extracted_text: Optional[str] = None
+
+        if mime_type == "application/pdf":
+            extracted_text = extract_pdf_text(content, max_chars=40_000)
+            if extracted_text:
+                # Log how much we extracted (useful for debugging large PDFs)
+                import logging
+                logging.getLogger(__name__).info(
+                    "[files.py] Extracted %d chars from PDF: %s",
+                    len(extracted_text), file.filename
+                )
+
+        elif mime_type.startswith("image/") and not mime_type == "image/svg+xml":
+            meta = extract_image_metadata(content, file.filename)
+            if meta:
+                extracted_text = (
+                    f"[Image file: {file.filename} | "
+                    f"Format: {meta.get('format', 'unknown')} | "
+                    f"Dimensions: {meta.get('size', 'unknown')} | "
+                    f"Color mode: {meta.get('mode', 'unknown')}]"
+                )
+
+        elif category == "code" or mime_type.startswith("text/"):
+            # Text-based files: decode and include directly (already safe as text)
+            try:
+                text_content = content.decode("utf-8", errors="replace")
+                if text_content.strip():
+                    # Cap at 20K chars for code files
+                    cap = 20_000
+                    if len(text_content) > cap:
+                        extracted_text = text_content[:cap] + f"\n[... truncated at {cap} chars]"
+                    else:
+                        extracted_text = text_content
+            except Exception:
+                pass  # silently skip — not critical
+        # ── End content extraction ─────────────────────────────────────────────
+
         # Build response metadata
         file_info = {
             "id": str(uuid.uuid4()),
@@ -176,7 +272,11 @@ async def upload_files(
             "type": mime_type,
             "category": category,
             "size": len(content),
-            "uploaded_at": datetime.now(timezone.utc).isoformat()
+            "uploaded_at": datetime.now(timezone.utc).isoformat(),
+            # NEW: populated when extraction succeeded, None otherwise
+            # The frontend forwards this in the WebSocket message so the AI
+            # receives file content without a second storage round-trip.
+            "extracted_text": extracted_text,
         }
         uploaded_files.append(file_info)
 
@@ -329,7 +429,6 @@ async def download_file(
     return RedirectResponse(url=url)
 
 
-
 @router.delete("/{filename}")
 async def delete_file(
     filename: str,
@@ -354,9 +453,6 @@ async def delete_file(
         "success": True,
         "message": f"File {filename} deleted successfully"
     }
-
-
-
 
 
 @router.get("/preview/{user_id}/{filename}")
@@ -415,6 +511,4 @@ async def preview_file(
             detail="File not found or failed to generate URL"
         )
 
-    # For S3, presigned GETs often force download or rely on Content-Disposition.
-    # A simple redirect is usually sufficient.
     return RedirectResponse(url=url)

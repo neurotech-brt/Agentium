@@ -121,6 +121,8 @@ export function ChatPage() {
     const [availableVoices,  setAvailableVoices]  = useState<{ id: string; name: string; description: string }[]>([]);
     const [availableLanguages, setAvailableLanguages] = useState<{ code: string; name: string }[]>([]);
     const [isSpeaking, setIsSpeaking]  = useState<string | null>(null);
+    // Upload progress: maps local UploadedFile id → 0-100 percent
+    const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
 
     const audioPlayerRef      = useRef<HTMLAudioElement | null>(null);
     const messagesEndRef      = useRef<HTMLDivElement>(null);
@@ -422,11 +424,14 @@ export function ChatPage() {
         const attachments = uploadedFiles
             .filter((f) => f.apiFile && !f.uploadError)
             .map((f) => ({
-                name:     f.apiFile!.original_name,
-                type:     f.apiFile!.type,
-                size:     f.apiFile!.size,
-                url:      f.apiFile!.url,
-                category: f.apiFile!.category,
+                name:           f.apiFile!.original_name,
+                type:           f.apiFile!.type,
+                size:           f.apiFile!.size,
+                url:            f.apiFile!.url,
+                category:       f.apiFile!.category,
+                // Forward extracted_text so the backend can inject file content
+                // into the AI prompt without a second round-trip to storage.
+                extracted_text: f.apiFile!.extracted_text ?? null,
             }));
 
         // Optimistically append the user message
@@ -588,15 +593,29 @@ export function ChatPage() {
                 { id, file, preview, isUploading: true },
             ]);
             try {
-                const response = await fileApi.uploadFiles([file]);
+                // Thread progress events through so the chip shows a real percentage
+                const response = await fileApi.uploadFiles([file], (pct) => {
+                    setUploadProgress((prev) => ({ ...prev, [id]: pct }));
+                });
                 const apiFile = response.files[0];
                 setUploadedFiles((prev) =>
                     prev.map((f) => f.id === id ? { ...f, apiFile, isUploading: false } : f),
                 );
+                // Clear progress entry once upload is complete
+                setUploadProgress((prev) => {
+                    const next = { ...prev };
+                    delete next[id];
+                    return next;
+                });
             } catch (error: any) {
                 setUploadedFiles((prev) =>
                     prev.map((f) => f.id === id ? { ...f, isUploading: false, uploadError: error.message } : f),
                 );
+                setUploadProgress((prev) => {
+                    const next = { ...prev };
+                    delete next[id];
+                    return next;
+                });
                 toast.error(`Upload failed: ${error.message}`);
             }
         }
@@ -1027,9 +1046,18 @@ export function ChatPage() {
                                                     ? <img src={uf.preview} alt={uf.file.name} className="w-8 h-8 rounded-lg object-cover" />
                                                     : <div className="text-gray-500 dark:text-gray-400">{getFileIcon(uf.file.type)}</div>}
                                                 <span className="text-gray-700 dark:text-gray-300 max-w-[120px] truncate text-xs">{uf.file.name}</span>
-                                                {uf.isUploading && <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />}
+                                                {/* Show real upload % when available, fall back to spinner */}
+                                                {uf.isUploading && (
+                                                    uploadProgress[uf.id] !== undefined
+                                                        ? <span className="text-xs text-blue-500 font-mono w-8 text-right tabular-nums">{uploadProgress[uf.id]}%</span>
+                                                        : <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-500" />
+                                                )}
                                                 {uf.uploadError && <span title={uf.uploadError}><AlertCircle className="w-3.5 h-3.5 text-red-500" /></span>}
-                                                {!uf.isUploading && !uf.uploadError && <CheckCircle className="w-3.5 h-3.5 text-green-500" />}
+                                                {!uf.isUploading && !uf.uploadError && (
+                                                    <span title={uf.apiFile?.extracted_text ? 'Content extracted — AI can read this file' : 'Uploaded'}>
+                                                        <CheckCircle className={`w-3.5 h-3.5 ${uf.apiFile?.extracted_text ? 'text-blue-500' : 'text-green-500'}`} />
+                                                    </span>
+                                                )}
                                                 <button onClick={() => removeFile(uf.id)}
                                                     className="ml-1 p-0.5 rounded-full hover:bg-gray-200 dark:hover:bg-[#2a3347] text-gray-400">
                                                     <X className="w-3 h-3" />

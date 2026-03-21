@@ -697,6 +697,30 @@ class ConstitutionalGuard:
                 self.db.add(violation)
 
             self.db.commit()
+
+            # Phase 13.4 Auto Constitutional Amendment
+            if decision.verdict == Verdict.VOTE_REQUIRED:
+                try:
+                    from datetime import timedelta
+                    cutoff = datetime.utcnow() - timedelta(hours=24)
+                    recent_votes = self.db.query(ConstitutionViolation).filter(
+                        ConstitutionViolation.violation_type == action,
+                        ConstitutionViolation.action_taken == Verdict.VOTE_REQUIRED.value,
+                        ConstitutionViolation.created_at >= cutoff
+                    ).count()
+                    
+                    if recent_votes >= 3:
+                        from backend.services.voting_service import voting_service
+                        voting_service.propose_amendment(
+                            db=self.db,
+                            proposed_by="SYSTEM_IMPROVEMENT_ENGINE",
+                            title=f"Auto-Amendment for {action}",
+                            content=f"This amendment was auto-proposed after {recent_votes} VOTE_REQUIRED occurrences in 24h.",
+                            articles_to_modify=[]
+                        )
+                except Exception as eval_e:
+                    logger.error(f"Failed to auto-propose amendment: {eval_e}")
+
         except Exception as exc:
             logger.error("Failed to log constitutional decision: %s", exc)
             try:

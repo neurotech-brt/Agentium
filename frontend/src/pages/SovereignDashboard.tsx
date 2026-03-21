@@ -15,6 +15,7 @@ import {
     Webhook,
     Code,
     TrendingUp,
+    Sparkles,
 } from 'lucide-react';
 import { SystemTab } from '@/components/sovereign/SystemTab';
 import { MCPToolRegistry } from '@/components/mcp/MCPToolRegistry';
@@ -27,6 +28,7 @@ import RBACManagementPage from './RBACManagement';
 import WebhookManagementPage from './WebhookManagementPage';
 import DeveloperPortalPage from './DeveloperPortalPage';
 import { ScalingDashboard } from './ScalingDashboard';
+import { LearningImpactDashboard } from './LearningImpactDashboard';
 
 // ── Tab definitions ───────────────────────────────────────────────────────────
 
@@ -41,7 +43,8 @@ type TabId =
     | 'mobile'
     | 'webhooks'
     | 'developer-portal'
-    | 'scaling';
+    | 'scaling'
+    | 'improve';
 
 interface Tab {
     id: TabId;
@@ -117,6 +120,12 @@ const TABS: Tab[] = [
         label: 'Auto-Scaling',
         icon: TrendingUp,
         description: 'Predictive agent capacity scaling and manual overrides',
+    },
+    {
+        id: 'improve',
+        label: 'Self-Improvement',
+        icon: Sparkles,
+        description: 'Learning patterns and task optimization telemetry',
     },
 ];
 
@@ -219,6 +228,7 @@ export function SovereignDashboard() {
                 {activeTab === 'webhooks'         && <WebhookManagementPage />}
                 {activeTab === 'developer-portal' && <DeveloperPortalPage />}
                 {activeTab === 'scaling'          && <ScalingDashboard />}
+                {activeTab === 'improve'          && <LearningImpactDashboard />}
             </div>
         </div>
     );

@@ -138,6 +138,15 @@ def execute_task_async(self, task_id: str, agent_id: str):
                     db=db
                 )
             
+            # Phase 13.4: Real-Time Learning Write
+            try:
+                from backend.services.autonomous_learning import get_learning_engine
+                engine = get_learning_engine()
+                learning_stats = engine.analyze_outcomes(db)
+                logger.info(f"Real-Time Learning executed for task {task_id}: {learning_stats}")
+            except Exception as learning_exc:
+                logger.error(f"Real-Time Learning extraction failed for task {task_id}: {learning_exc}")
+            
             db.commit()
             
             return {
@@ -152,6 +161,58 @@ def execute_task_async(self, task_id: str, agent_id: str):
             # Record failure for used skills
             # (Would need to track which skills were attempted)
             
+            # Phase 13.4: Anti-Pattern Early Warning
+            try:
+                from backend.core.vector_store import get_vector_store
+                from backend.api.routes.websocket import manager
+                import asyncio
+                
+                vs = get_vector_store()
+                try:
+                    results = vs.get_collection("task_patterns").query(
+                        query_texts=[str(exc)],
+                        n_results=3,
+                        where={"type": "anti_pattern"}
+                    )
+                    if results.get("documents") and results["documents"][0]:
+                        distances = results["distances"][0] if results.get("distances") else []
+                        similar_count = sum(1 for d in distances if d < 0.2)
+                        
+                        if similar_count >= 3:
+                            warning_msg = f"Anti-Pattern Detected: Similar failure occurred {similar_count} times. Error: {str(exc)[:100]}"
+                            logger.warning(warning_msg)
+                            
+                            try:
+                                loop = asyncio.get_event_loop()
+                            except RuntimeError:
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+                                
+                            loop.run_until_complete(manager.broadcast({
+                                "type": "pattern_warning",
+                                "data": {
+                                    "task_id": task_id,
+                                    "error": str(exc),
+                                    "message": warning_msg
+                                }
+                            }))
+                            
+                            # Increment impact tracker for anti-patterns finding
+                            try:
+                                import redis.asyncio as aioredis
+                                redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
+                                async def inc_ap():
+                                    r = await aioredis.from_url(redis_url, decode_responses=True)
+                                    await r.hincrby("agentium:learning:impact", "anti_patterns_warned", 1)
+                                    await r.close()
+                                loop.run_until_complete(inc_ap())
+                            except Exception:
+                                pass
+                except Exception as inner_exc:
+                    logger.debug(f"Anti-Pattern scan skipped or failed: {inner_exc}")
+            except Exception as eval_exc:
+                logger.error(f"Anti-pattern evaluation failed: {eval_exc}")
+
             # Phase 13.2: Exponential backoff — 1→2→4→8→16→32→60s cap
             countdown = min(2 ** self.request.retries, 60)
             logger.info(f"Retrying task {task_id} in {countdown}s (attempt {self.request.retries + 1})")
@@ -1042,10 +1103,10 @@ def self_diagnostic_daily():
         try:
             from backend.services.self_healing_service import SelfHealingService
             result = SelfHealingService.run_self_diagnostics(db)
-            is_healthy = len(result.get("issues", [])) == 0
-            logger.info(
-                f"🔍 Self-diagnostic: {'HEALTHY' if is_healthy else f'{len(result[\"issues\"])} issue(s)'}"
-            )
+            issues_count = len(result.get("issues", []))
+            is_healthy = issues_count == 0
+            health_str = "HEALTHY" if is_healthy else f"{issues_count} issue(s)"
+            logger.info(f"🔍 Self-diagnostic: {health_str}")
             return result
         except Exception as e:
             logger.error(f"self_diagnostic_daily failed: {e}")
@@ -1071,6 +1132,32 @@ def critical_path_guardian():
             return result
         except Exception as e:
             logger.error(f"critical_path_guardian failed: {e}")
+            return {"error": str(e)}
+
+# ═══════════════════════════════════════════════════════════
+# Phase 13.4 — Continuous Self-Improvement Engine
+# ═══════════════════════════════════════════════════════════
+
+@celery_app.task(name='backend.services.tasks.task_executor.knowledge_consolidation')
+def knowledge_consolidation():
+    """Weekly knowledge pruning and decay via AutonomousLearningEngine decay_outdated_learnings."""
+    with get_task_db() as db:
+        try:
+            from backend.services.autonomous_learning import get_learning_engine
+            return get_learning_engine().decay_outdated_learnings(db)
+        except Exception as e:
+            logger.error(f"knowledge_consolidation failed: {e}")
+            return {"error": str(e)}
+
+@celery_app.task(name='backend.services.tasks.task_executor.performance_optimization')
+def performance_optimization():
+    """Weekly task to query slow tasks and generate condensation suggestions."""
+    with get_task_db() as db:
+        try:
+            from backend.services.self_improvement_service import self_improvement_service
+            return self_improvement_service.optimize_performance(db)
+        except Exception as e:
+            logger.error(f"performance_optimization failed: {e}")
             return {"error": str(e)}
 
 # ═══════════════════════════════════════════════════════════

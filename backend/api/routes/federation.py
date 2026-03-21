@@ -415,3 +415,38 @@ async def webhook_cast_federated_vote(
         decision=req.decision
     )
     return {"status": "success"}
+
+class FederateKnowledgeRequest(BaseModel):
+    collection_name: str
+    documents: List[str]
+    metadatas: List[Dict[str, Any]]
+
+@router.post("/knowledge-share")
+async def receive_federated_knowledge(
+    request: FederateKnowledgeRequest,
+    db: Session = Depends(get_db),
+    peer=Depends(authenticate_peer),
+):
+    """
+    Phase 13.4: Cross-Agent Knowledge Sharing
+    Ingest payload into local knowledge store with source = 'federated',
+    performing deduplication.
+    """
+    try:
+        from backend.services.knowledge_service import get_knowledge_service
+        ks = get_knowledge_service()
+        import time
+        for i, doc in enumerate(request.documents):
+            meta = request.metadatas[i] if request.metadatas and i < len(request.metadatas) else {}
+            meta['source'] = 'federated'
+            meta['shared_by'] = peer.name
+            ks.store_or_revise_knowledge(
+                content=doc,
+                collection_name=request.collection_name,
+                doc_id=f"fed_share_{int(time.time()*1000)}_{i}",
+                metadata=meta
+            )
+        return {"acknowledged": True, "items_shared": len(request.documents)}
+    except Exception as e:
+        logger.error(f"failed to receive federated knowledge: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

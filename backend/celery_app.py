@@ -141,6 +141,16 @@ celery_app.conf.beat_schedule = {
         'task': 'backend.services.tasks.task_executor.predictive_scale',
         'schedule': 300.0,  # every 5 minutes
     },
+    
+    # ── Phase 13.4: Continuous Self-Improvement Engine ────────────────────────
+    'knowledge-consolidation-weekly': {
+        'task': 'backend.services.tasks.task_executor.knowledge_consolidation',
+        'schedule': 604800.0,  # weekly
+    },
+    'performance-optimization-weekly': {
+        'task': 'backend.services.tasks.task_executor.performance_optimization',
+        'schedule': 604800.0,  # weekly
+    },
 }
 
 

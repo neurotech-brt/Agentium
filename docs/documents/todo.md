@@ -345,13 +345,6 @@ Build a self-governing AI ecosystem where agents operate under constitutional la
 
 #### Backend
 
-- [ ] **Real-Time Learning Write** (extend `rag_service.py`) — immediately after `task.complete()` in `execute_task_async`, extract and write a learning record to ChromaDB `task_learnings`; remove any 6-hour delay
-- [ ] **Auto Knowledge Consolidation** — weekly Celery beat: cluster `task_learnings` embeddings with cosine similarity > 0.92; merge pairs into single entry with `confidence × 1.05`; delete originals
-- [ ] **Anti-Pattern Early Warning** — on every task failure, query `task_learnings` for similar past failures; if ≥ 3 similar failures within 7 days, emit `pattern_warning` WebSocket event
-- [ ] **Auto-Tool Generation** (`backend/services/self_improvement_service.py`) — detect tool call patterns repeated ≥ 5 times with > 90% success rate; auto-generate composite tool via `ToolCreationService.create_from_pattern()`
-- [ ] **Auto Constitutional Amendment** — when `ConstitutionalGuard` returns `VOTE_REQUIRED` for the same action type ≥ 3 times in 24 h: auto-submit amendment via `VotingService.propose_amendment()` with `proposed_by = 'SYSTEM_IMPROVEMENT_ENGINE'`
-- [ ] **Performance Optimization Loop** — weekly Celery task: query tasks with `duration_seconds > p95`; submit slow prompt + outcome to meta-LLM for condensation suggestion; store in `AuditLog` for human review (do not auto-apply)
-- [ ] **Cross-Agent Knowledge Sharing** — extend `federation.py`: `POST /federation/knowledge-share` ingests payload into local `task_learnings` with `source = 'federated'` and cosine deduplication
 - [ ] **Learning Impact Tracker** — Redis hash `agentium:learning:impact`; 7-day rolling success rate delta; expose via `GET /improvements/impact`
 
 #### Beat Schedule Additions

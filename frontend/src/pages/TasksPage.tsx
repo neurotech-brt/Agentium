@@ -2285,11 +2285,7 @@ export const TasksPage: React.FC = () => {
                                         3
                                     </span>
                                 )}
-                                {tab.id === 'preferences' && (
-                                    <span className="ml-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-blue-100 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400">
-                                        New
-                                    </span>
-                                )}
+
                             </button>
                         );
                     })}

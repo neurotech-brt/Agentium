@@ -1,6 +1,6 @@
 // src/pages/SovereignDashboard.tsx
 
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useAuthStore } from '@/store/authStore';
 import {
     Shield,
@@ -55,6 +55,7 @@ interface Tab {
 }
 
 const TABS: Tab[] = [
+    // ── Monitor ──────────────────────────────────────────────────────────────
     {
         id: 'system',
         label: 'System',
@@ -62,16 +63,23 @@ const TABS: Tab[] = [
         description: 'Containers, resources, and command history',
     },
     {
-        id: 'mcp-tools',
-        label: 'MCP Tools',
-        icon: Wrench,
-        description: 'Constitutional MCP server governance',
-    },
-    {
         id: 'financial-burn',
         label: 'Financial',
         icon: DollarSign,
         description: 'Token usage, cost burn rate, and completion stats',
+    },
+    {
+        id: 'scaling',
+        label: 'Auto-Scaling',
+        icon: TrendingUp,
+        description: 'Predictive agent capacity scaling and manual overrides',
+    },
+    // ── Configure ─────────────────────────────────────────────────────────────
+    {
+        id: 'mcp-tools',
+        label: 'MCP Tools',
+        icon: Wrench,
+        description: 'Constitutional MCP server governance',
     },
     {
         id: 'skills',
@@ -85,12 +93,7 @@ const TABS: Tab[] = [
         icon: Store,
         description: 'Browse, publish, and manage tools in the marketplace',
     },
-    {
-        id: 'federation',
-        label: 'Federation',
-        icon: Network,
-        description: 'Peer instances, cross-instance task delegation, and knowledge sharing',
-    },
+    // ── Secure ────────────────────────────────────────────────────────────────
     {
         id: 'rbac',
         label: 'Access Control',
@@ -98,11 +101,12 @@ const TABS: Tab[] = [
         description: 'Manage user roles, capabilities, and delegations',
     },
     {
-        id: 'mobile',
-        label: 'Mobile',
-        icon: Smartphone,
-        description: 'Devices, push notifications, and offline sync settings',
+        id: 'federation',
+        label: 'Federation',
+        icon: Network,
+        description: 'Peer instances, cross-instance task delegation, and knowledge sharing',
     },
+    // ── Integrate ─────────────────────────────────────────────────────────────
     {
         id: 'webhooks',
         label: 'Webhooks',
@@ -116,11 +120,12 @@ const TABS: Tab[] = [
         description: 'API documentation, code samples, and webhook event reference',
     },
     {
-        id: 'scaling',
-        label: 'Auto-Scaling',
-        icon: TrendingUp,
-        description: 'Predictive agent capacity scaling and manual overrides',
+        id: 'mobile',
+        label: 'Mobile',
+        icon: Smartphone,
+        description: 'Devices, push notifications, and offline sync settings',
     },
+    // ── Optimize ──────────────────────────────────────────────────────────────
     {
         id: 'improve',
         label: 'Self-Improvement',
@@ -134,6 +139,19 @@ const TABS: Tab[] = [
 export function SovereignDashboard() {
     const { user } = useAuthStore();
     const [activeTab, setActiveTab] = useState<TabId>('system');
+    const tabNavRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+        const el = tabNavRef.current;
+        if (!el) return;
+        const onWheel = (e: WheelEvent) => {
+            if (e.deltaY === 0) return;
+            e.preventDefault();
+            el.scrollLeft += e.deltaY;
+        };
+        el.addEventListener('wheel', onWheel, { passive: false });
+        return () => el.removeEventListener('wheel', onWheel);
+    }, []);
 
     // ── Access denied ────────────────────────────────────────────────────────
     if (!user?.is_admin) {
@@ -174,7 +192,10 @@ export function SovereignDashboard() {
 
             {/* ── Tab navigation ───────────────────────────────────────────── */}
             <div className="mb-6">
-                <div className="w-fit max-w-full overflow-x-auto rounded-xl border border-gray-200 dark:border-[#1e2535] bg-white dark:bg-[#161b27] shadow-sm [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-[#2a3347] [&::-webkit-scrollbar-thumb]:rounded-full">
+                <div
+                    ref={tabNavRef}
+                    className="w-fit max-w-full overflow-x-auto rounded-xl border border-gray-200 dark:border-[#1e2535] bg-white dark:bg-[#161b27] shadow-sm [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-[#2a3347] [&::-webkit-scrollbar-thumb]:rounded-full"
+                >
                     <div className="flex gap-1 p-1 min-w-max">
                         {TABS.map((tab) => {
                             const Icon = tab.icon;

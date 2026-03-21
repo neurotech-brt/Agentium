@@ -239,3 +239,47 @@ class WorkflowVersion(BaseEntity):
             'template_json': self.template_json
         })
         return base
+
+
+# ── WorkflowSubTask ───────────────────────────────────────────────────────────
+# New class required by the Phase 13 import in database.py.
+# Maps to the workflow_subtasks table created by migration 011_fix_workflow.
+# No existing code above this line has been changed.
+
+class WorkflowSubTask(BaseEntity):
+    """
+    One atomic sub-task within a WorkflowExecution (Phase 13 DAG engine).
+    FK workflow_id → workflows.id (matches WorkflowExecution's FK chain).
+    """
+    __tablename__ = 'workflow_subtasks'
+
+    workflow_id          = Column(String(36), ForeignKey('workflows.id', ondelete='CASCADE'), nullable=False, index=True)
+    step_index           = Column(Integer,    nullable=False, server_default='0')
+    intent               = Column(String(128), nullable=False)
+    params               = Column(JSON,        nullable=False, default=dict)
+    depends_on           = Column(JSON,        nullable=False, default=list)
+    status               = Column(String(32),  nullable=False, server_default='pending', index=True)
+    result               = Column(JSON,        nullable=True)
+    error                = Column(Text,        nullable=True)
+    celery_task_id       = Column(String(256), nullable=True)
+    schedule_offset_days = Column(Integer,     nullable=False, server_default='0')
+    scheduled_for        = Column(DateTime,    nullable=True)
+    completed_at         = Column(DateTime,    nullable=True)
+
+    def to_dict(self) -> Dict[str, Any]:
+        base = super().to_dict()
+        base.update({
+            'workflow_id':          self.workflow_id,
+            'step_index':           self.step_index,
+            'intent':               self.intent,
+            'params':               self.params,
+            'depends_on':           self.depends_on,
+            'status':               self.status,
+            'result':               self.result,
+            'error':                self.error,
+            'celery_task_id':       self.celery_task_id,
+            'schedule_offset_days': self.schedule_offset_days,
+            'scheduled_for':        self.scheduled_for.isoformat() if self.scheduled_for else None,
+            'completed_at':         self.completed_at.isoformat() if self.completed_at else None,
+        })
+        return base

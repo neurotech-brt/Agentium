@@ -18,98 +18,91 @@ import {
     Inbox,
     FlaskConical,
 } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { useState, useRef, useCallback, Suspense } from 'react';
 // ── Voice Bridge addition ─────────────────────────────────────────────────────
 import { VoiceIndicator } from '@/components/VoiceIndicator';
 
-// ── Nav order used to determine slide direction ───────────────────────────────
-const NAV_ORDER = [
-    '/',
-    '/chat',
-    '/agents',
-    '/tasks',
-    '/monitoring',
-    '/voting',
-    '/constitution',
-    '/models',
-    '/channels',
-    '/message-log',
-    '/ab-testing',
-    '/settings',
-    '/sovereign',
-];
-
-// ── Page transition variants ──────────────────────────────────────────────────
-// Subtle vertical slide + fade — keeps the sidebar perfectly static while only
-// the content area animates. "mode=wait" ensures the exit finishes before the
-// enter begins, preventing any visual overlap between pages.
-const pageVariants = {
-    initial: (direction: number) => ({
-        opacity: 0,
-        y: direction >= 0 ? 10 : -10,
-        scale: 0.995,
-    }),
-    animate: {
-        opacity: 1,
-        y: 0,
-        scale: 1,
-    },
-    exit: (direction: number) => ({
-        opacity: 0,
-        y: direction >= 0 ? -6 : 6,
-        scale: 0.998,
-    }),
-};
-
-const pageTransition = {
-    duration: 0.22,
-    ease: [0.25, 0.1, 0.25, 1] as const, // CSS "ease" — snappy & natural
-};
-
-// ── AnimatedOutlet ────────────────────────────────────────────────────────────
-// Wraps React Router's <Outlet /> with direction-aware animated transitions.
-// The key prop (location.pathname) tells AnimatePresence exactly when to swap
-// pages. The layout (sidebar, header) is never involved.
-function AnimatedOutlet() {
+// ── KeepAliveOutlet ───────────────────────────────────────────────────────────
+// Replaces AnimatePresence + motion.div. Instead of unmounting the previous
+// page and mounting the next one (which caused the full-screen flicker from two
+// absolutely-positioned divs overlapping during a crossfade), we keep every
+// visited page mounted and simply toggle visibility via opacity + pointer-events.
+//
+// Why this eliminates the flicker:
+//   • Only one div is ever opaque at a time — no overlapping paint.
+//   • Pages are never unmounted, so returning to a tab is instantaneous with
+//     zero re-fetch or loading-skeleton flash.
+//   • CSS opacity transition handles the fade; no JS animation frame budget used.
+function KeepAliveOutlet() {
     const location = useLocation();
     const currentOutlet = useOutlet();
 
-    // Track navigation direction based on nav item order
-    const prevPath = useRef(location.pathname);
-    const [direction, setDirection] = useState(0);
-
-    useEffect(() => {
-        const prevIndex = NAV_ORDER.findIndex(p =>
-            prevPath.current === '/' ? p === '/' : prevPath.current.startsWith(p) && p !== '/'
-        );
-        const currIndex = NAV_ORDER.findIndex(p =>
-            location.pathname === '/' ? p === '/' : location.pathname.startsWith(p) && p !== '/'
-        );
-        setDirection(currIndex >= prevIndex ? 1 : -1);
-        prevPath.current = location.pathname;
-    }, [location.pathname]);
+    // Cache React elements keyed by pathname. Once a page is first rendered its
+    // element stays in the map for the lifetime of the layout, keeping the
+    // component tree alive even when the route is not active.
+    const cache = useRef<Map<string, React.ReactNode>>(new Map());
+    if (currentOutlet) {
+        cache.current.set(location.pathname, currentOutlet);
+    }
 
     return (
-        <AnimatePresence mode="wait" initial={false} custom={direction}>
-            <motion.div
-                key={location.pathname}
-                custom={direction}
-                variants={pageVariants}
-                initial="initial"
-                animate="animate"
-                exit="exit"
-                transition={pageTransition}
-                // fill the entire <main> container and scroll independently
-                style={{ position: 'absolute', inset: 0, overflowY: 'auto' }}
-            >
-                {currentOutlet}
-            </motion.div>
-        </AnimatePresence>
+        <>
+            {Array.from(cache.current.entries()).map(([path, outlet]) => {
+                const isActive = path === location.pathname;
+                return (
+                    <div
+                        key={path}
+                        style={{
+                            position: 'absolute',
+                            inset: 0,
+                            overflowY: 'auto',
+                            // Inactive pages are invisible and non-interactive but
+                            // remain mounted — no re-mount cost on revisit.
+                            opacity: isActive ? 1 : 0,
+                            pointerEvents: isActive ? 'auto' : 'none',
+                            transition: 'opacity 0.15s ease',
+                        }}
+                    >
+                        {outlet}
+                    </div>
+                );
+            })}
+        </>
     );
 }
 
-// ── MainLayout ────────────────────────────────────────────────────────────────
+// ── PageSkeleton ──────────────────────────────────────────────────────────────
+// Shown only on the very first visit to a lazy page while its JS chunk loads.
+// Subsequent visits hit KeepAliveOutlet's cache and never render this at all.
+// Deliberately low-contrast so it doesn't flash aggressively in dark mode.
+function PageSkeleton() {
+    return (
+        <div className="absolute inset-0 flex flex-col gap-4 p-6 overflow-hidden">
+            {/* Simulated page header */}
+            <div className="h-8 w-48 rounded-lg bg-gray-200 dark:bg-white/5 animate-pulse" />
+            {/* Simulated content rows */}
+            <div className="flex flex-col gap-3 mt-2">
+                {[100, 85, 92, 78].map((w, i) => (
+                    <div
+                        key={i}
+                        className="h-4 rounded-md bg-gray-200 dark:bg-white/5 animate-pulse"
+                        style={{ width: `${w}%`, animationDelay: `${i * 60}ms` }}
+                    />
+                ))}
+            </div>
+            {/* Simulated card grid */}
+            <div className="grid grid-cols-3 gap-4 mt-4">
+                {[0, 1, 2].map(i => (
+                    <div
+                        key={i}
+                        className="h-32 rounded-xl bg-gray-200 dark:bg-white/5 animate-pulse"
+                        style={{ animationDelay: `${i * 80}ms` }}
+                    />
+                ))}
+            </div>
+        </div>
+    );
+}
 export function MainLayout() {
     const { user, logout } = useAuthStore();
     const navigate = useNavigate();
@@ -140,6 +133,28 @@ export function MainLayout() {
             localStorage.setItem('theme', 'light');
         }
     };
+
+    // ── Hover prefetch ────────────────────────────────────────────────────────
+    // Triggers the dynamic import for a page's JS chunk on nav-link hover so
+    // that by the time the user clicks, the chunk is already in the browser
+    // cache. Wrapped in useCallback so the function reference is stable.
+    const prefetch = useCallback((path: string) => {
+        switch (path) {
+            case '/chat':         import('@/pages/ChatPage');         break;
+            case '/agents':       import('@/pages/AgentsPage');       break;
+            case '/tasks':        import('@/pages/TasksPage');        break;
+            case '/monitoring':   import('@/pages/MonitoringPage');   break;
+            case '/voting':       import('@/pages/VotingPage');       break;
+            case '/constitution': import('@/pages/ConstitutionPage'); break;
+            case '/models':       import('@/pages/ModelsPage');       break;
+            case '/channels':     import('@/pages/ChannelsPage');     break;
+            case '/message-log':  import('@/pages/MessageLogPage');   break;
+            case '/ab-testing':   import('@/pages/ABTestingPage');    break;
+            case '/settings':     import('@/pages/SettingsPage');     break;
+            case '/sovereign':    import('@/pages/SovereignDashboard'); break;
+            default:              import('@/pages/Dashboard');        break;
+        }
+    }, []);
 
     type NavItem = {
         path: string;
@@ -208,6 +223,7 @@ export function MainLayout() {
                             <NavLink
                                 to={item.path}
                                 end={item.path === '/'}
+                                onMouseEnter={() => prefetch(item.path)}
                                 className={({ isActive }) =>
                                     `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
                                         item.variant === 'danger'
@@ -261,9 +277,15 @@ export function MainLayout() {
             </aside>
 
             {/* Main content — position:relative is required so the absolutely-
-                positioned AnimatedOutlet fills this container correctly.       */}
+                positioned KeepAliveOutlet fills this container correctly.
+                Suspense is intentionally placed HERE (not in App.tsx) so that
+                when a lazy page chunk suspends on first visit, only this content
+                pane shows the skeleton — the sidebar and nav stay mounted and
+                visible, eliminating the full-layout flicker.                   */}
             <main className="flex-1 min-h-0 overflow-hidden relative">
-                <AnimatedOutlet />
+                <Suspense fallback={<PageSkeleton />}>
+                    <KeepAliveOutlet />
+                </Suspense>
             </main>
         </div>
     );

@@ -32,10 +32,19 @@ interface ScalingEvent {
 export const ScalingDashboard: React.FC = () => {
     const { user } = useAuthStore();
     const isAdmin = user?.role === 'admin' || user?.role === 'primary_sovereign';
-    
-    // Using websocket if connected
-    const { lastMessage } = useWebSocket();
 
+    // Detect dark mode for chart tooltip theming
+    const [isDark, setIsDark] = useState(
+        typeof window !== 'undefined' && document.documentElement.classList.contains('dark')
+    );
+    useEffect(() => {
+        const observer = new MutationObserver(() => {
+            setIsDark(document.documentElement.classList.contains('dark'));
+        });
+        observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+        return () => observer.disconnect();
+    }, []);
+    
     const [predictions, setPredictions] = useState<Predictions | null>(null);
     const [history, setHistory] = useState<ScalingEvent[]>([]);
     
@@ -102,7 +111,7 @@ export const ScalingDashboard: React.FC = () => {
         <div className="p-6 max-w-7xl mx-auto space-y-6">
             <div className="flex items-center justify-between">
                 <div>
-                    <h1 className="text-2xl font-bold dark:text-white flex items-center gap-2">
+                    <h1 className="text-2xl font-bold text-gray-900 dark:text-white flex items-center gap-2">
                         <TrendingUp className="text-blue-500" />
                         Predictive Auto-Scaling
                     </h1>
@@ -127,7 +136,7 @@ export const ScalingDashboard: React.FC = () => {
                         </div>
                         <span className="font-semibold text-gray-700 dark:text-gray-300">Active Agents</span>
                     </div>
-                    <div className="text-3xl font-bold dark:text-white">
+                    <div className="text-3xl font-bold text-gray-900 dark:text-white">
                         {predictions?.current_capacity ?? '-'}
                     </div>
                 </div>
@@ -139,7 +148,7 @@ export const ScalingDashboard: React.FC = () => {
                         </div>
                         <span className="font-semibold text-gray-700 dark:text-gray-300">Predicted (1h)</span>
                     </div>
-                    <div className="text-3xl font-bold dark:text-white">
+                    <div className="text-3xl font-bold text-gray-900 dark:text-white">
                         {predictions?.next_1h ?? '-'}
                     </div>
                 </div>
@@ -151,7 +160,7 @@ export const ScalingDashboard: React.FC = () => {
                         </div>
                         <span className="font-semibold text-gray-700 dark:text-gray-300">Token Budget</span>
                     </div>
-                    <div className="text-3xl font-bold dark:text-white">
+                    <div className="text-3xl font-bold text-gray-900 dark:text-white">
                         ${tokenSpend.toFixed(2)}
                     </div>
                     <div className="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mt-2">
@@ -178,7 +187,7 @@ export const ScalingDashboard: React.FC = () => {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Chart */}
                 <div className="lg:col-span-2 p-6 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                    <h2 className="text-lg font-bold mb-4 dark:text-white flex items-center gap-2">
+                    <h2 className="text-lg font-bold mb-4 text-gray-900 dark:text-white flex items-center gap-2">
                         Load Prediction Forward-Look
                     </h2>
                     <div className="h-72 w-full">
@@ -188,7 +197,15 @@ export const ScalingDashboard: React.FC = () => {
                                 <XAxis dataKey="time" stroke="#888888" />
                                 <YAxis stroke="#888888" />
                                 <Tooltip 
-                                    contentStyle={{ backgroundColor: '#1f2937', borderColor: '#374151', color: '#fff' }}
+                                    contentStyle={{
+                                        backgroundColor: isDark ? '#1f2937' : '#ffffff',
+                                        borderColor: isDark ? '#374151' : '#e5e7eb',
+                                        color: isDark ? '#f9fafb' : '#111827',
+                                        borderRadius: '0.5rem',
+                                        boxShadow: isDark
+                                            ? '0 4px 6px rgba(0,0,0,0.4)'
+                                            : '0 4px 6px rgba(0,0,0,0.08)',
+                                    }}
                                 />
                                 <Line 
                                     type="monotone" 
@@ -212,7 +229,7 @@ export const ScalingDashboard: React.FC = () => {
 
                 {/* Manual Override Panel */}
                 <div className="p-6 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                    <h2 className="text-lg font-bold mb-4 dark:text-white flex items-center gap-2">
+                    <h2 className="text-lg font-bold mb-4 text-gray-900 dark:text-white flex items-center gap-2">
                         Manual Override
                     </h2>
                     {!isAdmin ? (
@@ -231,7 +248,7 @@ export const ScalingDashboard: React.FC = () => {
                                     max="20"
                                     value={overrideCount}
                                     onChange={(e) => setOverrideCount(Number(e.target.value))}
-                                    className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:text-white"
+                                    className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
                                 />
                             </div>
                             <div>
@@ -241,7 +258,7 @@ export const ScalingDashboard: React.FC = () => {
                                 <select 
                                     value={overrideTier}
                                     onChange={(e) => setOverrideTier(Number(e.target.value))}
-                                    className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 dark:text-white"
+                                    className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white"
                                 >
                                     <option value={1}>Tier 1 (Critical)</option>
                                     <option value={2}>Tier 2 (High)</option>
@@ -272,7 +289,7 @@ export const ScalingDashboard: React.FC = () => {
 
             {/* History Timeline */}
             <div className="p-6 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
-                <h2 className="text-lg font-bold mb-4 dark:text-white flex items-center gap-2">
+                <h2 className="text-lg font-bold mb-4 text-gray-900 dark:text-white flex items-center gap-2">
                     Scaling Activity Log
                 </h2>
                 {history.length === 0 ? (
@@ -292,11 +309,11 @@ export const ScalingDashboard: React.FC = () => {
                             </thead>
                             <tbody>
                                 {history.map((event, i) => (
-                                    <tr key={i} className="border-b dark:border-gray-700 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-750">
+                                    <tr key={i} className="border-b dark:border-gray-700 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-700/50">
                                         <td className="px-4 py-3 text-gray-500 dark:text-gray-400">
                                             {new Date(event.created_at).toLocaleString()}
                                         </td>
-                                        <td className="px-4 py-3 font-medium dark:text-white">
+                                        <td className="px-4 py-3 font-medium text-gray-900 dark:text-white">
                                             {event.action}
                                         </td>
                                         <td className="px-4 py-3 text-gray-700 dark:text-gray-300">

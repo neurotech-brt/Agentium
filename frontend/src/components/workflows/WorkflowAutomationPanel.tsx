@@ -78,8 +78,8 @@ export const WorkflowAutomationPanel: React.FC = () => {
     return (
       <div className="space-y-4">
         <div className="flex items-center gap-2">
-          <Button variant="ghost" onClick={() => setView('list')} className="text-gray-400">Back Config</Button>
-          <h2 className="text-xl font-bold text-white">New Workflow</h2>
+          <Button variant="ghost" onClick={() => setView('list')} className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">← Back</Button>
+          <h2 className="text-xl font-bold text-gray-900 dark:text-white">New Workflow</h2>
         </div>
         <WorkflowBuilder onSave={handleSave} />
       </div>
@@ -92,8 +92,8 @@ export const WorkflowAutomationPanel: React.FC = () => {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Button variant="ghost" onClick={() => setView('list')} className="text-gray-400 px-2 py-1 h-auto text-xs border border-gray-700">Back</Button>
-            <h2 className="text-xl font-bold text-white">Live Execution: <span className="text-indigo-400 font-mono text-lg">{executionId?.split('-')[0]}</span></h2>
+            <Button variant="ghost" onClick={() => setView('list')} className="text-gray-500 dark:text-gray-400 px-2 py-1 h-auto text-xs border border-gray-200 dark:border-gray-700">Back</Button>
+            <h2 className="text-xl font-bold text-gray-900 dark:text-white">Live Execution: <span className="text-indigo-400 font-mono text-lg">{executionId?.split('-')[0]}</span></h2>
           </div>
           <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider ${
             executionStatus.status === 'COMPLETED' ? 'bg-green-500/20 text-green-400' : 
@@ -103,7 +103,7 @@ export const WorkflowAutomationPanel: React.FC = () => {
             {executionStatus.status}
           </div>
         </div>
-        <div className="bg-slate-900 border border-slate-800 rounded-lg p-6 min-h-[300px] text-gray-300 relative overflow-hidden">
+        <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-6 min-h-[300px] text-gray-600 dark:text-gray-300 relative overflow-hidden">
           {!isDone && (
             <div className="absolute top-0 left-0 right-0 h-1 bg-indigo-500/20">
               <div className="h-full bg-indigo-500 animate-[pulse_2s_ease-in-out_infinite] w-1/3"></div>
@@ -115,17 +115,17 @@ export const WorkflowAutomationPanel: React.FC = () => {
             {executionStatus.status === 'COMPLETED' && <CheckCircle className="w-16 h-16 text-green-500 mb-4" />}
             {executionStatus.status === 'FAILED' && <XCircle className="w-16 h-16 text-red-500 mb-4" />}
             
-            <h3 className="text-2xl font-semibold mt-6">{isDone ? 'Execution ' + executionStatus.status : 'Processing Workflow...'}</h3>
-            <p className="text-gray-500 mt-2 font-mono text-sm max-w-sm text-center">
+            <h3 className="text-2xl font-semibold mt-6 text-gray-900 dark:text-white">{isDone ? 'Execution ' + executionStatus.status : 'Processing Workflow...'}</h3>
+            <p className="text-gray-500 dark:text-gray-500 mt-2 font-mono text-sm max-w-sm text-center">
               {isDone 
                 ? 'Workflow run has concluded.' 
                 : `Currently executing step index ${executionStatus.current_step_index}. The engine is actively orchestrating tasks.`}
             </p>
           </div>
 
-          <div className="mt-8 border-t border-slate-800 pt-6">
-            <h4 className="text-sm font-semibold text-gray-500 mb-4 uppercase tracking-wider">Execution Context</h4>
-            <pre className="bg-slate-950 p-4 rounded-lg text-xs font-mono text-emerald-400 overflow-x-auto border border-slate-800">
+          <div className="mt-8 border-t border-gray-200 dark:border-slate-800 pt-6">
+            <h4 className="text-sm font-semibold text-gray-500 dark:text-gray-500 mb-4 uppercase tracking-wider">Execution Context</h4>
+            <pre className="bg-gray-50 dark:bg-slate-950 p-4 rounded-lg text-xs font-mono text-emerald-700 dark:text-emerald-400 overflow-x-auto border border-gray-200 dark:border-slate-800">
               {JSON.stringify(executionStatus.context_data, null, 2)}
             </pre>
           </div>

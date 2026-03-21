@@ -1,6 +1,6 @@
 // src/App.tsx
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useOutlet } from 'react-router-dom';
-import { useEffect } from 'react';
+import { useEffect, useState, lazy } from 'react';
 import { Toaster } from 'react-hot-toast';
 import { useAuthStore } from '@/store/authStore';
 import { useBackendStore } from '@/store/backendStore';
@@ -9,23 +9,26 @@ import { MainLayout } from '@/components/layout/MainLayout';
 import { FlatMapAuthBackground } from '@/components/FlatMapAuthBackground';
 import { LoginPage } from '@/pages/LoginPage';
 import { SignupPage } from '@/pages/SignupPage';
-import { Dashboard } from '@/pages/Dashboard';
-import { SettingsPage } from '@/pages/SettingsPage';
-import { ChatPage } from '@/pages/ChatPage';
-import { ChannelsPage } from '@/pages/ChannelsPage';
-import { ModelsPage } from '@/pages/ModelsPage';
-import { AgentsPage } from '@/pages/AgentsPage';
-import { TasksPage } from '@/pages/TasksPage';
-import { ConstitutionPage } from '@/pages/ConstitutionPage';
-import { SovereignDashboard } from '@/pages/SovereignDashboard';
 import { SovereignRoute } from '@/components/SovereignRoute';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Shield, Loader2 } from 'lucide-react';
-import { useState } from 'react';
-import { MonitoringPage } from '@/pages/MonitoringPage';
-import { VotingPage } from '@/pages/VotingPage';
-import { MessageLogPage } from '@/pages/MessageLogPage';
-import { ABTestingPage } from '@/pages/ABTestingPage';
+
+// ── Lazy-loaded page components ───────────────────────────────────────────────
+// Each page chunk is fetched on first visit and cached by the browser thereafter.
+// Auth pages (Login/Signup) stay eager since they're needed before JS settles.
+const Dashboard        = lazy(() => import('@/pages/Dashboard').then(m => ({ default: m.Dashboard })));
+const SettingsPage     = lazy(() => import('@/pages/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const ChatPage         = lazy(() => import('@/pages/ChatPage').then(m => ({ default: m.ChatPage })));
+const ChannelsPage     = lazy(() => import('@/pages/ChannelsPage').then(m => ({ default: m.ChannelsPage })));
+const ModelsPage       = lazy(() => import('@/pages/ModelsPage').then(m => ({ default: m.ModelsPage })));
+const AgentsPage       = lazy(() => import('@/pages/AgentsPage').then(m => ({ default: m.AgentsPage })));
+const TasksPage        = lazy(() => import('@/pages/TasksPage').then(m => ({ default: m.TasksPage })));
+const ConstitutionPage = lazy(() => import('@/pages/ConstitutionPage').then(m => ({ default: m.ConstitutionPage })));
+const SovereignDashboard = lazy(() => import('@/pages/SovereignDashboard').then(m => ({ default: m.SovereignDashboard })));
+const MonitoringPage   = lazy(() => import('@/pages/MonitoringPage').then(m => ({ default: m.MonitoringPage })));
+const VotingPage       = lazy(() => import('@/pages/VotingPage').then(m => ({ default: m.VotingPage })));
+const MessageLogPage   = lazy(() => import('@/pages/MessageLogPage').then(m => ({ default: m.MessageLogPage })));
+const ABTestingPage    = lazy(() => import('@/pages/ABTestingPage').then(m => ({ default: m.ABTestingPage })));
 
 // Full-screen spinner shown while checkAuth() is in-flight on page load
 function AppLoader() {
@@ -168,11 +171,14 @@ export default function App() {
             />
           </Route>
 
-          {/* Protected Routes */}
+          {/* Protected Routes — Suspense uses an invisible fallback so lazy
+              chunks never flash a spinner; the page transition handles the reveal. */}
           <Route
             path="/"
             element={
-              isAuthenticated ? <MainLayout /> : <Navigate to="/login" replace />
+              isAuthenticated
+                ? <MainLayout />
+                : <Navigate to="/login" replace />
             }
           >
             <Route index element={<Dashboard />} />

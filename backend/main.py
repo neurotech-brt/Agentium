@@ -83,6 +83,7 @@ from backend.api.routes import audio as audio_routes      # Phase 10.3: Voice In
 from backend.api.routes import dashboard as dashboard_routes  # Dashboard aggregate summary
 from backend.api.routes import outbound_webhooks as outbound_webhooks_routes  # Phase 12: Outbound Webhooks
 from backend.api.routes import workflows as workflows_routes                   # Workflow Engine (006_workflow)
+from backend.api.routes import scaling as scaling_routes                       # Phase 13.3: Scaling Engine
 
 from backend.core.security_middleware import (
     RateLimitMiddleware,
@@ -464,6 +465,7 @@ app.include_router(mobile_routes.router, prefix="/api/v1")
 app.include_router(dashboard_routes.router, prefix="/api/v1")  # Dashboard aggregate summary
 app.include_router(outbound_webhooks_routes.router, prefix="/api/v1")  # Phase 12: Outbound Webhooks
 app.include_router(workflows_routes.router,          prefix="/api/v1")  # Workflow Engine (006_workflow)
+app.include_router(scaling_routes.router,            prefix="/api/v1")  # Phase 13.3: Scaling Engine
 
 
 # ══════════════════════════════════════════════════════════════════════════════

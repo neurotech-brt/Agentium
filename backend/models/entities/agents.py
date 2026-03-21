@@ -88,6 +88,7 @@ class Agent(BaseEntity):
     is_persistent = Column(Boolean, default=False, nullable=False, index=True)
     idle_mode_enabled = Column(Boolean, default=False, nullable=False)
     last_idle_action_at = Column(DateTime, nullable=True, index=True)
+    last_heartbeat_at = Column(DateTime, nullable=True, index=True)  # Phase 13.2: Self-Healing
     idle_task_count = Column(Integer, default=0)
     idle_tokens_saved = Column(Integer, default=0)
     current_idle_task_id = Column(String(36), nullable=True)

@@ -20,12 +20,16 @@ import {
     ChevronDown,
     Filter,
     XCircle,
+    HeartPulse,
+    RotateCcw,
+    ShieldAlert,
+    Wrench
 } from 'lucide-react';
 
 const KNOWN_MONITOR_IDS  = ['00001', '00002', '00003'];
 const REFRESH_INTERVAL_MS = 30_000;
 
-type Tab = 'dashboard' | 'violations';
+type Tab = 'dashboard' | 'violations' | 'recovery';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -297,6 +301,136 @@ function ViolationsTab({ initialViolations }: ViolationsTabProps) {
     );
 }
 
+// ─── Recovery Tab ─────────────────────────────────────────────────────────────
+
+function RecoveryTab() {
+    const [status, setStatus] = useState<any>(null);
+    const [events, setEvents] = useState<any[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isRollingBack, setIsRollingBack] = useState<string | null>(null);
+
+    const loadData = useCallback(async () => {
+        setIsLoading(true);
+        try {
+            const [st, evs] = await Promise.all([
+                monitoringService.getSelfHealingStatus(),
+                monitoringService.getSelfHealingEvents(50, 7)
+            ]);
+            setStatus(st);
+            setEvents(evs);
+        } catch (err) {
+            console.error('Failed to load recovery data', err);
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        loadData();
+    }, [loadData]);
+
+    const handleRollback = async (eventId: string, checkpointId: string) => {
+        if (!confirm(`Are you sure you want to rollback to checkpoint ${checkpointId}? This will terminate active agent operations and reset state.`)) return;
+        
+        setIsRollingBack(eventId);
+        try {
+            await monitoringService.rollbackFromCheckpoint(checkpointId);
+            alert(`Successfully rolled back to checkpoint ${checkpointId}`);
+            loadData();
+        } catch (err: any) {
+            alert(err?.response?.data?.detail || 'Rollback failed');
+        } finally {
+            setIsRollingBack(null);
+        }
+    };
+
+    if (isLoading) {
+        return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
+    }
+
+    return (
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+            {/* System Status Banner */}
+            <div className={`rounded-xl border p-6 shadow-sm ${status?.system_mode === 'degraded' ? 'bg-orange-50 dark:bg-orange-950/30 border-orange-200 dark:border-orange-800/50' : 'bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800/50'}`}>
+                <div className="flex items-start gap-4">
+                    <div className={`p-3 rounded-lg flex-shrink-0 ${status?.system_mode === 'degraded' ? 'bg-orange-100 dark:bg-orange-900/50' : 'bg-green-100 dark:bg-green-900/50'}`}>
+                        {status?.system_mode === 'degraded' ? <ShieldAlert className="w-6 h-6 text-orange-600 dark:text-orange-400" /> : <ShieldCheck className="w-6 h-6 text-green-600 dark:text-green-400" />}
+                    </div>
+                    <div>
+                        <h3 className={`text-lg font-bold ${status?.system_mode === 'degraded' ? 'text-orange-900 dark:text-orange-300' : 'text-green-900 dark:text-green-300'}`}>
+                            System Mode: {status?.system_mode === 'degraded' ? 'DEGRADED' : 'NORMAL'}
+                        </h3>
+                        {status?.system_mode === 'degraded' && (
+                             <p className="text-sm text-orange-800 dark:text-orange-400 mt-1">
+                                Degraded since {status.degraded_since ? new Date(status.degraded_since).toLocaleString() : 'recently'}. Reason: {status.reason}. Active circuit breakers: {status.active_circuit_breakers}. Non-critical tasks are paused.
+                             </p>
+                        )}
+                        {status?.system_mode !== 'degraded' && (
+                            <p className="text-sm text-green-800 dark:text-green-400 mt-1">
+                                All self-healing systems are active and operating normally. Automated recovery, degradation mode, and critical path protection are engaged.
+                            </p>
+                        )}
+                    </div>
+                </div>
+            </div>
+
+            {/* Events Feed */}
+            <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
+                <div className="border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex items-center justify-between bg-gray-50 dark:bg-gray-800/50">
+                    <h2 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                        <HeartPulse className="w-5 h-5 text-rose-500" />
+                        Self-Healing Activity Log
+                    </h2>
+                    <button onClick={loadData} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50 transition">
+                        <RefreshCw className="w-3.5 h-3.5" /> Refresh
+                    </button>
+                </div>
+                <div className="p-6">
+                    {events.length === 0 ? (
+                        <div className="text-center py-12">
+                            <Wrench className="w-12 h-12 text-gray-300 dark:text-gray-600 mx-auto mb-4" />
+                            <p className="text-gray-900 dark:text-white font-medium mb-1">No events recorded</p>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">Self-healing actions will appear here when triggered.</p>
+                        </div>
+                    ) : (
+                        <div className="space-y-4">
+                            {events.map((ev: any) => (
+                                <div key={ev.id} className="flex gap-4 border-l-2 border-indigo-200 dark:border-indigo-800/60 pl-4 py-2 relative group hover:border-indigo-400 dark:hover:border-indigo-500 transition-colors">
+                                    <div className="absolute w-2.5 h-2.5 rounded-full bg-indigo-500 dark:bg-indigo-400 -left-[6px] top-3" />
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-3 mb-1">
+                                            <span className="text-sm font-bold text-gray-900 dark:text-white">{ev.action}</span>
+                                            <span className="text-xs font-medium text-gray-400 dark:text-gray-500">{new Date(ev.created_at).toLocaleString()}</span>
+                                            {ev.level === 'critical' || ev.level === 'error' ? (
+                                                <span className="bg-red-100 text-red-700 text-[10px] px-2 py-0.5 rounded-full uppercase font-bold dark:bg-red-900/30 dark:text-red-400 border border-red-200 dark:border-red-800/40">Error</span>
+                                            ) : null}
+                                        </div>
+                                        <p className="text-sm text-gray-600 dark:text-gray-300 leading-relaxed mb-1">{ev.description}</p>
+                                        
+                                        {/* Rollback Button for crashed agents that were checkpointed before crash */}
+                                        {ev.action === 'agent_crashed' && ev.after_state?.checkpoint_id && (
+                                            <div className="mt-3">
+                                                <button
+                                                    onClick={() => handleRollback(ev.id, ev.after_state.checkpoint_id)}
+                                                    disabled={!!isRollingBack}
+                                                    className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 transition"
+                                                >
+                                                    {isRollingBack === ev.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RotateCcw className="w-3.5 h-3.5 text-rose-500" />}
+                                                    Debug: Rollback to Checkpoint
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export const MonitoringPage: React.FC = () => {
@@ -492,7 +626,7 @@ export const MonitoringPage: React.FC = () => {
 
                 {/* ── Tabs ────────────────────────────────────────────────── */}
                 <div className="flex gap-1 mb-6 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-1 w-fit shadow-sm">
-                    {(['dashboard', 'violations'] as Tab[]).map(tab => (
+                    {(['dashboard', 'violations', 'recovery'] as Tab[]).map(tab => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
@@ -724,6 +858,11 @@ export const MonitoringPage: React.FC = () => {
                 {/* ══ Violations Tab ═════════════════════════════════════════ */}
                 {activeTab === 'violations' && (
                     <ViolationsTab initialViolations={violations} />
+                )}
+
+                {/* ══ Recovery Tab ═══════════════════════════════════════════ */}
+                {activeTab === 'recovery' && (
+                    <RecoveryTab />
                 )}
 
             </div>

@@ -12,6 +12,9 @@ from dataclasses import asdict
 from datetime import datetime, timedelta
 from contextlib import contextmanager
 
+from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
+from sqlalchemy.exc import OperationalError
+
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.pool import NullPool
@@ -65,6 +68,12 @@ CeleryScopedSession = scoped_session(CelerySessionLocal)
 # ═══════════════════════════════════════════════════════════
 
 @contextmanager
+@retry(
+    retry=retry_if_exception_type(OperationalError),
+    stop=stop_after_attempt(5),
+    wait=wait_fixed(2),
+    reraise=True,
+)
 def get_task_db():
     """
     Context manager for database sessions in Celery tasks.
@@ -143,7 +152,10 @@ def execute_task_async(self, task_id: str, agent_id: str):
             # Record failure for used skills
             # (Would need to track which skills were attempted)
             
-            raise self.retry(exc=exc, countdown=60)
+            # Phase 13.2: Exponential backoff — 1→2→4→8→16→32→60s cap
+            countdown = min(2 ** self.request.retries, 60)
+            logger.info(f"Retrying task {task_id} in {countdown}s (attempt {self.request.retries + 1})")
+            raise self.retry(exc=exc, countdown=countdown)
 
 
 @celery_app.task
@@ -972,3 +984,135 @@ def process_dependency_graph():
         except Exception as e:
             logger.error(f"process_dependency_graph failed: {e}")
             return {"error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════
+# Phase 13.2 — Self-Healing & Auto-Recovery Tasks
+# ═══════════════════════════════════════════════════════════
+
+@celery_app.task(name='backend.services.tasks.task_executor.agent_heartbeat')
+def agent_heartbeat():
+    """
+    Heartbeat task: update last_heartbeat_at for all active/working agents.
+    Runs every 60 seconds via Celery beat.
+    """
+    with get_task_db() as db:
+        try:
+            from backend.services.self_healing_service import SelfHealingService
+            result = SelfHealingService.update_heartbeats(db)
+            logger.info(f"💓 Heartbeat: updated {result['updated']} agents")
+            return result
+        except Exception as e:
+            logger.error(f"agent_heartbeat failed: {e}")
+            return {"error": str(e)}
+
+
+@celery_app.task(name='backend.services.tasks.task_executor.detect_crashed_agents')
+def detect_crashed_agents():
+    """
+    Crash detection: find agents with stale heartbeats and trigger recovery.
+    Runs every 30 seconds via Celery beat.
+    """
+    with get_task_db() as db:
+        try:
+            from backend.services.self_healing_service import SelfHealingService
+            result = SelfHealingService.detect_crashed_agents(db)
+            if result["detected"] > 0:
+                logger.warning(
+                    f"🚨 Crash detection: {result['detected']} crashed, "
+                    f"{result['recovered']} recovered"
+                )
+            
+            # Phase 13.2: Trigger degradation check after crash detection
+            SelfHealingService.check_degradation_triggers(db)
+            return result
+        except Exception as e:
+            logger.error(f"detect_crashed_agents failed: {e}")
+            return {"error": str(e)}
+
+
+@celery_app.task(name='backend.services.tasks.task_executor.self_diagnostic_daily')
+def self_diagnostic_daily():
+    """
+    Daily self-diagnostic: check DB, Redis, ChromaDB, stale tasks.
+    Proposes constitutional amendment if repeated violations detected.
+    Runs once per day (86400s) via Celery beat.
+    """
+    with get_task_db() as db:
+        try:
+            from backend.services.self_healing_service import SelfHealingService
+            result = SelfHealingService.run_self_diagnostics(db)
+            is_healthy = len(result.get("issues", [])) == 0
+            logger.info(
+                f"🔍 Self-diagnostic: {'HEALTHY' if is_healthy else f'{len(result[\"issues\"])} issue(s)'}"
+            )
+            return result
+        except Exception as e:
+            logger.error(f"self_diagnostic_daily failed: {e}")
+            return {"error": str(e)}
+
+
+@celery_app.task(name='backend.services.tasks.task_executor.critical_path_guardian')
+def critical_path_guardian():
+    """
+    Critical path protection: tag DAG ancestors of CRITICAL/SOVEREIGN tasks
+    and reserve agent slots for these chains.
+    Runs every 120 seconds via Celery beat.
+    """
+    with get_task_db() as db:
+        try:
+            from backend.services.self_healing_service import SelfHealingService
+            result = SelfHealingService.protect_critical_path(db)
+            if result["critical_tasks_found"] > 0:
+                logger.info(
+                    f"🛡️ Critical path: {result['critical_tasks_found']} critical tasks, "
+                    f"{result['ancestors_tagged']} ancestors tagged"
+                )
+            return result
+        except Exception as e:
+            logger.error(f"critical_path_guardian failed: {e}")
+            return {"error": str(e)}
+
+# ═══════════════════════════════════════════════════════════
+# Phase 13.3 — Predictive Auto-Scaling Tasks
+# ═══════════════════════════════════════════════════════════
+
+@celery_app.task(name='backend.services.tasks.task_executor.metrics_snapshot')
+def metrics_snapshot():
+    """
+    Takes a snapshot of current system metrics for predictive scaling.
+    Runs every 5 minutes.
+    """
+    with get_task_db() as db:
+        try:
+            from backend.services.predictive_scaling import predictive_scaling_service
+            result = predictive_scaling_service.snapshot_metrics(db)
+            return {"status": "success", "snapshot": result}
+        except Exception as e:
+            logger.error(f"metrics_snapshot failed: {e}")
+            return {"error": str(e)}
+
+@celery_app.task(name='backend.services.tasks.task_executor.predictive_scale')
+def predictive_scale():
+    """
+    Evaluates historical metrics to predict load and pre-spawn/liquidate agents.
+    Also enforces token budget and time-based policies.
+    Runs every 5 minutes.
+    """
+    with get_task_db() as db:
+        try:
+            from backend.services.predictive_scaling import predictive_scaling_service
+            # 1. Evaluate token budget limits (may pause non-critical tasks)
+            predictive_scaling_service.enforce_token_budget_guard(db)
+            
+            # 2. Get predictions based on moving averages
+            predictions = predictive_scaling_service.get_predictions()
+            
+            # 3. Make pre-spawn or pre-liquidation decisions
+            predictive_scaling_service.evaluate_scaling(db, predictions)
+            
+            return {"status": "success", "predictions": predictions}
+        except Exception as e:
+            logger.error(f"predictive_scale failed: {e}")
+            return {"error": str(e)}
+

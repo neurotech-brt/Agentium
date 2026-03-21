@@ -113,6 +113,34 @@ celery_app.conf.beat_schedule = {
         'task': 'backend.services.tasks.task_executor.process_dependency_graph',
         'schedule': 30.0,   # every 30 seconds
     },
+
+    # ── Phase 13.2: Self-Healing & Auto-Recovery ──────────────────────────
+    'agent-heartbeat': {
+        'task': 'backend.services.tasks.task_executor.agent_heartbeat',
+        'schedule': 60.0,   # every 60 seconds
+    },
+    'crash-detection': {
+        'task': 'backend.services.tasks.task_executor.detect_crashed_agents',
+        'schedule': 30.0,   # every 30 seconds
+    },
+    'self-diagnostic-daily': {
+        'task': 'backend.services.tasks.task_executor.self_diagnostic_daily',
+        'schedule': 86400.0,  # daily
+    },
+    'critical-path-guardian': {
+        'task': 'backend.services.tasks.task_executor.critical_path_guardian',
+        'schedule': 120.0,  # every 2 minutes
+    },
+    
+    # ── Phase 13.3: Predictive Auto-Scaling ──────────────────────────
+    'load-metrics-snapshot': {
+        'task': 'backend.services.tasks.task_executor.metrics_snapshot',
+        'schedule': 300.0,  # every 5 minutes
+    },
+    'predictive-scaling-check': {
+        'task': 'backend.services.tasks.task_executor.predictive_scale',
+        'schedule': 300.0,  # every 5 minutes
+    },
 }
 
 

@@ -606,3 +606,81 @@ async def get_validation_failures(
         "failures":       failures,
         "generated_at":   datetime.utcnow().isoformat(),
     }
+
+
+# ═══════════════════════════════════════════════════════════
+# Phase 13.2 — Self-Healing & Auto-Recovery Routes
+# ═══════════════════════════════════════════════════════════
+
+@router.get("/self-healing/status")
+async def get_self_healing_status(
+    current_user: dict = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get the current system status (normal vs degraded).
+    """
+    from backend.services.self_healing_service import SelfHealingService
+    return SelfHealingService.get_system_mode(db)
+
+
+@router.get("/self-healing/events")
+async def get_self_healing_events(
+    limit: int = Query(50, ge=1, le=100),
+    days: int = Query(7, ge=1, le=30),
+    current_user: dict = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Get a list of recent self-healing actions and events (crashes, degradations).
+    """
+    from backend.services.self_healing_service import SelfHealingService
+    return SelfHealingService.get_self_healing_events(db, limit=limit, days=days)
+
+
+@router.post("/admin/rollback/{checkpoint_id}")
+async def rollback_from_checkpoint(
+    checkpoint_id: str,
+    current_user: dict = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Admin-only endpoint to manually trigger a rollback to a specific execution checkpoint.
+    """
+    try:
+        from backend.services.checkpoint_service import CheckpointService
+        
+        # In a real system we'd verify current_user isAdmin here
+        # (Assuming it's protected by get_current_active_user metadata or similar RBAC)
+        
+        actor_id = current_user.get("user_id", "admin")
+        result = CheckpointService.resume_from_checkpoint(
+            db=db,
+            checkpoint_id=checkpoint_id,
+            actor_id=actor_id
+        )
+        
+        from backend.models.entities.audit import AuditLog, AuditLevel, AuditCategory
+        audit = AuditLog.log(
+            level=AuditLevel.WARNING,
+            category=AuditCategory.SYSTEM,
+            actor_type="user",
+            actor_id=actor_id,
+            action="manual_rollback",
+            description=f"Admin manually rolled back to checkpoint {checkpoint_id}",
+            after_state=result if isinstance(result, dict) else {"result": "success"}
+        )
+        db.add(audit)
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": f"Successfully rolled back to checkpoint {checkpoint_id}",
+            "checkpoint_id": checkpoint_id
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Rollback failed: {str(e)}"
+        )

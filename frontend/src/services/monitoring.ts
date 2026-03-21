@@ -260,4 +260,23 @@ export const monitoringService = {
     );
     return response.data;
   },
+
+  // ─── Phase 13.2: Self-Healing & Auto-Recovery ──────────────────────────────
+  
+  getSelfHealingStatus: async (): Promise<{ system_mode: string; degraded_since: string | null; active_circuit_breakers: number; reason: string | null }> => {
+    const response = await api.get('/api/v1/monitoring/self-healing/status');
+    return response.data;
+  },
+
+  getSelfHealingEvents: async (limit = 50, days = 7): Promise<any[]> => {
+    const response = await api.get('/api/v1/monitoring/self-healing/events', {
+      params: { limit, days }
+    });
+    return response.data;
+  },
+
+  rollbackFromCheckpoint: async (checkpointId: string): Promise<{ success: boolean; message: string; checkpoint_id: string }> => {
+    const response = await api.post(`/api/v1/monitoring/admin/rollback/${checkpointId}`);
+    return response.data;
+  }
 };

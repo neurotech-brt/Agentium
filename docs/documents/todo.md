@@ -272,33 +272,33 @@ Build a self-governing AI ecosystem where agents operate under constitutional la
 
 #### Backend
 
-- [ ] **Circuit Breaker → Council Auto-Escalation** — when `CB_OPEN` transitions, immediately enqueue a `EMERGENCY` micro-vote via `VotingService`; currently silent
-- [ ] **Exponential Backoff** — replace fixed 60 s retry in `execute_task_async` with `min(2 ** retry_count, 60)` seconds (1 → 2 → 4 → 8 → 16 → 32 → 60 cap)
-- [ ] **Agent Crash Detection** (`backend/services/reincarnation_service.py`) — Celery beat every 30 s: agents with `status = 'working'` and `last_heartbeat_at > 2 min` → mark crashed, emit `agent_crashed` WebSocket event
-- [ ] **State Restoration from Checkpoint** — on crash, call `CheckpointService.get_latest(agent_id)`; restore `ethos`, `current_task_id`, `context_window_snapshot`
-- [ ] **Agent Reincarnation** — spawn replacement via `AgentFactory` with restored state; re-queue interrupted task in `ASSIGNED` status
-- [ ] **Graceful Degradation Mode** — if all API providers have `CB_OPEN`: pause tasks with `priority < HIGH`, continue CRITICAL/SOVEREIGN on local Ollama, emit `system_mode_change` WebSocket banner
-- [ ] **Critical Path Protection** — tag tasks that are DAG ancestors of CRITICAL/SOVEREIGN leaves; reserve one agent slot permanently for these chains
-- [ ] **Self-Diagnostic Routine** — daily Celery beat: check DB connection pool, Redis ping, ChromaDB collection counts, disk usage, stale task count; auto-propose constitutional amendment if repeated violations detected
-- [ ] **DB Connection Pool Auto-Recovery** — wrap `CelerySessionLocal` in `tenacity` retry loop (5 attempts, 2 s wait) on `OperationalError`
-- [ ] **Heartbeat Task** — Celery beat every 60 s: each active agent writes `last_heartbeat_at = utcnow()`
+- [x] **Circuit Breaker → Council Auto-Escalation** — when `CB_OPEN` transitions, immediately enqueue a `EMERGENCY` micro-vote via `VotingService`; currently silent
+- [x] **Exponential Backoff** — replace fixed 60 s retry in `execute_task_async` with `min(2 ** retry_count, 60)` seconds (1 → 2 → 4 → 8 → 16 → 32 → 60 cap)
+- [x] **Agent Crash Detection** (`backend/services/reincarnation_service.py`) — Celery beat every 30 s: agents with `status = 'working'` and `last_heartbeat_at > 2 min` → mark crashed, emit `agent_crashed` WebSocket event
+- [x] **State Restoration from Checkpoint** — on crash, call `CheckpointService.get_latest(agent_id)`; restore `ethos`, `current_task_id`, `context_window_snapshot`
+- [x] **Agent Reincarnation** — spawn replacement via `AgentFactory` with restored state; re-queue interrupted task in `ASSIGNED` status
+- [x] **Graceful Degradation Mode** — if all API providers have `CB_OPEN`: pause tasks with `priority < HIGH`, continue CRITICAL/SOVEREIGN on local Ollama, emit `system_mode_change` WebSocket banner
+- [x] **Critical Path Protection** — tag tasks that are DAG ancestors of CRITICAL/SOVEREIGN leaves; reserve one agent slot permanently for these chains
+- [x] **Self-Diagnostic Routine** — daily Celery beat: check DB connection pool, Redis ping, ChromaDB collection counts, disk usage, stale task count; auto-propose constitutional amendment if repeated violations detected
+- [x] **DB Connection Pool Auto-Recovery** — wrap `CelerySessionLocal` in `tenacity` retry loop (5 attempts, 2 s wait) on `OperationalError`
+- [x] **Heartbeat Task** — Celery beat every 60 s: each active agent writes `last_heartbeat_at = utcnow()`
 
 #### Alembic
 
-- [ ] Add `last_heartbeat_at` (DateTime, nullable) column to `agents` table
+- [x] Add `last_heartbeat_at` (DateTime, nullable) column to `agents` table
 
 #### Beat Schedule Additions to `celery_app.py`
 
-- [ ] `agent-heartbeat` — 60 s
-- [ ] `crash-detection` — 30 s
-- [ ] `self-diagnostic-daily` — 86400 s
-- [ ] `critical-path-guardian` — 120 s
+- [x] `agent-heartbeat` — 60 s
+- [x] `crash-detection` — 30 s
+- [x] `self-diagnostic-daily` — 86400 s
+- [x] `critical-path-guardian` — 120 s
 
 #### Frontend
 
-- [ ] Self-Healing Events feed in `MonitoringPage.tsx` — reincarnation events, circuit state changes, degradation activations
-- [ ] System mode banner: normal (hidden) / degraded (amber) / critical (red) — driven by `system_mode_change` WebSocket event
-- [ ] "One-Click Rollback" button per healing action — calls `POST /admin/rollback/{audit_id}`
+- [x] Self-Healing Events feed in `MonitoringPage.tsx` — reincarnation events, circuit state changes, degradation activations
+- [x] System mode banner: normal (hidden) / degraded (amber) / critical (red) — driven by `system_mode_change` WebSocket event
+- [x] "One-Click Rollback" button per healing action — calls `POST /admin/rollback/{audit_id}`
 
 ---
 
@@ -308,34 +308,34 @@ Build a self-governing AI ecosystem where agents operate under constitutional la
 
 #### Backend
 
-- [ ] **Time-Series Store** (`backend/services/predictive_scaling.py`) — every 5 min, snapshot `pending_task_count`, `active_agent_count`, `avg_task_duration_seconds`, `token_spend_last_5m` to Redis sorted set; retain 7 days, auto-trim
-- [ ] **Load Predictor** — weighted moving average (`[0.5, 0.3, 0.2]`) over time-series; output: `next_1h`, `next_6h`, `next_24h` predictions
-- [ ] **Pre-Spawn Decision** — if `next_1h_prediction > current_capacity × 0.8`: call `AgentLifecycleService.spawn_agent(tier=3)` immediately; log to `AuditLog`
-- [ ] **Pre-Liquidation Decision** — if `next_6h_prediction < current_agents × 0.3` AND agent idle > 30 min: trigger existing auto-termination path
-- [ ] **Fix `auto_scale_check` stub** — replace `# In production: actually spawn agents` comment with real `AgentLifecycleService.spawn_agent(tier=3, count=recommended_agents, db=db)` call
-- [ ] **Resource-Aware Scheduler** — check Redis memory and PG connection pool before spawning; if either > 85%, delay non-critical dispatch 30 s
-- [ ] **Token Budget Guard** — daily cap via `DAILY_TOKEN_BUDGET_USD` env var (default `10.00`); at 80% downgrade new task allocations to cheapest model; at 100% pause non-CRITICAL tasks, emit `budget_exceeded` WebSocket event
-- [ ] **Time-Based Policy** — read `BUSINESS_HOURS_TZ`, `BUSINESS_HOURS_START`, `BUSINESS_HOURS_END` env vars; outside hours, cap active task agents at 2
+- [x] **Time-Series Store** (`backend/services/predictive_scaling.py`) — every 5 min, snapshot `pending_task_count`, `active_agent_count`, `avg_task_duration_seconds`, `token_spend_last_5m` to Redis sorted set; retain 7 days, auto-trim
+- [x] **Load Predictor** — weighted moving average (`[0.5, 0.3, 0.2]`) over time-series; output: `next_1h`, `next_6h`, `next_24h` predictions
+- [x] **Pre-Spawn Decision** — if `next_1h_prediction > current_capacity × 0.8`: call `AgentLifecycleService.spawn_agent(tier=3)` immediately; log to `AuditLog`
+- [x] **Pre-Liquidation Decision** — if `next_6h_prediction < current_agents × 0.3` AND agent idle > 30 min: trigger existing auto-termination path
+- [x] **Fix `auto_scale_check` stub** — replace `# In production: actually spawn agents` comment with real `AgentLifecycleService.spawn_agent(tier=3, count=recommended_agents, db=db)` call
+- [x] **Resource-Aware Scheduler** — check Redis memory and PG connection pool before spawning; if either > 85%, delay non-critical dispatch 30 s
+- [x] **Token Budget Guard** — daily cap via `DAILY_TOKEN_BUDGET_USD` env var (default `10.00`); at 80% downgrade new task allocations to cheapest model; at 100% pause non-CRITICAL tasks, emit `budget_exceeded` WebSocket event
+- [x] **Time-Based Policy** — read `BUSINESS_HOURS_TZ`, `BUSINESS_HOURS_START`, `BUSINESS_HOURS_END` env vars; outside hours, cap active task agents at 2
 
 #### Beat Schedule Additions
 
-- [ ] `load-metrics-snapshot` — 300 s
-- [ ] `predictive-scaling-check` — 300 s
+- [x] `load-metrics-snapshot` — 300 s
+- [x] `predictive-scaling-check` — 300 s
 
 #### API Routes (`backend/api/routes/scaling.py` — new file)
 
-- [ ] `GET /predictions/load` — return `{ next_1h, next_6h, next_24h, current_capacity, recommendation }`
-- [ ] `GET /scaling/history` — last 100 scaling decisions from `AuditLog`
-- [ ] `POST /scaling/override` — `{ action: 'spawn' | 'liquidate', count, tier }` (admin only)
+- [x] `GET /predictions/load` — return `{ next_1h, next_6h, next_24h, current_capacity, recommendation }`
+- [x] `GET /scaling/history` — last 100 scaling decisions from `AuditLog`
+- [x] `POST /scaling/override` — `{ action: 'spawn' | 'liquidate', count, tier }` (admin only)
 
 #### Frontend — `ScalingDashboard.tsx` (new page at `/scaling`)
 
-- [ ] Four KPI cards: Active Agents, Pending Tasks, Token Spend Today (USD), Capacity %
-- [ ] Load Prediction Chart (Recharts `LineChart`): actual 24 h history + predicted `next_1h` + `next_6h` series
-- [ ] Scaling Events Timeline: spawn/liquidate events with rationale; click to expand AuditLog entry
-- [ ] Manual Override Panel: "Spawn N Agents" / "Liquidate N Idle Agents" controls + tier selector
-- [ ] Budget Gauge: radial gauge amber at 80%, red at 100%
-- [ ] Poll `GET /predictions/load` every 60 s; subscribe to `scaling_event` WebSocket
+- [x] Four KPI cards: Active Agents, Pending Tasks, Token Spend Today (USD), Capacity %
+- [x] Load Prediction Chart (Recharts `LineChart`): actual 24 h history + predicted `next_1h` + `next_6h` series
+- [x] Scaling Events Timeline: spawn/liquidate events with rationale; click to expand AuditLog entry
+- [x] Manual Override Panel: "Spawn N Agents" / "Liquidate N Idle Agents" controls + tier selector
+- [x] Budget Gauge: radial gauge amber at 80%, red at 100%
+- [x] Poll `GET /predictions/load` every 60 s; subscribe to `scaling_event` WebSocket
 
 ---
 

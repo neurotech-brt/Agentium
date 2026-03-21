@@ -906,6 +906,17 @@ class AgentOrchestrator:
                     "Circuit breaker OPENED for %s after %d failures",
                     agent_id, cb["failures"],
                 )
+                
+                # Phase 13.2: Circuit Breaker → Council Auto-Escalation
+                try:
+                    from backend.services.self_healing_service import SelfHealingService
+                    SelfHealingService.trigger_circuit_breaker_escalation(
+                        agent_id=agent_id,
+                        cb_state=cb,
+                        db=self.db
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to trigger circuit breaker escalation for {agent_id}: {e}")
 
     # ------------------------------------------------------------------
     # Helpers

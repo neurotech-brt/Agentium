@@ -141,6 +141,7 @@ async def lifespan(app: FastAPI):
     """
     Application lifespan with:
     - Database initialization
+    - Constitution seed (API-key independent)
     - Persistent Council (IDLE GOVERNANCE)
     - API Manager & Model Allocation
     - Enhanced Token Optimizer
@@ -166,6 +167,28 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ Database initialization failed: {e}")
         raise
+
+    # ─────────────────────────────────────────────────────────────
+    # 1b. Seed fallback Constitution (API-key independent)
+    #     The constitution is pure DB data — no LLM call required.
+    #     This ensures GET /api/v1/constitution always returns 200,
+    #     even on a fresh install before Genesis has run.
+    #     create_default_constitution() is idempotent: it returns
+    #     the existing row if one is already present.
+    # ─────────────────────────────────────────────────────────────
+    try:
+        db = next(get_db())
+        try:
+            existing = db.query(Constitution).filter_by(is_active=True).first()
+            if not existing:
+                fallback = InitializationService.create_default_constitution(db)
+                logger.info(f"✅ Fallback constitution seeded: {fallback.version}")
+            else:
+                logger.info(f"✅ Constitution already present: {existing.version}")
+        finally:
+            db.close()
+    except Exception as e:
+        logger.error(f"❌ Constitution seed failed (non-fatal): {e}")
 
     # ─────────────────────────────────────────────────────────────
     # 2. Initialize Persistent Council (IDLE GOVERNANCE)
@@ -485,7 +508,7 @@ app.include_router(outbound_webhooks_routes.router, prefix="/api/v1")  # Phase 1
 app.include_router(workflows_routes.router,          prefix="/api/v1")  # Workflow Engine (006_workflow)
 app.include_router(scaling_routes.router,            prefix="/api/v1")  # Phase 13.3: Scaling Engine
 app.include_router(improvements_routes.router,       prefix="/api/v1")  # Phase 13.4: Continuous Self-Improvement
-app.include_router(genesis_routes.router)                                # Genesis Protocol endpoints
+app.include_router(genesis_routes.router)                                # Genesis Protocol endpoints (prefix defined in genesis.py)
 
 
 

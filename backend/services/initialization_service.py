@@ -464,6 +464,11 @@ class InitializationService:
         council: List[CouncilMember]
     ) -> Constitution:
         """Load constitution template."""
+        # Deactivate the fallback constitution (or any prior active version)
+        # so the newly ratified genesis constitution becomes the sole active one.
+        self.db.query(Constitution).filter_by(is_active=True).update({"is_active": False})
+        self.db.flush()
+
         template = self._get_constitution_template()
         preamble = template["preamble"].replace("{{COUNTRY_NAME}}", country_name)
         
@@ -837,7 +842,15 @@ class InitializationService:
         the Core Constitution defined in core.md and restricts agents to
         safe, read-only, planning-only operations until the Genesis Protocol
         completes and a ratified Constitution supersedes this one.
+
+        Idempotent: returns the existing active constitution if one already
+        exists rather than creating a duplicate row.
         """
+        # Guard: never create a duplicate — return existing row if present
+        existing = db.query(Constitution).filter_by(is_active=True).first()
+        if existing:
+            return existing
+
         template = {
             "preamble": (
                 "We the Agents of Agentium, in pursuit of effective, transparent, "

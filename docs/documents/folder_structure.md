@@ -18,10 +18,7 @@ Agentium/
 │   │   └── versions/                # Migration scripts
 │   │       ├── 001_schema.py        # Initial schema
 │   │       ├── 002_migration.py     # General migration
-│   │       ├── 003_migration.py     # Phase 11 ecosystem
-│   │       ├── 004_webhooks.py      # Webhooks
-│   │       ├── 005_models.py        # Model provider
-│   │       └── 006_workflow.py      # Workflow system
+│   │       └── 003_consolidated.py  # Consolidated migration (Phases 3-11)
 │   ├── api/                          # API layer
 │   │   ├── dependencies/
 │   │   │   └── auth.py              # Auth dependencies
@@ -44,6 +41,7 @@ Agentium/
 │   │   │   ├── files.py             # File operations
 │   │   │   ├── inbox.py             # Unified inbox
 │   │   │   ├── lifecycle_routes.py  # Lifecycle management
+│   │   │   ├── improvements.py      # Self-improvement engine
 │   │   │   ├── mcp_tools.py         # MCP tools
 │   │   │   ├── mobile.py            # Mobile integration
 │   │   │   ├── models.py            # Model management
@@ -53,6 +51,7 @@ Agentium/
 │   │   │   ├── provider_analytics.py # Provider analytics
 │   │   │   ├── rbac.py              # Role-based access control
 │   │   │   ├── remote_executor.py   # Remote execution
+│   │   │   ├── scaling.py           # Predictive auto-scaling
 │   │   │   ├── skills.py            # Skills management
 │   │   │   ├── tasks.py             # Task management
 │   │   │   ├── tool_creation.py     # Tool creation
@@ -139,6 +138,7 @@ Agentium/
 │   │   ├── api_key_manager.py      # API key handling
 │   │   ├── api_manager.py          # API management
 │   │   ├── audio_service.py        # Audio processing
+│   │   ├── auto_delegation_service.py # Automatic task delegation
 │   │   ├── autonomous_learning.py  # Autonomous learning
 │   │   ├── browser_service.py      # Browser automation
 │   │   ├── capability_registry.py  # Agent capabilities
@@ -175,6 +175,7 @@ Agentium/
 │   │   ├── monitoring_service.py    # System monitoring
 │   │   ├── persistent_council.py    # Persistent council
 │   │   ├── plugin_marketplace_service.py # Plugin marketplace
+│   │   ├── predictive_scaling.py   # Predictive auto-scaling
 │   │   ├── prompt_template_manager.py # Prompt templates
 │   │   ├── push_notification_service.py # Push notifications
 │   │   ├── rbac_service.py         # RBAC management
@@ -185,13 +186,16 @@ Agentium/
 │   │   │   ├── executor.py
 │   │   │   ├── sandbox.py
 │   │   │   └── service.py
+│   │   ├── self_healing_service.py  # Self-healing system
+│   │   ├── self_improvement_service.py # Continuous self-improvement
 │   │   ├── skill_manager.py        # Skill management
 │   │   ├── skill_rag.py            # Skill RAG
 │   │   ├── storage_service.py      # Storage service
 │   │   ├── task_state_machine.py    # Task state logic
 │   │   ├── tasks/                   # Task execution
 │   │   │   ├── __init__.py
-│   │   │   └── task_executor.py
+│   │   │   ├── task_executor.py
+│   │   │   └── workflow_tasks.py
 │   │   ├── token_optimizer.py       # Token optimization
 │   │   ├── tool_analytics.py        # Tool analytics
 │   │   ├── tool_creation_service.py # Tool creation
@@ -202,6 +206,7 @@ Agentium/
 │   │   ├── user_preference_service.py # User preferences
 │   │   ├── ab_testing_service.py    # A/B testing service
 │   │   ├── webhook_dispatch_service.py # Webhook dispatch
+│   │   ├── workflow_engine.py       # Workflow engine
 │   │   ├── workflow_executor.py     # Workflow execution
 │   │   ├── workflow_planner.py      # Workflow planning
 │   │   └── workflow_tools.py       # Workflow tools
@@ -240,20 +245,23 @@ Agentium/
 │   ├── Dockerfile.remote-executor  # Remote executor
 │   ├── main.py                     # FastAPI app entry
 │   └── requirements.txt            # Python dependencies
-│
+
 ├── frontend/                        # React TypeScript frontend
 │   ├── public/                      # Static assets
 │   ├── src/
 │   │   ├── components/             # React components
 │   │   │   ├── agents/             # Agent components
 │   │   │   │   ├── AgentCard.tsx
+│   │   │   │   ├── AgentListView.tsx
 │   │   │   │   ├── AgentTree.tsx
 │   │   │   │   ├── BulkLiquidateModal.tsx
 │   │   │   │   ├── LifecycleDashboard.tsx
 │   │   │   │   ├── PromoteAgentModal.tsx
-│   │   │   │   └── SpawnAgentModal.tsx
+│   │   │   │   ├── SpawnAgentModal.tsx
+│   │   │   │   └── TerminateAgentModal.tsx
 │   │   │   ├── checkpoints/         # Checkpoint UI
 │   │   │   │   ├── BranchDiffView.tsx
+│   │   │   │   ├── CheckpointDiffModal.tsx
 │   │   │   │   ├── CheckpointImportModal.tsx
 │   │   │   │   └── CheckpointTimeline.tsx
 │   │   │   ├── channels/            # Channel UI
@@ -266,14 +274,24 @@ Agentium/
 │   │   │   ├── council/             # Governance UI
 │   │   │   │   └── VotingInterface.tsx
 │   │   │   ├── dashboard/           # Dashboard components
+│   │   │   │   ├── AgentsList.tsx
 │   │   │   │   ├── ChannelHealthWidget.tsx
+│   │   │   │   ├── DashboardHeader.tsx
 │   │   │   │   ├── FinancialBurnDashboard.tsx
-│   │   │   │   └── ProviderAnalytics.tsx
+│   │   │   │   ├── ProviderAnalytics.tsx
+│   │   │   │   ├── QuickActions.tsx
+│   │   │   │   ├── RecentTasks.tsx
+│   │   │   │   ├── StatsGrid.tsx
+│   │   │   │   └── SystemHealth.tsx
 │   │   │   ├── federation/          # Federation UI
-│   │   │   │   └── ...
+│   │   │   │   ├── AddPeerModal.tsx
+│   │   │   │   ├── DelegateTaskModal.tsx
+│   │   │   │   └── PeerTable.tsx
 │   │   │   ├── layout/              # Layout components
 │   │   │   │   └── MainLayout.tsx
 │   │   │   ├── models/              # Model config UI
+│   │   │   │   ├── ModelCard.tsx
+│   │   │   │   ├── ModelCardSkeleton.tsx
 │   │   │   │   └── ModelConfigForm.tsx
 │   │   │   ├── mcp/                # MCP tools UI
 │   │   │   │   └── MCPToolRegistry.tsx
@@ -281,15 +299,23 @@ Agentium/
 │   │   │   │   ├── APIKeyHealth.tsx
 │   │   │   │   ├── HealthScore.tsx
 │   │   │   │   └── ViolationCard.tsx
+│   │   │   ├── sovereign/           # Sovereign governance UI
+│   │   │   │   └── SystemTab.tsx
 │   │   │   ├── tasks/               # Task UI
+│   │   │   │   ├── AutoDelegationPanel.tsx
 │   │   │   │   ├── CreateTaskModal.tsx
 │   │   │   │   └── TaskCard.tsx
 │   │   │   ├── ui/                  # Shared UI components
+│   │   │   │   ├── button.tsx
+│   │   │   │   ├── card.tsx
 │   │   │   │   ├── DashboardSkeleton.tsx
 │   │   │   │   ├── ErrorState.tsx
 │   │   │   │   ├── StatCard.tsx
 │   │   │   │   ├── Toggle.tsx
 │   │   │   │   └── WidgetErrorFallback.tsx
+│   │   │   ├── workflows/           # Workflow UI
+│   │   │   │   ├── WorkflowAutomationPanel.tsx
+│   │   │   │   └── WorkflowBuilder.tsx
 │   │   │   ├── BrowserTaskPanel.tsx # Browser task panel
 │   │   │   ├── BudgetControl.tsx
 │   │   │   ├── ConnectionStatus.tsx
@@ -311,12 +337,14 @@ Agentium/
 │   │   │   ├── Dashboard.tsx
 │   │   │   ├── DeveloperPortalPage.tsx # Developer portal
 │   │   │   ├── FederationPage.tsx   # Federation management
+│   │   │   ├── LearningImpactDashboard.tsx # Learning impact
 │   │   │   ├── LoginPage.tsx
 │   │   │   ├── MessageLogPage.tsx
 │   │   │   ├── MobilePage.tsx       # Mobile integration
 │   │   │   ├── ModelsPage.tsx
 │   │   │   ├── MonitoringPage.tsx
 │   │   │   ├── RBACManagement.tsx   # RBAC management
+│   │   │   ├── ScalingDashboard.tsx # Auto-scaling dashboard
 │   │   │   ├── SettingsPage.tsx
 │   │   │   ├── SignupPage.tsx
 │   │   │   ├── SkillsPage.tsx
@@ -356,7 +384,8 @@ Agentium/
 │   │   │   ├── tasks.ts
 │   │   │   ├── voiceApi.ts
 │   │   │   ├── voiceBridge.ts
-│   │   │   └── voting.ts
+│   │   │   ├── voting.ts
+│   │   │   └── webhooksService.ts
 │   │   ├── store/                   # State management
 │   │   │   ├── authStore.ts
 │   │   │   ├── backendStore.ts
@@ -380,13 +409,13 @@ Agentium/
 │   ├── tsconfig.json
 │   ├── tsconfig.node.json
 │   └── vite.config.ts
-│
+
 ├── mobile/                          # Mobile applications
 │   ├── android/                    # Android app
 │   │   └── README.md
 │   └── ios/                        # iOS app
 │       └── README.md
-│
+
 ├── sdk/                            # Agentium SDKs
 │   ├── python/                     # Python SDK
 │   │   ├── agentium_sdk/           # Python SDK package
@@ -405,7 +434,7 @@ Agentium/
 │       ├── scripts/                # Build scripts
 │       ├── tests/                  # TypeScript SDK tests
 │       └── README.md
-│
+
 ├── docs/                            # Documentation
 │   ├── architecture/               # Architecture documentation
 │   │   └── scalability_strategy.md # Scalability strategy
@@ -426,7 +455,7 @@ Agentium/
 │   │   ├── task_execution.md
 │   │   └── unified_inbox.md
 │   └── phase10_plan.md             # Phase 10 planning
-│
+
 ├── scripts/                         # Build and utility scripts
 ├── test/                            # Test files
 ├── voice-bridge/                    # Voice bridge functionality

@@ -21,6 +21,7 @@ import {
 import { useState, useRef, useCallback, Suspense } from 'react';
 // ── Voice Bridge addition ─────────────────────────────────────────────────────
 import { VoiceIndicator } from '@/components/VoiceIndicator';
+import { useGenesisCheck } from '@/hooks/useGenesisCheck';
 
 // ── KeepAliveOutlet ───────────────────────────────────────────────────────────
 // Replaces AnimatePresence + motion.div. Instead of unmounting the previous
@@ -104,6 +105,7 @@ function PageSkeleton() {
     );
 }
 export function MainLayout() {
+    useGenesisCheck(); // One-time post-login redirect if no API key is configured
     const { user, logout } = useAuthStore();
     const navigate = useNavigate();
     const unreadCount = useWebSocketStore(state => state.unreadCount);

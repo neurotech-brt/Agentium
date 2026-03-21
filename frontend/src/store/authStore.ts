@@ -183,6 +183,8 @@ export const useAuthStore = create<AuthState>()(
 
             logout: () => {
                 localStorage.removeItem('access_token');
+                // Clear the one-time genesis check so the next login re-checks.
+                sessionStorage.removeItem('genesis_check_done');
                 set({ user: null, error: null, isInitialized: true });
             },
 

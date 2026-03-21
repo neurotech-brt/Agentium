@@ -103,7 +103,18 @@ class InitializationService:
         self.genesis_log: List[str] = []
         self._pending_country_name: Optional[str] = None
         self._country_name_event: Optional[asyncio.Event] = None
-    
+
+    # ── API Key availability check ────────────────────────────────────────────
+    def _has_any_active_api_key(self) -> bool:
+        """Return True if at least one healthy provider key exists in the DB."""
+        from backend.services.api_key_manager import api_key_manager
+        try:
+            availability = api_key_manager.get_provider_availability(self.db)
+            return any(availability.values())
+        except Exception as e:
+            logger.warning(f"Could not check API key availability: {e}")
+            return False  # Fail safe — block genesis if we can't verify
+
     def is_system_initialized(self) -> bool:
         """Check if Head 00001 exists (system already bootstrapped)."""
         head_exists = self.db.query(HeadOfCouncil).filter_by(
@@ -251,7 +262,22 @@ class InitializationService:
                 "message": "Head 00001 exists. System already bootstrapped.",
                 "head_id": "00001"
             }
-        
+
+        # ── API KEY GATE ──────────────────────────────────────────────────────
+        # Genesis requires a working AI provider. Without one the agents are
+        # created but can never make a single LLM call — a broken half-state.
+        if not self._has_any_active_api_key():
+            logger.warning("⛔ Genesis blocked: no active API key configured.")
+            return {
+                "status": "no_api_key",
+                "message": (
+                    "Genesis cannot begin. No active AI provider key is configured. "
+                    "Add at least one API key via the Models page, then start Genesis."
+                ),
+                "action_required": "configure_api_key",
+            }
+        # ─────────────────────────────────────────────────────────────────────
+
         if force:
             self._log("WARNING", "Force re-initialization requested.")
             await self._clear_existing_data()

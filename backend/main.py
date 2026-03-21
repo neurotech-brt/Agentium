@@ -169,18 +169,32 @@ async def lifespan(app: FastAPI):
 
     # ─────────────────────────────────────────────────────────────
     # 2. Initialize Persistent Council (IDLE GOVERNANCE)
+    #    Guarded: genesis requires at least one healthy API key.
+    #    If none exists yet, skip silently — the user will be
+    #    redirected to /models on first login (useGenesisCheck).
     # ─────────────────────────────────────────────────────────────
     try:
         db = next(get_db())
         try:
-            council_status = persistent_council.initialize_persistent_council(db)
+            # api_key_manager is already imported at the top of this module.
+            availability = api_key_manager.get_provider_availability(db)
+            has_key = any(availability.values())
 
-            persistent_agents = persistent_council.get_persistent_agents(db)
-            agent_list = list(persistent_agents.values())
+            if not has_key:
+                logger.warning(
+                    "⚠️  No API key configured — skipping Genesis Protocol at startup. "
+                    "Add a provider key via the Models page and restart, or trigger "
+                    "genesis manually via POST /api/v1/genesis/initialize."
+                )
+            else:
+                council_status = persistent_council.initialize_persistent_council(db)
 
-            logger.info(f"✅ Persistent Council initialized: {council_status}")
-            logger.info(f"   - Head: {len([a for a in agent_list if a.agentium_id.startswith('0')])}")
-            logger.info(f"   - Council: {len([a for a in agent_list if a.agentium_id.startswith('1')])}")
+                persistent_agents = persistent_council.get_persistent_agents(db)
+                agent_list = list(persistent_agents.values())
+
+                logger.info(f"✅ Persistent Council initialized: {council_status}")
+                logger.info(f"   - Head: {len([a for a in agent_list if a.agentium_id.startswith('0')])}")
+                logger.info(f"   - Council: {len([a for a in agent_list if a.agentium_id.startswith('1')])}")
         finally:
             db.close()
     except Exception as e:
@@ -426,6 +440,7 @@ app.add_middleware(ObserverReadOnlyMiddleware)
 
 from backend.api.routes import scaling as scaling_routes                       # Phase 13.3: Scaling Engine
 from backend.api.routes import improvements as improvements_routes             # Phase 13.4: Continuous Self-Improvement
+from backend.api.routes import genesis as genesis_routes                       # Genesis Protocol endpoints
 
 # ═══════════════════════════════════════════════════════════
 # REGISTER ROUTERS
@@ -470,6 +485,7 @@ app.include_router(outbound_webhooks_routes.router, prefix="/api/v1")  # Phase 1
 app.include_router(workflows_routes.router,          prefix="/api/v1")  # Workflow Engine (006_workflow)
 app.include_router(scaling_routes.router,            prefix="/api/v1")  # Phase 13.3: Scaling Engine
 app.include_router(improvements_routes.router,       prefix="/api/v1")  # Phase 13.4: Continuous Self-Improvement
+app.include_router(genesis_routes.router)                                # Genesis Protocol endpoints
 
 
 
@@ -490,16 +506,6 @@ async def health_check_api():
     }
 
 
-
-@app.post("/api/v1/genesis/country-name")
-async def submit_country_name(
-    name: str,
-    db: Session = Depends(get_db)
-):
-    """Submit country name during genesis initialization."""
-    service = InitializationService(db)
-    service.set_country_name(name)
-    return {"status": "received", "name": name}
 
 # ── Agent Management ──────────────────────────────────────────────────────────
 

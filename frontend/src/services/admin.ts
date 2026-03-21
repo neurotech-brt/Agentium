@@ -89,6 +89,25 @@ export const adminService = {
         }
     },
 
+    // ── C12: raw budget endpoints for FinancialBurnDashboard ──────────────────
+    // These return unmerged response data so FinancialBurnDashboard can apply
+    // its own normalizeBudgetStatus / normalizeBudgetHistory functions,
+    // which handle both flat and nested API response shapes.
+
+    async getBudgetStatus(): Promise<unknown> {
+        const response = await api.get('/api/v1/admin/budget');
+        return response.data;
+    },
+
+    async getBudgetHistory(days = 7): Promise<unknown> {
+        const response = await api.get('/api/v1/admin/budget/history', {
+            params: { days },
+        });
+        return response.data;
+    },
+
+    // ── User management ───────────────────────────────────────────────────────
+
     async getPendingUsers(): Promise<UserListResponse> {
         try {
             const response = await api.get(`/api/v1/admin/users/pending`);
@@ -130,9 +149,6 @@ export const adminService = {
      * Change a user's password.
      * Password is sent in the request BODY — never in the URL — to avoid
      * it appearing in server access logs, browser history, or proxy caches.
-     *
-     * Note: if the FastAPI route uses a query param, update it to accept
-     * a JSON body: `new_password: str = Body(...)` instead of a query param.
      */
     async changeUserPassword(
         userId: number,

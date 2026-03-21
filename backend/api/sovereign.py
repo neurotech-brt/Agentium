@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, WebSocke
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
+from functools import lru_cache
 import asyncio
 import json
 import os
@@ -22,7 +23,8 @@ from pydantic import BaseModel
 
 router = APIRouter(prefix="/sovereign", tags=["sovereign"])
 
-# Pydantic models for requests
+# ── Pydantic request models ───────────────────────────────────────────────────
+
 class SovereignCommandRequest(BaseModel):
     command: str
     params: dict = {}
@@ -37,22 +39,40 @@ class WriteFileRequest(BaseModel):
     path: str
     content: str
 
-# Store active WebSocket connections
+# ── WebSocket connection registry ─────────────────────────────────────────────
+
+# NOTE: This module-level list works correctly in single-worker deployments.
+# For multi-worker production (gunicorn with workers > 1), replace with
+# a Redis pub/sub channel so all workers share the same connection pool.
 active_connections: List[WebSocket] = []
+
+# ── Auth dependency ───────────────────────────────────────────────────────────
 
 async def get_current_sovereign_user(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """
-    Verify that the current user is the Sovereign (admin).
-    """
+    """Verify that the current user is the Sovereign (admin)."""
     if not current_user or not current_user.is_admin:
         raise HTTPException(
             status_code=403,
             detail="Only the Sovereign can access this endpoint"
         )
     return current_user
+
+# ── C10: HostAccessService singleton ─────────────────────────────────────────
+# Previously every endpoint called HostAccessService("00001") directly, which
+# opened a new Docker client socket on each HTTP request. lru_cache(maxsize=1)
+# makes the service — and its underlying Docker client — a process-level
+# singleton. Errors in Docker connectivity surface once at startup rather
+# than once per request, and connection overhead is eliminated.
+
+@lru_cache(maxsize=1)
+def _get_head_service() -> HostAccessService:
+    return HostAccessService("00001")
+
+
+# ── System status ─────────────────────────────────────────────────────────────
 
 @router.get("/system/status")
 async def get_system_status(
@@ -82,21 +102,13 @@ async def get_system_status(
     load_avg: list   = list(psutil.getloadavg()) if hasattr(psutil, "getloadavg") else [0.0, 0.0, 0.0]
 
     # ── Memory ─────────────────────────────────────────────────────────────────
-    # All psutil memory values are in bytes — consistent with the frontend
-    # divisor (1_073_741_824 = 1 GiB) to display correct GB values.
-    # /proc is bind-mounted from the host (volumes: - /proc:/proc:rw) so psutil
-    # reads real host memory figures.
     vm              = psutil.virtual_memory()
     mem_total:  int = vm.total
     mem_used:   int = vm.used
-    mem_free:   int = vm.available   # "available" is more meaningful than raw "free"
+    mem_free:   int = vm.available
     mem_pct:  float = round(vm.percent, 1)
 
     # ── Disk ───────────────────────────────────────────────────────────────────
-    # FIX: use /host (bind-mount of host "/" defined in docker-compose volumes:
-    #   - /:/host:rw) so we report the real host disk instead of the container
-    #   overlay filesystem. os.path.ismount("/host") is False in local dev,
-    #   so we fall back to "/" automatically — zero breaking change.
     _disk_path = "/host" if os.path.ismount("/host") else "/"
     try:
         disk            = psutil.disk_usage(_disk_path)
@@ -153,12 +165,15 @@ async def get_system_status(
         "timestamp": datetime.utcnow().isoformat(),
     }
 
+# ── Containers ────────────────────────────────────────────────────────────────
+
 @router.get("/containers")
 async def list_containers(
     current_user: User = Depends(get_current_sovereign_user)
 ):
     """List all Docker containers (agents) on host system."""
-    head = HostAccessService("00001")
+    # C10: reuse cached service instead of instantiating a new Docker client
+    head = _get_head_service()
     return head.list_containers()
 
 @router.post("/containers/{container_id}/{action}")
@@ -171,9 +186,10 @@ async def manage_container(
     """Start, stop, restart, or remove agent containers."""
     if action not in ['start', 'stop', 'restart', 'remove']:
         raise HTTPException(status_code=400, detail="Invalid action")
-    
-    head = HostAccessService("00001")
-    
+
+    # C10: reuse cached service
+    head = _get_head_service()
+
     # Log sovereign intervention
     audit = AuditLog(
         level=AuditLevel.WARNING,
@@ -190,11 +206,13 @@ async def manage_container(
     )
     db.add(audit)
     db.commit()
-    
+
     result = head.manage_container(action, container_id)
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error"))
     return result
+
+# ── Commands ──────────────────────────────────────────────────────────────────
 
 @router.post("/command")
 async def execute_sovereign_command(
@@ -206,8 +224,9 @@ async def execute_sovereign_command(
     Execute command as Sovereign (human override).
     This bypasses the Head of Council and executes directly on host.
     """
-    head = HostAccessService("00001")
-    
+    # C10: reuse cached service
+    head = _get_head_service()
+
     # Log the sovereign command
     audit = AuditLog(
         level=AuditLevel.CRITICAL,
@@ -224,7 +243,7 @@ async def execute_sovereign_command(
     )
     db.add(audit)
     db.commit()
-    
+
     # Execute command
     if command_req.command == "execute":
         result = head.execute_command(
@@ -240,7 +259,7 @@ async def execute_sovereign_command(
         )
     else:
         raise HTTPException(status_code=400, detail="Unknown command type")
-    
+
     return {
         "id": f"sov_{datetime.utcnow().timestamp()}",
         "agentium_id": "SOVEREIGN",
@@ -251,6 +270,8 @@ async def execute_sovereign_command(
         "result": result,
         "requested_at": datetime.utcnow().isoformat()
     }
+
+# ── Audit logs ────────────────────────────────────────────────────────────────
 
 @router.get("/audit")
 async def get_audit_logs(
@@ -264,7 +285,7 @@ async def get_audit_logs(
 ):
     """Get detailed audit logs with filtering."""
     query = db.query(AuditLog).order_by(AuditLog.created_at.desc())
-    
+
     if agentium_id:
         query = query.filter(AuditLog.actor_id == agentium_id)
     if level:
@@ -273,9 +294,11 @@ async def get_audit_logs(
         query = query.filter(AuditLog.created_at >= start_time)
     if end_time:
         query = query.filter(AuditLog.created_at <= end_time)
-    
+
     logs = query.limit(limit).all()
     return [log.to_dict() for log in logs]
+
+# ── Agent block / unblock ─────────────────────────────────────────────────────
 
 @router.post("/agents/{agentium_id}/block")
 async def block_agent(
@@ -300,7 +323,7 @@ async def block_agent(
     )
     db.add(audit)
     db.commit()
-    
+
     # Notify via WebSocket
     await notify_sovereign({
         "type": "agent_blocked",
@@ -308,7 +331,7 @@ async def block_agent(
         "reason": req.reason,
         "timestamp": datetime.utcnow().isoformat()
     })
-    
+
     return {"status": "blocked", "agentium_id": agentium_id}
 
 @router.post("/agents/{agentium_id}/unblock")
@@ -333,8 +356,10 @@ async def unblock_agent(
     )
     db.add(audit)
     db.commit()
-    
+
     return {"status": "unblocked", "agentium_id": agentium_id}
+
+# ── File system ───────────────────────────────────────────────────────────────
 
 @router.get("/files")
 async def read_file(
@@ -342,7 +367,8 @@ async def read_file(
     current_user: User = Depends(get_current_sovereign_user)
 ):
     """Read file from host filesystem."""
-    head = HostAccessService("00001")
+    # C10: reuse cached service
+    head = _get_head_service()
     return head.read_file(path)
 
 @router.post("/files")
@@ -351,7 +377,8 @@ async def write_file(
     current_user: User = Depends(get_current_sovereign_user)
 ):
     """Write file to host filesystem (Sovereign only)."""
-    head = HostAccessService("00001")
+    # C10: reuse cached service
+    head = _get_head_service()
     return head.write_file(req.path, req.content)
 
 @router.get("/directory")
@@ -360,8 +387,11 @@ async def list_directory(
     current_user: User = Depends(get_current_sovereign_user)
 ):
     """List directory contents."""
-    head = HostAccessService("00001")
+    # C10: reuse cached service
+    head = _get_head_service()
     return head.list_directory(path)
+
+# ── WebSocket ─────────────────────────────────────────────────────────────────
 
 @router.websocket("/ws")
 async def sovereign_websocket(
@@ -370,46 +400,46 @@ async def sovereign_websocket(
     db: Session = Depends(get_db)
 ):
     """WebSocket endpoint for real-time sovereign notifications."""
-    
+
     # Validate token presence
     if not token:
         await websocket.close(code=4001, reason="Missing token")
         return
-    
+
     # Validate JWT and check admin privileges
     try:
         from jose import jwt, JWTError
         from backend.core.config import settings
-        
+
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
         username = payload.get("sub")
         if not username:
             await websocket.close(code=4001, reason="Invalid token: no subject")
             return
-        
+
         # Verify user exists and is admin
         user = db.query(User).filter(User.username == username).first()
         if not user or not user.is_admin:
             await websocket.close(code=4003, reason="Forbidden: admin access required")
             return
-            
+
     except JWTError as e:
         await websocket.close(code=4001, reason=f"Invalid authentication: {str(e)}")
         return
     except Exception as e:
         await websocket.close(code=1011, reason=f"Authentication error: {str(e)}")
         return
-    
+
     # Accept connection only after successful auth
     await websocket.accept()
     active_connections.append(websocket)
     print(f"[Sovereign WebSocket] ✅ Admin connected: {username}")
-    
+
     try:
         while True:
             data = await websocket.receive_text()
             message = json.loads(data)
-            
+
             if message.get("action") == "ping":
                 await websocket.send_json({
                     "type": "pong",
@@ -427,7 +457,7 @@ async def sovereign_websocket(
                     "content": f"Unknown action: {message.get('action')}",
                     "timestamp": datetime.utcnow().isoformat()
                 })
-                
+
     except WebSocketDisconnect:
         print(f"[Sovereign WebSocket] ❌ Disconnected: {username}")
     except json.JSONDecodeError:
@@ -440,11 +470,13 @@ async def sovereign_websocket(
         print(f"[Sovereign WebSocket] Error: {e}")
         try:
             await websocket.close(code=1011, reason=f"Server error: {str(e)}")
-        except:
+        except Exception:
             pass
     finally:
         if websocket in active_connections:
             active_connections.remove(websocket)
+
+# ── Broadcast helper ──────────────────────────────────────────────────────────
 
 async def notify_sovereign(message: dict):
     """Send notification to all connected sovereign dashboards."""
@@ -452,45 +484,14 @@ async def notify_sovereign(message: dict):
     for conn in active_connections:
         try:
             await conn.send_json(message)
-        except:
+        except Exception:
             disconnected.append(conn)
-    
+
     for conn in disconnected:
         if conn in active_connections:
             active_connections.remove(conn)
 
-# Helper functions — kept for backward compatibility with any other callers
-def parse_meminfo(content: str) -> dict:
-    """Parse /proc/meminfo output."""
-    info = {}
-    for line in content.split('\n'):
-        if ':' in line:
-            key, value = line.split(':', 1)
-            # Extract number from string like "16384000 kB"
-            num = ''.join(filter(str.isdigit, value))
-            info[key.strip()] = int(num) * 1024 if num else 0  # Convert to bytes
-    return info
-
-def parse_df(content: str) -> dict:
-    """Parse df -B1 output."""
-    lines = content.strip().split('\n')
-    if len(lines) < 2:
-        return {}
-    
-    parts = lines[1].split()
-    if len(parts) < 6:
-        return {}
-    
-    total = int(parts[1])
-    used = int(parts[2])
-    available = int(parts[3])
-    
-    return {
-        "total": total,
-        "used": used,
-        "available": available,
-        "percentage": round(used / total * 100, 1) if total > 0 else 0
-    }
+# ── Command history ───────────────────────────────────────────────────────────
 
 @router.get("/commands")
 async def get_command_history(
@@ -499,9 +500,21 @@ async def get_command_history(
     current_user: User = Depends(get_current_sovereign_user)
 ):
     """Get sovereign command history."""
+    # C9: added "container_remove" — previously remove actions were silently
+    #     omitted from the history log because the filter list was incomplete.
     logs = db.query(AuditLog).filter(
         AuditLog.actor_type == "sovereign",
-        AuditLog.action.in_(["sovereign_command", "container_start", "container_stop", "container_restart"])
+        AuditLog.action.in_([
+            "sovereign_command",
+            "container_start",
+            "container_stop",
+            "container_restart",
+            "container_remove",   # C9: was missing
+        ])
     ).order_by(AuditLog.created_at.desc()).limit(limit).all()
-    
+
     return [log.to_dict() for log in logs]
+
+# C8: parse_meminfo() and parse_df() removed — both were dead code left over
+# from the old subprocess-based metrics approach. psutil replaced them entirely
+# and neither function was imported or called anywhere else in the codebase.

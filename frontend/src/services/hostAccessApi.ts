@@ -117,10 +117,20 @@ export const hostAccessApi = {
 
     /**
      * Open a WebSocket connection for live sovereign events.
-     * Derives the WS URL from the current page's protocol/host so it
-     * works in both HTTP (ws://) and HTTPS (wss://) environments.
+     *
+     * @param onMessage  Called for every well-formed JSON message received.
+     * @param onClose    Optional — called when the socket closes for any reason
+     *                   (clean close, network error, server restart). Callers
+     *                   can use this to schedule a reconnect with backoff.
+     *                   C2: added to enable reconnect logic in useSystemTab.
+     *
+     * Derives the WS URL from the current page's protocol/host so it works in
+     * both HTTP (ws://) and HTTPS (wss://) environments.
      */
-    connectWebSocket: (onMessage: (data: unknown) => void) => {
+    connectWebSocket: (
+        onMessage: (data: unknown) => void,
+        onClose?: () => void,
+    ) => {
         const token = localStorage.getItem('access_token');
         const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
         const wsBase = `${wsProtocol}://${window.location.host}`;
@@ -145,6 +155,7 @@ export const hostAccessApi = {
 
         ws.onclose = () => {
             console.log('Sovereign WebSocket disconnected');
+            onClose?.();
         };
 
         return {

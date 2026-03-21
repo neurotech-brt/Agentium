@@ -1,5 +1,4 @@
 // src/components/mcp/MCPToolRegistry.tsx
-// Phase 6.7 — Constitutional MCP Tool Registry
 // Embedded inside SovereignDashboard as a tab panel.
 
 import { useEffect, useState, useCallback } from 'react';
@@ -23,6 +22,12 @@ import {
     Hash,
 } from 'lucide-react';
 import { api } from '@/services/api';
+import { useAuthStore } from '@/store/authStore';
+
+// ── Shared input style (C6: moved to top — was at line 558 in original) ───────
+
+const inputCls =
+    'w-full px-3 py-2 text-sm bg-gray-50 dark:bg-[#0f1117] border border-gray-200 dark:border-[#2a3347] rounded-lg text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-colors';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -91,18 +96,27 @@ const TIER_META = {
 };
 
 const STATUS_META: Record<string, { label: string; icon: any; cls: string }> = {
-    pending:  { label: 'Pending',  icon: Clock,        cls: 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-500/10 dark:text-yellow-400 dark:border-yellow-500/20' },
-    approved: { label: 'Approved', icon: CheckCircle,  cls: 'bg-green-100 text-green-700 border-green-200 dark:bg-green-500/10 dark:text-green-400 dark:border-green-500/20' },
-    rejected: { label: 'Rejected', icon: XCircle,      cls: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/20' },
-    revoked:  { label: 'Revoked',  icon: ShieldOff,    cls: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/20' },
+    pending:  { label: 'Pending',  icon: Clock,         cls: 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-500/10 dark:text-yellow-400 dark:border-yellow-500/20' },
+    approved: { label: 'Approved', icon: CheckCircle,   cls: 'bg-green-100 text-green-700 border-green-200 dark:bg-green-500/10 dark:text-green-400 dark:border-green-500/20' },
+    rejected: { label: 'Rejected', icon: XCircle,       cls: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/20' },
+    revoked:  { label: 'Revoked',  icon: ShieldOff,     cls: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-400 dark:border-red-500/20' },
     disabled: { label: 'Disabled', icon: AlertTriangle, cls: 'bg-gray-100 text-gray-600 border-gray-200 dark:bg-gray-700/30 dark:text-gray-400 dark:border-gray-600/30' },
 };
 
 const HEALTH_META: Record<string, { cls: string; dot: string }> = {
-    healthy:  { cls: 'text-green-600 dark:text-green-400',  dot: 'bg-green-500 animate-pulse' },
+    healthy:  { cls: 'text-green-600 dark:text-green-400',   dot: 'bg-green-500 animate-pulse' },
     degraded: { cls: 'text-yellow-600 dark:text-yellow-400', dot: 'bg-yellow-500 animate-pulse' },
-    down:     { cls: 'text-red-600 dark:text-red-400',      dot: 'bg-red-500' },
-    unknown:  { cls: 'text-gray-500 dark:text-gray-400',    dot: 'bg-gray-400' },
+    down:     { cls: 'text-red-600 dark:text-red-400',       dot: 'bg-red-500' },
+    unknown:  { cls: 'text-gray-500 dark:text-gray-400',     dot: 'bg-gray-400' },
+};
+
+// C5: typed lookup object replaces the fragile `.split(' ').slice(...)` pattern
+// that broke whenever Tailwind class order changed.
+const CARD_COLORS: Record<string, { bg: string; text: string }> = {
+    blue:   { bg: 'bg-blue-100 dark:bg-blue-500/10',     text: 'text-blue-600 dark:text-blue-400' },
+    green:  { bg: 'bg-green-100 dark:bg-green-500/10',   text: 'text-green-600 dark:text-green-400' },
+    yellow: { bg: 'bg-yellow-100 dark:bg-yellow-500/10', text: 'text-yellow-600 dark:text-yellow-400' },
+    red:    { bg: 'bg-red-100 dark:bg-red-500/10',       text: 'text-red-600 dark:text-red-400' },
 };
 
 function fmtDate(iso: string | null): string {
@@ -283,8 +297,8 @@ function AuditDrawer({ tool, onClose }: { tool: MCPTool; onClose: () => void }) 
                             <p className="text-xs text-gray-400 dark:text-gray-500">Last 100 invocations</p>
                         </div>
                     </div>
-                    <button 
-                        onClick={onClose} 
+                    <button
+                        onClick={onClose}
                         className="p-2 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg transition-colors"
                         title="Close"
                         aria-label="Close audit log"
@@ -301,8 +315,9 @@ function AuditDrawer({ tool, onClose }: { tool: MCPTool; onClose: () => void }) 
                     {!loading && entries.length === 0 && (
                         <div className="text-center py-12 text-sm text-gray-400">No invocations recorded yet.</div>
                     )}
-                    {!loading && entries.map((e, i) => (
-                        <div key={i} className="p-4 hover:bg-gray-50 dark:hover:bg-[#0f1117] transition-colors">
+                    {/* C7: use stable compound key instead of array index */}
+                    {!loading && entries.map((e) => (
+                        <div key={`${e.agent_id}-${e.timestamp}`} className="p-4 hover:bg-gray-50 dark:hover:bg-[#0f1117] transition-colors">
                             <div className="flex items-center gap-3 mb-1">
                                 {e.success
                                     ? <CheckCircle className="w-4 h-4 text-green-500 shrink-0" />
@@ -326,19 +341,29 @@ function AuditDrawer({ tool, onClose }: { tool: MCPTool; onClose: () => void }) 
 
 // ── Tool Row / Card ───────────────────────────────────────────────────────────
 
-function ToolCard({ tool, onRefresh }: { tool: MCPTool; onRefresh: () => void }) {
-    const [expanded, setExpanded] = useState(false);
-    const [showAudit, setShowAudit] = useState(false);
-    const [healthLoading, setHealthLoading] = useState(false);
-    const [approving, setApproving] = useState(false);
-    const [revoking, setRevoking] = useState(false);
-    const [revokeReason, setRevokeReason] = useState('');
+// C4: currentUser passed in so approve/revoke log the real actor, not '00001'
+interface ToolCardProps {
+    tool: MCPTool;
+    onRefresh: () => void;
+    currentUser: { username?: string } | null;
+}
+
+function ToolCard({ tool, onRefresh, currentUser }: ToolCardProps) {
+    const [expanded,        setExpanded]        = useState(false);
+    const [showAudit,       setShowAudit]       = useState(false);
+    const [healthLoading,   setHealthLoading]   = useState(false);
+    const [approving,       setApproving]       = useState(false);
+    const [revoking,        setRevoking]        = useState(false);
+    const [revokeReason,    setRevokeReason]    = useState('');
     const [showRevokeInput, setShowRevokeInput] = useState(false);
 
-    const tier = TIER_META[tool.tier] || TIER_META.restricted;
-    const statusMeta = STATUS_META[tool.status] || STATUS_META.pending;
-    const health = HEALTH_META[tool.health_status] || HEALTH_META.unknown;
-    const TierIcon = tier.icon;
+    const tier       = TIER_META[tool.tier]         || TIER_META.restricted;
+    const statusMeta = STATUS_META[tool.status]     || STATUS_META.pending;
+    const health     = HEALTH_META[tool.health_status] || HEALTH_META.unknown;
+    const TierIcon   = tier.icon;
+
+    // C4: use the logged-in sovereign's username, not a hardcoded agent ID
+    const actorName = currentUser?.username ?? 'sovereign';
 
     const pingHealth = async () => {
         setHealthLoading(true);
@@ -354,7 +379,7 @@ function ToolCard({ tool, onRefresh }: { tool: MCPTool; onRefresh: () => void })
         setApproving(true);
         try {
             await api.post(`/api/v1/mcp-tools/${tool.id}/approve`, {
-                approved_by: '00001',
+                approved_by: actorName,
                 vote_id: null,
             });
             onRefresh();
@@ -368,7 +393,7 @@ function ToolCard({ tool, onRefresh }: { tool: MCPTool; onRefresh: () => void })
         setRevoking(true);
         try {
             await api.post(`/api/v1/mcp-tools/${tool.id}/revoke`, {
-                revoked_by: '00001',
+                revoked_by: actorName,
                 reason: revokeReason,
             });
             setShowRevokeInput(false);
@@ -450,8 +475,8 @@ function ToolCard({ tool, onRefresh }: { tool: MCPTool; onRefresh: () => void })
                             <button
                                 onClick={() => setExpanded(v => !v)}
                                 className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/5 rounded-lg transition-colors"
-                                title={expanded ? "Collapse details" : "Expand details"}
-                                aria-label={expanded ? "Collapse details" : "Expand details"}
+                                title={expanded ? 'Collapse details' : 'Expand details'}
+                                aria-label={expanded ? 'Collapse details' : 'Expand details'}
                             >
                                 {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                             </button>
@@ -464,10 +489,10 @@ function ToolCard({ tool, onRefresh }: { tool: MCPTool; onRefresh: () => void })
                     <div className="px-5 pb-5 border-t border-gray-100 dark:border-[#1e2535] pt-4 space-y-4">
                         {/* Stats grid */}
                         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                            <Stat label="Total Uses" value={tool.usage_count.toString()} />
-                            <Stat label="Failures" value={tool.failure_count.toString()} warn={tool.failure_count > 0} />
-                            <Stat label="Consecutive Failures" value={tool.consecutive_failures.toString()} warn={tool.consecutive_failures > 0} />
-                            <Stat label="Last Used" value={tool.last_used_at ? new Date(tool.last_used_at).toLocaleDateString() : '—'} />
+                            <Stat label="Total Uses"           value={tool.usage_count.toString()} />
+                            <Stat label="Failures"            value={tool.failure_count.toString()}             warn={tool.failure_count > 0} />
+                            <Stat label="Consecutive Failures" value={tool.consecutive_failures.toString()}     warn={tool.consecutive_failures > 0} />
+                            <Stat label="Last Used"           value={tool.last_used_at ? new Date(tool.last_used_at).toLocaleDateString() : '—'} />
                         </div>
 
                         {/* Capabilities */}
@@ -486,12 +511,12 @@ function ToolCard({ tool, onRefresh }: { tool: MCPTool; onRefresh: () => void })
 
                         {/* Metadata */}
                         <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
-                            <MetaRow label="Proposed by" value={tool.proposed_by || '—'} />
-                            <MetaRow label="Proposed at" value={fmtDate(tool.proposed_at)} />
-                            {tool.approved_by && <MetaRow label="Approved by" value={tool.approved_by} />}
-                            {tool.approved_at && <MetaRow label="Approved at" value={fmtDate(tool.approved_at)} />}
-                            {tool.revoked_by && <MetaRow label="Revoked by" value={tool.revoked_by} />}
-                            {tool.revocation_reason && <MetaRow label="Revocation reason" value={tool.revocation_reason} />}
+                            <MetaRow label="Proposed by"       value={tool.proposed_by || '—'} />
+                            <MetaRow label="Proposed at"       value={fmtDate(tool.proposed_at)} />
+                            {tool.approved_by        && <MetaRow label="Approved by"       value={tool.approved_by} />}
+                            {tool.approved_at        && <MetaRow label="Approved at"       value={fmtDate(tool.approved_at)} />}
+                            {tool.revoked_by         && <MetaRow label="Revoked by"        value={tool.revoked_by} />}
+                            {tool.revocation_reason  && <MetaRow label="Revocation reason" value={tool.revocation_reason} />}
                         </div>
 
                         {/* Action buttons */}
@@ -507,7 +532,7 @@ function ToolCard({ tool, onRefresh }: { tool: MCPTool; onRefresh: () => void })
                                 </button>
                             )}
 
-                            {(tool.status === 'approved') && (
+                            {tool.status === 'approved' && (
                                 <>
                                     {!showRevokeInput ? (
                                         <button
@@ -555,9 +580,6 @@ function ToolCard({ tool, onRefresh }: { tool: MCPTool; onRefresh: () => void })
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
-const inputCls =
-    'w-full px-3 py-2 text-sm bg-gray-50 dark:bg-[#0f1117] border border-gray-200 dark:border-[#2a3347] rounded-lg text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500/40 transition-colors';
-
 function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
     return (
         <div>
@@ -597,19 +619,22 @@ type FilterTier   = 'all' | 'pre_approved' | 'restricted' | 'forbidden';
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function MCPToolRegistry() {
-    const [tools, setTools] = useState<MCPTool[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [showPropose, setShowPropose] = useState(false);
+    // C4: read the current sovereign user so ToolCard can log correct actor
+    const { user } = useAuthStore();
+
+    const [tools,        setTools]        = useState<MCPTool[]>([]);
+    const [loading,      setLoading]      = useState(true);
+    const [showPropose,  setShowPropose]  = useState(false);
     const [statusFilter, setStatusFilter] = useState<FilterStatus>('all');
-    const [tierFilter, setTierFilter] = useState<FilterTier>('all');
-    const [search, setSearch] = useState('');
+    const [tierFilter,   setTierFilter]   = useState<FilterTier>('all');
+    const [search,       setSearch]       = useState('');
 
     const fetchTools = useCallback(async () => {
         setLoading(true);
         try {
             const params: Record<string, string> = {};
             if (statusFilter !== 'all') params.status = statusFilter;
-            if (tierFilter !== 'all') params.tier = tierFilter;
+            if (tierFilter   !== 'all') params.tier   = tierFilter;
 
             const res = await api.get('/api/v1/mcp-tools', { params });
             setTools(res.data.tools || []);
@@ -668,7 +693,8 @@ export function MCPToolRegistry() {
                     />
 
                     {/* Status filter */}
-                    <select aria-label="Status filter"
+                    <select
+                        aria-label="Status filter"
                         className={`${inputCls} w-auto`}
                         value={statusFilter}
                         onChange={e => setStatusFilter(e.target.value as FilterStatus)}
@@ -681,7 +707,8 @@ export function MCPToolRegistry() {
                     </select>
 
                     {/* Tier filter */}
-                    <select aria-label="Tier filter"
+                    <select
+                        aria-label="Tier filter"
                         className={`${inputCls} w-auto`}
                         value={tierFilter}
                         onChange={e => setTierFilter(e.target.value as FilterTier)}
@@ -728,8 +755,9 @@ export function MCPToolRegistry() {
                     </div>
                 ) : (
                     <div className="space-y-3">
+                        {/* C4: currentUser passed to ToolCard */}
                         {filtered.map(tool => (
-                            <ToolCard key={tool.id} tool={tool} onRefresh={fetchTools} />
+                            <ToolCard key={tool.id} tool={tool} onRefresh={fetchTools} currentUser={user} />
                         ))}
                     </div>
                 )}
@@ -738,17 +766,15 @@ export function MCPToolRegistry() {
     );
 }
 
+// ── Summary card ──────────────────────────────────────────────────────────────
+
+// C5: replaced fragile .split(' ').slice(...) with CARD_COLORS lookup object
 function SummaryCard({ label, value, color }: { label: string; value: number; color: string }) {
-    const colors: Record<string, string> = {
-        blue:   'bg-blue-100 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400',
-        green:  'bg-green-100 dark:bg-green-500/10 text-green-600 dark:text-green-400',
-        yellow: 'bg-yellow-100 dark:bg-yellow-500/10 text-yellow-600 dark:text-yellow-400',
-        red:    'bg-red-100 dark:bg-red-500/10 text-red-600 dark:text-red-400',
-    };
+    const { bg, text } = CARD_COLORS[color] ?? CARD_COLORS.blue;
     return (
-        <div className={`rounded-xl border border-gray-200 dark:border-[#1e2535] p-4 ${colors[color].split(' ').slice(0, 2).join(' ')} bg-opacity-40`}>
+        <div className={`rounded-xl border border-gray-200 dark:border-[#1e2535] p-4 ${bg}`}>
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">{label}</p>
-            <p className={`text-2xl font-bold ${colors[color].split(' ').slice(2).join(' ')}`}>{value}</p>
+            <p className={`text-2xl font-bold ${text}`}>{value}</p>
         </div>
     );
 }

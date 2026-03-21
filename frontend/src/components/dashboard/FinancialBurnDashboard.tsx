@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { api } from '@/services/api';
+import { adminService } from '@/services/admin';
 import {
     DollarSign,
     Zap,
@@ -64,12 +64,12 @@ function normalizeBudgetStatus(data: any): BudgetStatus {
             daily_cost_limit:  data?.daily_cost_limit  ?? data?.current_limits?.daily_cost_limit  ?? 0,
         },
         usage: {
-            tokens_used_today:       data?.tokens_used_today       ?? 0,
-            tokens_remaining:        data?.tokens_remaining        ?? 0,
-            cost_used_today_usd:     data?.cost_used_today_usd     ?? 0,
-            cost_remaining_usd:      data?.cost_remaining_usd      ?? 0,
-            cost_percentage_used:    data?.cost_percentage_used    ?? 0,
-            cost_percentage_tokens:  data?.cost_percentage_tokens  ?? 0,
+            tokens_used_today:      data?.tokens_used_today      ?? 0,
+            tokens_remaining:       data?.tokens_remaining       ?? 0,
+            cost_used_today_usd:    data?.cost_used_today_usd    ?? 0,
+            cost_remaining_usd:     data?.cost_remaining_usd     ?? 0,
+            cost_percentage_used:   data?.cost_percentage_used   ?? 0,
+            cost_percentage_tokens: data?.cost_percentage_tokens ?? 0,
         },
     };
 }
@@ -86,25 +86,30 @@ function normalizeBudgetHistory(data: any): BudgetHistory {
 }
 
 export const FinancialBurnDashboard: React.FC = () => {
-    const [status, setStatus] = useState<BudgetStatus | null>(null);
-    const [history, setHistory] = useState<BudgetHistory | null>(null);
+    const [status,    setStatus]    = useState<BudgetStatus | null>(null);
+    const [history,   setHistory]   = useState<BudgetHistory | null>(null);
     const [isLoading, setIsLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const [error,     setError]     = useState<string | null>(null);
 
     useEffect(() => {
         const fetchDashboardData = async () => {
             try {
                 setIsLoading(true);
                 setError(null);
-                const [statusRes, historyRes] = await Promise.all([
-                    api.get('/api/v1/admin/budget'),
-                    api.get('/api/v1/admin/budget/history?days=7')
+
+                // C12: replaced direct api.get() calls with adminService methods
+                // — consistent with the rest of the frontend service layer and
+                //   mockable in tests without importing the axios instance directly.
+                const [statusData, historyData] = await Promise.all([
+                    adminService.getBudgetStatus(),
+                    adminService.getBudgetHistory(7),
                 ]);
-                setStatus(normalizeBudgetStatus(statusRes.data));
-                setHistory(normalizeBudgetHistory(historyRes.data));
+
+                setStatus(normalizeBudgetStatus(statusData));
+                setHistory(normalizeBudgetHistory(historyData));
             } catch (err: any) {
-                console.error("Failed to fetch financial data:", err);
-                setError(err?.response?.data?.detail || "Failed to load financial data");
+                console.error('Failed to fetch financial data:', err);
+                setError(err?.response?.data?.detail || 'Failed to load financial data');
             } finally {
                 setIsLoading(false);
             }

@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { api } from '@/services/api';
 import { jwtDecode } from 'jwt-decode';
-import { GENESIS_SESSION_KEY, GENESIS_REDIRECT_KEY } from '@/hooks/useGenesisCheck';
+import { GENESIS_SESSION_KEY, GENESIS_REDIRECT_KEY } from '@/constants/genesis';
 
 // B6: extended role type to match the backend RBAC system
 type UserRole =

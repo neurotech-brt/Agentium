@@ -41,26 +41,7 @@ import { useEffect, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '@/store/authStore';
-
-// ── Session keys ──────────────────────────────────────────────────────────────
-
-/**
- * Set once genesis reaches "ready".
- * Guards the entire hook from running once the system is fully initialized.
- */
-export const GENESIS_SESSION_KEY = 'genesis_check_done';
-
-/**
- * Set the FIRST time we redirect to /models due to a missing API key.
- * Prevents repeated redirects on the same login session (including after
- * page refreshes), while still being cleared the moment a key is added.
- *
- * Lifecycle:
- *   • Set   → when status === "no_api_key" and we navigate to /models
- *   • Clear → when status transitions to "pending" or "ready" (key exists)
- *   • Clear → on logout (via authStore.logout)
- */
-export const GENESIS_REDIRECT_KEY = 'genesis_redirected_to_models';
+import { GENESIS_SESSION_KEY, GENESIS_REDIRECT_KEY } from '@/constants/genesis';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 

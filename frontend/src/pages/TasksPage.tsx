@@ -171,7 +171,7 @@ const CRITIC_META: Record<string, {
 }> = {
     code: {
         label: 'Code Critic',
-        id: '40001',
+        id: '7xxxx',
         icon: Code2,
         accent: 'text-violet-600',
         accentDark: 'dark:text-violet-400',
@@ -184,7 +184,7 @@ const CRITIC_META: Record<string, {
     },
     output: {
         label: 'Output Critic',
-        id: '50001',
+        id: '8xxxx',
         icon: FileText,
         accent: 'text-sky-600',
         accentDark: 'dark:text-sky-400',
@@ -197,7 +197,7 @@ const CRITIC_META: Record<string, {
     },
     plan: {
         label: 'Plan Critic',
-        id: '60001',
+        id: '9xxxx',
         icon: GitBranch,
         accent: 'text-teal-600',
         accentDark: 'dark:text-teal-400',
@@ -2061,17 +2061,18 @@ const CriticsTab: React.FC<{ onStatsLoaded?: (count: number) => void }> = ({ onS
                     </button>
                 </div>
 
-                {stats.critics.length === 0 ? (
+                {/* critics is absent when all ephemeral instances have been terminated */}
+                {(stats.critics ?? []).length === 0 ? (
                     <div className="bg-white dark:bg-[#161b27] rounded-xl border border-dashed border-gray-200 dark:border-[#2a3347] p-8 text-center">
                         <ShieldCheck className="w-8 h-8 text-gray-300 dark:text-gray-600 mx-auto mb-3" />
-                        <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">No critic agents found</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 font-medium">No active critic agents</p>
                         <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                            Critics are seeded during genesis (agents 70001, 80001, 90001)
+                            Critics spawn per-task (7xxxx code · 8xxxx output · 9xxxx plan) and terminate on completion
                         </p>
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                        {stats.critics.map(c => <CriticCard key={c.agentium_id} critic={c} />)}
+                        {(stats.critics ?? []).map(c => <CriticCard key={c.agentium_id} critic={c} />)}
                     </div>
                 )}
             </div>

@@ -345,7 +345,7 @@ export interface CriticStatsResponse {
         escalations: number;
         approval_rate: number;
     }>;
-    critics: CriticAgentStats[];
+    critics?: CriticAgentStats[];
 }
 
 // ─── Constitution types ────────────────────────────────────────────────────────

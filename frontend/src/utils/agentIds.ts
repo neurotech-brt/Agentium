@@ -1,41 +1,56 @@
-import { TIER_PREFIXES } from '../constants/agents';
+/**
+ * frontend/src/utils/agentIds.ts
+ *
+ * Utilities for working with Agentium ID prefixes.
+ *
+ * Tier prefixes
+ * -------------
+ *   0xxxx  Head of Council
+ *   1xxxx  Council Members
+ *   2xxxx  Lead Agents
+ *   3xxxx  Task Agents
+ *   4xxxx  (legacy) Code Critics (permanent singletons — deprecated)
+ *   5xxxx  (legacy) Output Critics (permanent singletons — deprecated)
+ *   6xxxx  (legacy) Plan Critics (permanent singletons — deprecated)
+ *   7xxxx  Code Critics (ephemeral, per-task)
+ *   8xxxx  Output Critics (ephemeral, per-task)
+ *   9xxxx  Plan Critics (ephemeral, per-task)
+ */
 
-/** Extract the tier prefix (first character) from an agentium_id. */
-export function getAgentTierPrefix(agentiumId: string | undefined | null): string {
-    return agentiumId?.[0] ?? '';
+/** Returns true for any critic agent (legacy 4/5/6 or ephemeral 7/8/9). */
+export function isCriticAgentId(id: string | null | undefined): boolean {
+  if (!id) return false;
+  return ['4', '5', '6', '7', '8', '9'].includes(id[0]);
 }
 
-/** Returns true for Critic agents (IDs starting with 4, 5, or 6) */
-export function isCriticAgentId(agentiumId: string | undefined | null): boolean {
-    const prefix = getAgentTierPrefix(agentiumId);
-    return (TIER_PREFIXES.critics as readonly string[]).includes(prefix);
+/** Returns true only for the ephemeral per-task critics (7/8/9 prefix). */
+export function isEphemeralCriticId(id: string | null | undefined): boolean {
+  if (!id) return false;
+  return ['7', '8', '9'].includes(id[0]);
 }
 
-/** Returns true for Head of Council agents (ID starts with 0) */
-export function isHeadAgentId(agentiumId: string | undefined | null): boolean {
-    return getAgentTierPrefix(agentiumId) === TIER_PREFIXES.head;
+/** Returns true only for the legacy singleton critics (4/5/6 prefix). */
+export function isLegacyCriticId(id: string | null | undefined): boolean {
+  if (!id) return false;
+  return ['4', '5', '6'].includes(id[0]);
 }
 
-/** Returns true for Council Member agents (ID starts with 1) */
-export function isCouncilAgentId(agentiumId: string | undefined | null): boolean {
-    return getAgentTierPrefix(agentiumId) === TIER_PREFIXES.council;
+/** Returns a human-readable label for a critic prefix. */
+export function criticTypeLabel(id: string | null | undefined): string {
+  if (!id) return 'Unknown Critic';
+  switch (id[0]) {
+    case '4': case '7': return 'Code Critic';
+    case '5': case '8': return 'Output Critic';
+    case '6': case '9': return 'Plan Critic';
+    default: return 'Critic';
+  }
 }
 
-/** Returns true if parentId can legally be the direct parent of childId. */
-export function canBeParentOf(parentId: string, childId: string): boolean {
-    const parentNum = parseInt(getAgentTierPrefix(parentId) || '9', 10);
-    const childNum  = parseInt(getAgentTierPrefix(childId)  || '9', 10);
-    return parentNum < childNum;
-}
-
-/** Human-readable tier name for an agentium_id. */
-export function getTierName(agentiumId: string | undefined | null): string {
-    const map: Record<string, string> = {
-        '0': 'Head of Council',
-        '1': 'Council Member',
-        '2': 'Lead Agent',
-        '3': 'Task Agent',
-        '4': 'Critic', '5': 'Critic', '6': 'Critic',
-    };
-    return map[getAgentTierPrefix(agentiumId)] ?? 'Unknown';
+/** Returns the tier number (0–3) for governance agents, null for critics. */
+export function agentTierNumber(id: string | null | undefined): number | null {
+  if (!id) return null;
+  const prefix = id[0];
+  if (['4','5','6','7','8','9'].includes(prefix)) return null;
+  const tier = parseInt(prefix, 10);
+  return isNaN(tier) ? null : tier;
 }

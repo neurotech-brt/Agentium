@@ -1,3 +1,4 @@
+// frontend/src/constants/agents.ts
 // ─── Agent Type Constants ─────────────────────────────────────────────────────
 
 export const VALID_AGENT_TYPES = [
@@ -56,7 +57,6 @@ export const AGENT_WS_EVENT_TYPES = [
     'agent_status_changed',
 ] as const;
 
-/** Legacy string-prefix events still sent via system messages */
 export const AGENT_WS_CONTENT_PREFIXES = [
     'agent_spawned',
     'agent_terminated',
@@ -81,5 +81,13 @@ export const TIER_PREFIXES = {
     council: '1',
     lead:    '2',
     task:    '3',
-    critics: ['4', '5', '6'],
+    /**
+     * All critic prefixes — includes both legacy singletons (4/5/6) and the
+     * new ephemeral per-task critics (7/8/9).  Use isCriticAgentId() from
+     * utils/agentIds for reliable checks rather than testing prefixes directly.
+     */
+    critics: ['4', '5', '6', '7', '8', '9'],
 } as const;
+
+/** All prefixes that should be hidden from the main agents list/tree. */
+export const HIDDEN_FROM_AGENTS_PAGE: string[] = ['4', '5', '6', '7', '8', '9'];

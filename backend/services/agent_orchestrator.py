@@ -611,7 +611,7 @@ class AgentOrchestrator:
             suggestions.append("list_containers")
         return suggestions
 
-    # ── Task delegation with critic review ────────────────────────────────────
+    # ── Task delegation with ephemeral critic review ──────────────────────────
 
     async def delegate_to_task(
         self,
@@ -620,7 +620,18 @@ class AgentOrchestrator:
         task_id: Optional[str] = None,
         retry_count: int = 0,
     ) -> RouteResult:
-        """Delegate from Lead (2xxxx) to Task (3xxxx) with critic review."""
+        """
+        Delegate from Lead (2xxxx) to Task (3xxxx) with ephemeral critic review.
+
+        Lifecycle
+        ---------
+        1. Spawn critics appropriate for the task type (once, on first call).
+        2. Route task down to a Task Agent.
+        3. Review output through every spawned critic.
+        4. PASS    → terminate critics, return success.
+        5. REJECT  → retry (critics persist — same instances review the retry).
+        6. ESCALATE → terminate critics, escalate to Council.
+        """
         token_optimizer.record_activity()
 
         if not task_id:
@@ -629,19 +640,43 @@ class AgentOrchestrator:
         if not task_id:
             return RouteResult(success=False, message_id="", error="No Task Agent available")
 
+        db_task_id = task.get("id") or task_id
+        task_type_str = (task.get("task_type") or task.get("type") or "general")
+
+        # Step 1: Spawn critics on the first attempt (retry_count == 0).
+        # On retries the critics already exist (tracked by current_task_id).
+        if retry_count == 0:
+            spawned = await critic_service.spawn_critics_for_task(
+                db=self.db,
+                task_id=db_task_id,
+                task_type=task_type_str,
+                parent_agent_id=lead_id,
+            )
+            if spawned:
+                logger.info(
+                    "Spawned critics for task %s: %s",
+                    db_task_id, spawned,
+                )
+            else:
+                logger.warning(
+                    "No critics spawned for task %s (type=%s) — review will auto-pass",
+                    db_task_id, task_type_str,
+                )
+
+        # Step 2: Build and route the message to the Task Agent
         msg = AgentMessage(
             sender_id=lead_id,
             recipient_id=task_id,
             message_type="delegation",
             content=task.get("description", ""),
             payload=task,
-            route_direction="down"
+            route_direction="down",
         )
 
         if self.vector_store:
             patterns = self.vector_store.get_collection("task_patterns").query(
                 query_texts=[task.get("description", "")],
-                n_results=3
+                n_results=3,
             )
             msg.rag_context = {"patterns": patterns}
 
@@ -651,10 +686,10 @@ class AgentOrchestrator:
             actor=lead_id,
             action="task_delegation",
             desc=f"Assigned task to {task_id} with tools: {task.get('allowed_tools', 'default')}",
-            target=task_id
+            target=task_id,
         )
 
-        # Phase 6.2: Critic Review
+        # Step 3: Extract output and run all critics
         output_content = ""
         if result.success and result.metadata:
             output_content = (
@@ -664,26 +699,27 @@ class AgentOrchestrator:
             )
 
         if result.success and output_content:
-            critic_type = self._resolve_critic_type(task)
-            db_task_id = task.get("id") or task_id
-
-            review = await critic_service.review_task_output(
+            review = await critic_service.review_with_all_task_critics(
                 db=self.db,
                 task_id=db_task_id,
                 output_content=output_content,
-                critic_type=critic_type,
-                subtask_id=task_id,
+                task_type=task_type_str,
                 retry_count=retry_count,
             )
 
             verdict = review.get("verdict")
+            blocking_type = review.get("blocking_critic_type", "output")
 
             await self._log(
                 actor=lead_id,
                 action=f"critic_review_{verdict}",
                 desc=(
-                    f"Critic ({critic_type.value}) verdict for task {db_task_id}: {verdict}"
-                    + (f" — {review.get('rejection_reason', '')[:150]}" if verdict != "pass" else "")
+                    f"Critic ({blocking_type}) verdict for task {db_task_id}: {verdict}"
+                    + (
+                        f" — {review.get('rejection_reason', '')[:150]}"
+                        if verdict != "pass"
+                        else ""
+                    )
                 ),
                 level=AuditLevel.INFO if verdict == "pass" else AuditLevel.WARNING,
                 target=task_id,
@@ -691,9 +727,10 @@ class AgentOrchestrator:
 
             if verdict == "reject":
                 logger.warning(
-                    "Critic REJECTED output for task %s (attempt %d/%d). Retrying within team...",
-                    db_task_id, retry_count + 1, review.get("max_retries", 5),
+                    "Critic REJECTED output for task %s (attempt %d/%d). Retrying…",
+                    db_task_id, retry_count + 1, critic_service.DEFAULT_MAX_RETRIES,
                 )
+                # Critics survive — same instances review the retry
                 return await self.delegate_to_task(
                     task=task,
                     lead_id=lead_id,
@@ -706,30 +743,43 @@ class AgentOrchestrator:
                     "Critic ESCALATING task %s to Council after %d failed retries.",
                     db_task_id, retry_count,
                 )
+                # Terminate critics before escalating
+                await critic_service.terminate_critics_for_task(
+                    self.db, db_task_id, reason="escalated"
+                )
                 return await self.escalate_to_council(
                     issue=(
                         f"Task {db_task_id} failed critic review after {retry_count} retries. "
-                        f"Critic type: {critic_type.value}. "
+                        f"Critic type: {blocking_type}. "
                         f"Reason: {review.get('rejection_reason', 'unknown')}"
                     ),
                     reporter_id=lead_id,
                 )
 
+            else:
+                # PASS — terminate critics, task is done
+                await critic_service.terminate_critics_for_task(
+                    self.db, db_task_id, reason="task_passed"
+                )
+
         return result
 
-    def _resolve_critic_type(self, task: Dict) -> CriticType:
-        """Map task type/hints to the appropriate CriticType."""
+    def _resolve_critic_type(self, task: Dict) -> "CriticType":
+        """
+        Map a task dict to a primary CriticType.
+        Kept for backward compatibility with any direct callers.
+        New code should use critic_service.get_required_critic_types() instead.
+        """
+        from backend.services.critic_agents import TASK_TYPE_CRITIC_MAP, DEFAULT_CRITIC_TYPES
+        from backend.models.entities.critics import CriticType
+
         explicit = task.get("critic_type", "").lower()
         if explicit in ("code", "output", "plan"):
             return CriticType(explicit)
 
         task_type = str(task.get("task_type") or task.get("type") or "").lower()
-        if any(kw in task_type for kw in ("code", "script", "function", "sql")):
-            return CriticType.CODE
-        if any(kw in task_type for kw in ("plan", "dag", "strategy", "decompose")):
-            return CriticType.PLAN
-
-        return CriticType.OUTPUT
+        types = TASK_TYPE_CRITIC_MAP.get(task_type, DEFAULT_CRITIC_TYPES)
+        return types[0]
 
     async def enrich_with_context(self, msg: AgentMessage) -> AgentMessage:
         """Inject Vector DB context before routing."""

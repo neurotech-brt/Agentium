@@ -1,7 +1,7 @@
 import React from 'react';
 import { Agent } from '../../types';
 import { Shield, Brain, Users, Terminal, Activity, Zap, TrendingUp, Trash2, CheckSquare } from 'lucide-react';
-import { AGENT_TYPE_LABELS } from '../../constants/agents';
+import { AGENT_TYPE_LABELS, HIDDEN_FROM_AGENTS_PAGE } from '../../constants/agents';
 
 interface AgentListViewProps {
     agents:      Agent[];
@@ -40,10 +40,11 @@ function StatusBadge({ status }: { status: Agent['status'] }) {
 export const AgentListView: React.FC<AgentListViewProps> = React.memo(({
     agents, onSpawn, onTerminate, onPromote,
 }) => {
-    // Filter out critics (4–6 prefix) from list view; they render separately in tree
+    // Filter out all critic prefixes (4–9) — critics are shown via the
+    // dedicated Critics panel in AgentTree, not in the flat list.
     const displayAgents = agents.filter(a => {
         const prefix = (a.agentium_id ?? a.id ?? '')[0];
-        return !['4', '5', '6'].includes(prefix);
+        return !HIDDEN_FROM_AGENTS_PAGE.includes(prefix);
     });
 
     if (displayAgents.length === 0) {
@@ -71,10 +72,10 @@ export const AgentListView: React.FC<AgentListViewProps> = React.memo(({
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {displayAgents.map(agent => {
-                        const isTerminated  = agent.status === 'terminated' || agent.status === 'terminating';
-                        const isHead        = agent.agent_type === 'head_of_council';
-                        const isTask        = agent.agent_type === 'task_agent';
-                        const subordinates  = Array.isArray(agent.subordinates) ? agent.subordinates.length : 0;
+                        const isTerminated   = agent.status === 'terminated' || agent.status === 'terminating';
+                        const isHead         = agent.agent_type === 'head_of_council';
+                        const isTask         = agent.agent_type === 'task_agent';
+                        const subordinates   = Array.isArray(agent.subordinates) ? agent.subordinates.length : 0;
                         const tasksCompleted = agent.stats?.tasks_completed ?? 0;
                         const activeCount    = agent.active_task_count ?? 0;
 

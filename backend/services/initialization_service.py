@@ -20,7 +20,6 @@ from backend.models.entities.agents import (
     HeadOfCouncil,
 )
 from backend.models.entities.constitution import Constitution, Ethos
-from backend.models.entities.critics import CriticAgent, CriticType
 from backend.models.entities.user import User
 from backend.models.entities.user_config import UserModelConfig as UserConfig
 from backend.models.entities.voting import IndividualVote
@@ -42,7 +41,7 @@ class CountryNameTimeoutError(Exception):
 class InitializationService:
     """
     Bootstraps Agentium from zero state.
-    
+
     Implements the Genesis Protocol:
     1. Create Head 00001
     2. Create Council Members (2 Council + 1 Head = 3 votes for anti-tyranny quorum)
@@ -50,52 +49,15 @@ class InitializationService:
     4. Load and customize constitution
     5. Index to Vector DB
     6. Grant Council admin rights
-    7. Seed persistent critic agents
+
+    Note: Critics are no longer seeded at genesis. They are spawned ephemerally
+    by the orchestrator when a task is delegated (see agent_orchestrator.py →
+    delegate_to_task).
     """
-    
-    DEFAULT_COUNCIL_SIZE = 2  
+
+    DEFAULT_COUNCIL_SIZE = 2
     COUNTRY_NAME_TIMEOUT_SECONDS = 60  # Time to wait for user input
 
-    # Phase 6.2: Critic agents — persistent, outside democratic chain
-    CRITIC_SEED: List[Dict[str, Any]] = [
-        {
-            "agentium_id": "40001",
-            "critic_specialty": CriticType.CODE,
-            "role": "Code Critic",
-            "name": "Code Critic Prime",
-            "description": (
-                "Validates code syntax, security, and logic. "
-                "Operates outside the democratic chain with absolute "
-                "veto authority."
-            ),
-            "specialization": "Code Security & Correctness",
-        },
-        {
-            "agentium_id": "50001",
-            "critic_specialty": CriticType.OUTPUT,
-            "role": "Output Critic",
-            "name": "Output Critic Prime",
-            "description": (
-                "Validates agent outputs against user intent. "
-                "Operates outside the democratic chain with absolute "
-                "veto authority."
-            ),
-            "specialization": "Output Quality & Relevance",
-        },
-        {
-            "agentium_id": "60001",
-            "critic_specialty": CriticType.PLAN,
-            "role": "Plan Critic",
-            "name": "Plan Critic Prime",
-            "description": (
-                "Validates execution DAG soundness and plan feasibility. "
-                "Operates outside the democratic chain with absolute "
-                "veto authority."
-            ),
-            "specialization": "Execution Planning & DAG Validation",
-        },
-    ]
-    
     def __init__(self, db: Optional[Session] = None) -> None:
         self.db = db
         self.vector_store = get_vector_store()
@@ -122,7 +84,7 @@ class InitializationService:
             is_active=True
         ).first()
         return head_exists is not None
-    
+
     def set_country_name(self, name: str) -> None:
         """
         Receive country name from user via external call (API/WebSocket).
@@ -131,30 +93,30 @@ class InitializationService:
         if self._country_name_event and not self._country_name_event.is_set():
             self._pending_country_name = name.strip() if name else None
             self._country_name_event.set()
-    
+
     async def _broadcast_to_user(self, message: str, is_urgent: bool = False) -> None:
         """
         Broadcast message to user via all available channels.
-        
+
         Uses:
         1. WebSocket ConnectionManager (real-time dashboard)
         2. ChannelManager (external channels: Slack, WhatsApp, etc.)
         """
         # Find sovereign user
         sovereign_user = self.db.query(User).filter_by(
-            is_admin=True, 
+            is_admin=True,
             is_active=True
         ).first()
-        
+
         if not sovereign_user:
             self._log("WARNING", "No sovereign user found for broadcast")
             return
-        
+
         # 1. Broadcast via WebSocket (real-time dashboard)
         try:
             # Import here to avoid circular imports
             from backend.api.routes.websocket import manager as ws_manager
-            
+
             await ws_manager.broadcast({
                 "type": "genesis_prompt",
                 "role": "head_of_council",
@@ -170,11 +132,11 @@ class InitializationService:
             self._log("INFO", "Broadcast via WebSocket sent")
         except Exception as e:
             self._log("WARNING", f"WebSocket broadcast failed: {e}")
-        
+
         # 2. Broadcast via external channels (Slack, WhatsApp, etc.)
         try:
             from backend.services.channel_manager import ChannelManager
-            
+
             # Fire and forget - don't block genesis on external channels
             asyncio.create_task(
                 ChannelManager.broadcast_to_channels(
@@ -187,17 +149,17 @@ class InitializationService:
             self._log("INFO", "Broadcast via external channels initiated")
         except Exception as e:
             self._log("WARNING", f"External channel broadcast failed: {e}")
-    
+
     async def _prompt_for_country_name(self, timeout: int = 60) -> Optional[str]:
         """
         Prompt user for country name via broadcast and wait for response.
-        
+
         Returns:
             User-provided name or None if timeout
         """
         self._country_name_event = asyncio.Event()
         self._pending_country_name = None
-        
+
         # Broadcast prompt to all channels
         prompt_message = (
             "🏛️ **Welcome to Agentium**\n\n"
@@ -207,9 +169,9 @@ class InitializationService:
             "I shall designate it 'The Agentium Sovereignty'.*\n\n"
             "**To respond:** Reply with `name: YourChosenName`"
         )
-        
+
         await self._broadcast_to_user(prompt_message, is_urgent=True)
-        
+
         try:
             await asyncio.wait_for(
                 self._country_name_event.wait(),
@@ -221,10 +183,10 @@ class InitializationService:
         finally:
             self._country_name_event = None
             self._pending_country_name = None
-    
+
     async def _notify_country_name_decision(
-        self, 
-        name: str, 
+        self,
+        name: str,
         user_provided: bool
     ) -> None:
         """Notify user of the final country name decision."""
@@ -241,17 +203,17 @@ class InitializationService:
                 f"I have designated this domain as '{name}' by default. "
                 f"You may propose a constitutional amendment to rename it later."
             )
-        
+
         await self._broadcast_to_user(message, is_urgent=False)
-    
+
     async def run_genesis_protocol(
-        self, 
+        self,
         force: bool = False,
         country_name: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Main entry point: Run the complete genesis protocol.
-        
+
         Args:
             force: Force re-initialization even if already initialized
             country_name: Optional pre-provided name (skips prompt)
@@ -281,24 +243,24 @@ class InitializationService:
         if force:
             self._log("WARNING", "Force re-initialization requested.")
             await self._clear_existing_data()
-        
+
         results = {
             "status": "initialized",
             "steps_completed": [],
             "timestamp": datetime.utcnow().isoformat()
         }
-        
+
         try:
             # Step 1: Create Head 00001
             head = await self._create_head_of_council()
             results["steps_completed"].append("created_head_00001")
             self._log("INFO", f"Head 00001 created: {head.id}")
-            
+
             # Step 2: Create Council Members (2 Council + 1 Head = 3 votes for anti-tyranny)
             council = await self._create_council_members()
             results["steps_completed"].append(f"created_council_members:{len(council)}")
             self._log("INFO", f"Created {len(council)} Council Members")
-            
+
             # Step 3: Democratic vote on country name (with user input timeout)
             if country_name:
                 # Pre-provided name (e.g., from API call)
@@ -317,49 +279,43 @@ class InitializationService:
                     selected_name = "The Agentium Sovereignty"
                     user_provided = False
                     self._log("INFO", "Country name prompt timed out, using default")
-            
+
             # Record the vote and notify
             await self._vote_on_country_name(council, selected_name)
             await self._notify_country_name_decision(selected_name, user_provided)
-            
+
             results["country_name"] = selected_name
             results["user_provided"] = user_provided
             results["steps_completed"].append("country_name_voted")
-            
+
             # Step 4: Load and customize constitution
             constitution = await self._load_constitution(selected_name, head, council)
             results["constitution_version"] = constitution.version
             results["steps_completed"].append("constitution_loaded")
-            
+
             # Step 5: Index to Vector DB
             await self._index_to_vector_db(constitution, council)
             results["steps_completed"].append("vector_db_indexed")
-            
+
             # Step 6: Grant Council admin rights
             await self._grant_council_privileges(council)
             results["steps_completed"].append("council_privileges_granted")
 
-            # Step 7: Seed persistent critic agents (Phase 6.2)
-            critics = await self._create_critic_agents(constitution)
-            results["steps_completed"].append(f"created_critic_agents:{len(critics)}")
-            self._log("INFO", f"Created {len(critics)} Critic Agents (40001, 50001, 60001)")
-
-            
             self.db.commit()
             results["message"] = f"Agentium initialized: {selected_name}"
             return results
-            
+
         except Exception as e:
             self.db.rollback()
             self._log("ERROR", f"Genesis failed: {str(e)}")
             raise InitializationError(f"Genesis failed: {str(e)}")
-    
+
     async def _create_head_of_council(self) -> HeadOfCouncil:
         """Create the supreme authority - Head 00001."""
         existing = self.db.query(HeadOfCouncil).filter_by(agentium_id="00001").first()
         if existing:
             return existing
-        
+
         head = HeadOfCouncil(
             agentium_id="00001",
             name="Head of Council Prime",
@@ -370,32 +326,32 @@ class InitializationService:
             idle_mode_enabled=True,
             constitution_version="v1.0.0"
         )
-        
+
         self.db.add(head)
         self.db.flush()
-        
+
         ethos = self._create_head_ethos(head)
         head.ethos_id = ethos.id
         self.db.flush()
-        
+
         # Workflow §1: Constitutional alignment at creation
         head.read_and_align_constitution(self.db)
-        
+
         self.db.flush()
         return head
-    
+
     async def _create_council_members(self) -> List[CouncilMember]:
         """Create initial Council Members (10001, 10002)."""
         council = []
-        
+
         for i in range(self.DEFAULT_COUNCIL_SIZE):
             agentium_id = f"1{i+1:04d}"  # 10001, 10002
-            
+
             existing = self.db.query(CouncilMember).filter_by(agentium_id=agentium_id).first()
             if existing:
                 council.append(existing)
                 continue
-            
+
             member = CouncilMember(
                 agentium_id=agentium_id,
                 name=f"Council Member {i+1}",
@@ -404,24 +360,24 @@ class InitializationService:
                 is_active=True,
                 specialization=self._assign_specialization(i)
             )
-            
+
             self.db.add(member)
             self.db.flush()
-            
+
             ethos = self._create_council_ethos(member, i+1)
             member.ethos_id = ethos.id
-            
+
             # Workflow §1: Constitutional alignment at creation
             member.read_and_align_constitution(self.db)
-            
+
             council.append(member)
-        
+
         self.db.flush()
         return council
-    
+
     async def _vote_on_country_name(
-        self, 
-        council: List[CouncilMember], 
+        self,
+        council: List[CouncilMember],
         country_name: str
     ) -> None:
         """Record democratic vote on country name."""
@@ -434,7 +390,7 @@ class InitializationService:
                 agentium_id=f"V{member.agentium_id}_GENESIS"
             )
             self.db.add(vote)
-        
+
         # Also record Head's vote
         head_vote = IndividualVote(
             voter_agentium_id="00001",
@@ -444,7 +400,7 @@ class InitializationService:
             agentium_id="V00001_GENESIS"
         )
         self.db.add(head_vote)
-        
+
         # Store in UserConfig for persistence
         try:
             config = UserConfig(
@@ -456,11 +412,11 @@ class InitializationService:
             self.db.add(config)
         except Exception:
             pass  # UserConfig table might not exist in early migrations
-    
+
     async def _load_constitution(
-        self, 
-        country_name: str, 
-        head: HeadOfCouncil, 
+        self,
+        country_name: str,
+        head: HeadOfCouncil,
         council: List[CouncilMember]
     ) -> Constitution:
         """
@@ -536,27 +492,27 @@ class InitializationService:
         self.db.flush()
 
         return constitution
-    
+
     async def _index_to_vector_db(
-        self, 
-        constitution: Constitution, 
+        self,
+        constitution: Constitution,
         council: List[CouncilMember]
     ) -> None:
         """Index to Vector DB."""
         try:
             self.vector_store.initialize()
             self.knowledge_service.embed_constitution(self.db, constitution)
-            
+
             for member in council:
                 if member.ethos:
                     self.knowledge_service.embed_ethos(member.ethos)
-            
+
             head = self.db.query(HeadOfCouncil).filter_by(agentium_id="00001").first()
             if head and head.ethos:
                 self.knowledge_service.embed_ethos(head.ethos)
         except Exception as e:
             self._log("WARNING", f"Vector DB indexing skipped: {e}")
-    
+
     async def _grant_council_privileges(self, council: List[CouncilMember]) -> None:
         """Grant Council admin rights."""
         for member in council:
@@ -567,7 +523,7 @@ class InitializationService:
                     "granted_at": datetime.utcnow().isoformat()
                 })
         self.db.flush()
-    
+
     def _create_head_ethos(self, head: HeadOfCouncil) -> Ethos:
         """Create ethos for Head of Council (Workflow §1 — enriched template)."""
         ethos = Ethos(
@@ -611,7 +567,7 @@ class InitializationService:
         self.db.add(ethos)
         self.db.flush()
         return ethos
-    
+
     def _create_council_ethos(self, member: CouncilMember, number: int) -> Ethos:
         """Create ethos for Council Member (Workflow §1 — enriched template)."""
         spec = self._assign_specialization(number - 1)
@@ -656,126 +612,12 @@ class InitializationService:
         self.db.add(ethos)
         self.db.flush()
         return ethos
-    
-
-    async def _create_critic_agents(
-        self, 
-        constitution: Constitution
-    ) -> List[CriticAgent]:
-        """
-        Seed the three persistent critic agents: 40001, 50001, 60001.
-
-        Critics operate OUTSIDE the democratic chain — they are never
-        voted on, never receive tasks, and never participate in Council
-        deliberation. They are created here once and persist forever.
-        """
-        critics = []
-
-        for seed in self.CRITIC_SEED:
-            existing = self.db.query(CriticAgent).filter_by(
-                agentium_id=seed["agentium_id"]
-            ).first()
-
-            if existing:
-                critics.append(existing)
-                self._log("INFO", f"Critic {seed['agentium_id']} already exists — skipping")
-                continue
-
-            critic = CriticAgent(
-                agentium_id=seed["agentium_id"],
-                name=seed["name"],
-                description=seed["description"],
-                critic_specialty=seed["critic_specialty"],
-                status=AgentStatus.ACTIVE,
-                is_active=True,
-                is_persistent=True,
-                idle_mode_enabled=False,   # Critics are never idle — always ready
-                constitution_version=constitution.version,
-                # Orthogonal model: deliberately different from executor default
-                preferred_review_model="openai:gpt-4o-mini",
-            )
-
-            self.db.add(critic)
-            self.db.flush()
-
-            ethos = self._create_critic_ethos(critic, seed)
-            critic.ethos_id = ethos.id
-            self.db.flush()
-
-            critics.append(critic)
-            self._log("INFO", f"Critic {seed['agentium_id']} ({seed['role']}) created")
-
-        return critics
-
-    def _create_critic_ethos(self, critic: CriticAgent, seed: dict) -> Ethos:
-        """Create ethos for a critic agent."""
-        specialty = seed["critic_specialty"]
-        spec_label = seed["specialization"]
-
-        specialty_rules = {
-            CriticType.CODE: [
-                "Reject any output containing dangerous patterns: eval, exec, os.system, shell injection",
-                "Reject syntactically invalid code without exception",
-                "Reject outputs exceeding 100K characters — likely unbounded generation",
-                "Pass clean, secure, logically sound code without modification",
-            ],
-            CriticType.OUTPUT: [
-                "Reject empty outputs — they fulfill no user intent",
-                "Reject pure error tracebacks passed off as results",
-                "Reject outputs with less than 5% keyword overlap with the task description",
-                "Pass outputs that meaningfully address the task, even if imperfect",
-            ],
-            CriticType.PLAN: [
-                "Reject empty plans",
-                "Reject plans with duplicate steps — indicates circular logic",
-                "Reject plans exceeding 100 steps — likely over-engineered",
-                "Pass plans that are complete, sequential, and achievable",
-            ],
-        }
-
-        ethos = Ethos(
-            agentium_id=f"E{critic.agentium_id}",
-            agent_type="critic",
-            mission_statement=(
-                f"{seed['role']} — specialist in {spec_label}. "
-                f"Operates OUTSIDE the democratic chain with ABSOLUTE veto authority. "
-                f"Does not vote, does not deliberate, does not accept tasks. "
-                f"Sole purpose: validate outputs and enforce quality gates."
-            ),
-            core_values=json.dumps([
-                "Absolute Independence — Never influenced by the democratic chain",
-                "Orthogonal Judgement — Uses a different model than executors to avoid correlated failures",
-                "Decisive Authority — Issues verdicts without negotiation",
-                f"Domain Mastery — {spec_label} is the sole area of focus",
-            ]),
-            behavioral_rules=json.dumps(specialty_rules[specialty]),
-            restrictions=json.dumps([
-                "Cannot vote on amendments or Council deliberations",
-                "Cannot be overruled by any agent in the democratic chain",
-                "Cannot accept task assignments — critics review, never execute",
-                "Cannot modify verdicts after they are issued",
-            ]),
-            capabilities=json.dumps([
-                "Absolute veto authority over task outputs",
-                "Force retry within the same team on REJECT (up to 5 retries)",
-                "Escalate to Council after max retries exhausted",
-                "Full audit trail logging of every verdict",
-            ]),
-            created_by_agentium_id="00001",
-            agent_id=critic.id,
-            is_verified=True,
-            verified_by_agentium_id="00001",
-        )
-
-        self.db.add(ethos)
-        self.db.flush()
-        return ethos
 
     def _assign_specialization(self, index: int) -> str:
         """Assign specializations."""
         specializations = ["Constitutional Law", "System Security", "Resource Allocation"]
         return specializations[index % len(specializations)]
-    
+
     def _get_constitution_template(self) -> Dict[str, Any]:
         """Return constitution template (Workflow §7 — Design Principles)."""
         return {
@@ -854,7 +696,7 @@ class InitializationService:
                 "Bypassing democratic deliberation for constitutional amendments"
             ]
         }
-    
+
     async def _clear_existing_data(self) -> None:
         """Clear existing data."""
         try:
@@ -863,13 +705,13 @@ class InitializationService:
             self.db.commit()
         except Exception as e:
             self._log("ERROR", f"Clear failed: {e}")
-    
+
     def _log(self, level: str, message: str) -> None:
         """Log to genesis log."""
         entry = f"[{datetime.utcnow().isoformat()}] [{level}] {message}"
         self.genesis_log.append(entry)
         getattr(logger, level.lower(), logger.info)(message)
-    
+
     @staticmethod
     def create_default_constitution(db: Session) -> Constitution:
         """
@@ -1048,13 +890,13 @@ class InitializationService:
 
 # Convenience function
 async def initialize_agentium(
-    db: Optional[Session] = None, 
+    db: Optional[Session] = None,
     force: bool = False,
     country_name: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Public API to run genesis protocol.
-    
+
     Args:
         db: Database session
         force: Force re-initialization

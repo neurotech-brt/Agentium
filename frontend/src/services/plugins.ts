@@ -11,6 +11,34 @@
  */
 
 import { api } from './api';
+import type {
+  MarketplaceListing,
+  MarketplaceBrowseParams,
+  MarketplaceResult,
+  ToolListResponse,
+  VoteChoice,
+  PublishListingRequest,
+  ImportToolResponse,
+  FinalizeImportRequest,
+  FinalizeImportResponse,
+  RateToolRequest,
+  YankListingRequest,
+  VoteRequest,
+  ProposeToolRequest,
+  ExecuteToolRequest,
+  DeprecateRequest,
+  ScheduleSunsetRequest,
+  ExecuteSunsetRequest,
+  RestoreToolRequest,
+  ProposeUpdateRequest,
+  ApproveUpdateRequest,
+  RollbackRequest,
+  AnalyticsReport,
+  ToolStats,
+  ErrorsResponse,
+  AgentUsageResponse,
+  ApiActionResponse,
+} from '../types/toolManagement';
 
 export interface PluginItem {
     id: string;
@@ -118,4 +146,126 @@ export const toolCreationMarketplaceService = {
         );
         return response.data;
     },
+};
+
+// ─── Tool Management API (/api/v1/tool-management) ─────────────────────────────
+//
+// Comprehensive API for tool management including marketplace, versioning,
+// deprecation, and analytics. Replaces the local callApi wrapper in
+// ToolMarketplacePage with fully typed service calls.
+
+const BASE = '/api/v1/tool-management';
+const mkt = (path = '') => `${BASE}/marketplace${path}`;
+const tool = (name: string, path = '') => `${BASE}/${encodeURIComponent(name)}${path}`;
+
+export const toolManagementApi = {
+  // ── Marketplace ───────────────────────────────────────────────────────────
+  
+  /** Browse marketplace listings with filters and pagination */
+  browseMarketplace: (params: MarketplaceBrowseParams) =>
+    api.get<MarketplaceResult>(mkt(), { params }).then(r => r.data),
+
+  /** Publish a tool to the marketplace */
+  publishTool: (data: PublishListingRequest) =>
+    api.post<ApiActionResponse>(mkt('/publish'), data).then(r => r.data),
+
+  /** Stage a tool import from marketplace */
+  stageImport: (listingId: string) =>
+    api.post<ImportToolResponse>(mkt(`/${encodeURIComponent(listingId)}/import`)).then(r => r.data),
+
+  /** Finalize a staged import - REQUIRES listing_id (fix for route/service mismatch) */
+  finalizeImport: (data: FinalizeImportRequest) =>
+    api.post<FinalizeImportResponse>(mkt('/finalize-import'), data).then(r => r.data),
+
+  /** Rate a marketplace listing */
+  rateTool: (listingId: string, data: RateToolRequest) =>
+    api.post<ApiActionResponse>(mkt(`/${encodeURIComponent(listingId)}/rate`), data).then(r => r.data),
+
+  /** Yank a marketplace listing */
+  yankTool: (listingId: string, data: YankListingRequest) =>
+    api.post<ApiActionResponse>(mkt(`/${encodeURIComponent(listingId)}/yank`), data).then(r => r.data),
+
+  // ── Tools ─────────────────────────────────────────────────────────────────
+
+  /** List all tools with optional status filter */
+  listTools: (statusFilter?: string) =>
+    api.get<ToolListResponse>(`${BASE}/${statusFilter ? `?status_filter=${encodeURIComponent(statusFilter)}` : ''}`).then(r => r.data),
+
+  /** Propose a new tool */
+  proposeTool: (data: ProposeToolRequest) =>
+    api.post<ApiActionResponse>(`${BASE}/propose`, data).then(r => r.data),
+
+  /** Vote on a pending tool proposal */
+  voteOnTool: (toolName: string, data: VoteRequest) =>
+    api.post<ApiActionResponse>(tool(toolName, '/vote'), data).then(r => r.data),
+
+  /** Execute a tool */
+  executeTool: (toolName: string, data: ExecuteToolRequest) =>
+    api.post<ApiActionResponse>(tool(toolName, '/execute'), data).then(r => r.data),
+
+  /** Deprecate a tool */
+  deprecateTool: (toolName: string, data: DeprecateRequest) =>
+    api.post<ApiActionResponse>(tool(toolName, '/deprecate'), data).then(r => r.data),
+
+  /** Restore a deprecated tool */
+  restoreTool: (toolName: string, data: RestoreToolRequest) =>
+    api.post<ApiActionResponse>(tool(toolName, '/restore'), data).then(r => r.data),
+
+  /** Schedule sunset for a tool */
+  scheduleSunset: (toolName: string, data: ScheduleSunsetRequest) =>
+    api.post<ApiActionResponse>(tool(toolName, '/schedule-sunset'), data).then(r => r.data),
+
+  /** Execute sunset (hard removal) */
+  executeSunset: (toolName: string, data: ExecuteSunsetRequest) =>
+    api.post<ApiActionResponse>(tool(toolName, '/execute-sunset'), data).then(r => r.data),
+
+  // ── Versions ──────────────────────────────────────────────────────────────
+
+  /** Get changelog for a tool */
+  getChangelog: (toolName: string) =>
+    api.get(tool(toolName, '/versions/changelog')).then(r => r.data),
+
+  /** Get diff between two versions */
+  getVersionDiff: (toolName: string, versionA: number, versionB: number) =>
+    api.get(`${tool(toolName, '/versions/diff')}?version_a=${versionA}&version_b=${versionB}`).then(r => r.data),
+
+  /** Propose a code update */
+  proposeUpdate: (toolName: string, data: ProposeUpdateRequest) =>
+    api.post<ApiActionResponse>(tool(toolName, '/versions/propose-update'), data).then(r => r.data),
+
+  /** Approve a pending update */
+  approveUpdate: (toolName: string, data: ApproveUpdateRequest) =>
+    api.post<ApiActionResponse>(tool(toolName, '/versions/approve-update'), data).then(r => r.data),
+
+  /** Rollback to a specific version */
+  rollback: (toolName: string, data: RollbackRequest) =>
+    api.post<ApiActionResponse>(tool(toolName, '/versions/rollback'), data).then(r => r.data),
+
+  // ── Sunset ──────────────────────────────────────────────────────────────
+
+  /** List deprecated tools */
+  listDeprecated: () =>
+    api.get(`${BASE}/deprecated`).then(r => r.data),
+
+  /** Run sunset cleanup */
+  runSunsetCleanup: () =>
+    api.post<ApiActionResponse>(`${BASE}/run-sunset-cleanup`).then(r => r.data),
+
+  // ── Analytics ─────────────────────────────────────────────────────────────
+
+  /** Get full analytics report */
+  getAnalyticsReport: (days: number) =>
+    api.get<AnalyticsReport>(`${BASE}/analytics/report?days=${days}`).then(r => r.data),
+
+  /** Get recent errors */
+  getRecentErrors: (toolName?: string, limit: number = 50) =>
+    api.get<ErrorsResponse>(`${BASE}/analytics/errors?${toolName ? `tool_name=${encodeURIComponent(toolName)}&` : ''}limit=${limit}`).then(r => r.data),
+
+  /** Get agent tool usage */
+  getAgentToolUsage: (agentiumId: string, days: number) =>
+    api.get<AgentUsageResponse>(`${BASE}/analytics/agent/${encodeURIComponent(agentiumId)}?days=${days}`).then(r => r.data),
+
+  /** Get per-tool analytics */
+  getToolStats: (toolName: string, days: number) =>
+    api.get<ToolStats>(tool(toolName, `/analytics?days=${days}`)).then(r => r.data),
 };

@@ -11,6 +11,10 @@ Fixes (Phase 6.8):
 - /execute endpoint now enforces tier auth (blocks task agents 3xxxx)
   and injects agent_tier dependency to do so
 - Router tag updated from stale "Phase 6.1" to "Phase 6.8"
+
+Fixes (This Update):
+- FinalizeImportRequest now includes listing_id field (was missing)
+- finalize_import route now passes listing_id to service
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -97,7 +101,10 @@ class PublishListingRequest(BaseModel):
 class ImportToolRequest(BaseModel):
     pass  # agent_id comes from JWT now
 
+# FIX: Added listing_id field which was missing - this caused the finalize_import
+# route to fail because the service expects both listing_id and staging_id
 class FinalizeImportRequest(BaseModel):
+    listing_id: str   # ← ADDED: was missing, required by service
     staging_id: str
 
 class RateToolRequest(BaseModel):
@@ -309,6 +316,7 @@ async def import_tool(
     return result
 
 
+# FIX: Added listing_id parameter to match service signature
 @router.post("/marketplace/finalize-import")
 async def finalize_import(
     body: FinalizeImportRequest,
@@ -319,7 +327,11 @@ async def finalize_import(
     """Finalize a staged marketplace import. Head/Council only."""
     _require_head_or_council(agent_tier)
     service = ToolMarketplaceService(db)
-    result  = service.finalize_import(staging_id=body.staging_id)
+    # FIX: Now passing listing_id which was previously missing
+    result  = service.finalize_import(
+        listing_id=body.listing_id,   # ← ADDED: was missing
+        staging_id=body.staging_id,
+    )
     if not result.get("finalized"):
         raise HTTPException(status_code=400, detail=result.get("error"))
     return result

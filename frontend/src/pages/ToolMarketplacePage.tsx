@@ -1264,7 +1264,7 @@ function VersionsTab() {
             {pendingAction === "Diff" && <Loader2 className="w-4 h-4 animate-spin" />}
             Get Diff
           </button>
-          {diff && (
+          {diff != null && (
             <div className="mt-4">
               <JsonBox data={diff} />
             </div>
@@ -1724,7 +1724,7 @@ function AnalyticsTab() {
     color = "text-blue-600 dark:text-blue-400",
   }: {
     label: string;
-    value: unknown;
+    value: React.ReactNode;
     color?: string;
   }) {
     return (
@@ -1996,7 +1996,7 @@ function AnalyticsTab() {
                     key={l}
                     className="bg-white dark:bg-[#161b27] rounded-xl border border-gray-200 dark:border-[#1e2535] p-4 text-center shadow-sm dark:shadow-[0_2px_16px_rgba(0,0,0,0.25)]"
                   >
-                    <div className={`text-2xl font-bold ${c} tabular-nums`}>{v ?? "—"}</div>
+                    <div className={`text-2xl font-bold ${c} tabular-nums`}>{(v as React.ReactNode) ?? "—"}</div>
                     <div className="text-gray-500 dark:text-gray-400 text-xs mt-1 uppercase tracking-wider">
                       {l}
                     </div>

@@ -21,6 +21,9 @@ interface User {
     is_pending?: boolean;
     is_sovereign?: boolean;  // B6: field returned by backend to_dict()
     created_at?: string;
+    // D3: Forward last_login_at from backend so SettingsPage can display it
+    //     without an `as any` cast.
+    last_login_at?: string;
     role?: UserRole;
     isAuthenticated: boolean;
     isSovereign?: boolean;
@@ -112,6 +115,8 @@ export const useAuthStore = create<AuthState>()(
                             is_pending: user.is_pending,
                             is_sovereign: user.is_sovereign,
                             created_at: user.created_at,
+                            // D3: forward last_login_at so SettingsPage can display it
+                            last_login_at: user.last_login_at ?? undefined,
                             isAuthenticated: true,
                             role: user.role ?? (user.is_admin ? 'admin' : 'user'),
                             // B6: use deriveIsSovereign instead of blindly equating
@@ -248,6 +253,8 @@ export const useAuthStore = create<AuthState>()(
                                 username: userData.username,
                                 is_admin: userData.is_admin || false,
                                 is_sovereign: userData.is_sovereign,
+                                // D3: forward last_login_at from verify response
+                                last_login_at: userData.last_login_at ?? undefined,
                                 isAuthenticated: true,
                                 role: userData.role ?? (userData.is_admin ? 'admin' : 'user'),
                                 // B6: consistent isSovereign derivation

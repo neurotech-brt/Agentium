@@ -7,15 +7,24 @@ Budget endpoints:
   - POST /admin/budget         → persist new limits to system_settings, update in-memory manager
   - GET  /admin/budget/history → per-day and per-provider breakdown from real API logs
 
+User management endpoints:
+  - GET  /admin/users/pending              → users awaiting approval
+  - GET  /admin/users                      → approved users (supports ?search=, ?limit=, ?offset=)
+  - POST /admin/users/{id}/approve         → approve pending registration
+  - POST /admin/users/{id}/reject          → reject + delete pending user
+  - DELETE /admin/users/{id}               → delete approved user
+  - POST /admin/users/{id}/change-password → admin password override (body, not query param)
+  - POST /admin/users/{id}/role            → change RBAC role
+
 """
 
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
-from sqlalchemy import func, text
 
 from backend.core.auth import get_current_active_user
 from backend.models.database import get_db
@@ -261,8 +270,6 @@ async def update_budget(
     Requires admin or sovereign role.
     - Persists to system_settings (survives restarts; new value IS the new default)
     - Updates in-memory IdleBudgetManager immediately (no restart needed)
-
-    If budget was $5 and user sets it to $1,000, the new default is $1,000.
     """
     if not _can_modify_budget(current_user):
         raise HTTPException(
@@ -311,10 +318,7 @@ async def get_budget_history(
     admin: dict = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """
-    Day-by-day and per-provider breakdown of real API usage.
-    All data sourced from ModelUsageLog — no estimates.
-    """
+    """Day-by-day and per-provider breakdown of real API usage."""
     try:
         from backend.models.entities.user_config import ModelUsageLog
 
@@ -380,15 +384,48 @@ async def get_pending_users(
 @router.get("/admin/users")
 async def get_all_users(
     include_pending: bool = False,
+    # D1 (pagination readiness): Optional server-side search filters by username
+    # or email. Avoids loading the full user list into memory and filtering
+    # client-side, which breaks at scale.
+    search: Optional[str] = Query(None, description="Filter by username or email (case-insensitive)"),
+    # Pagination params are optional for now so the current frontend client is
+    # not broken. Pass limit/offset when you implement the paginated table.
+    limit: int = Query(200, ge=1, le=500, description="Max users to return (default 200)"),
+    offset: int = Query(0, ge=0, description="Pagination offset"),
     admin: dict = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Get all users, optionally including pending."""
+    """
+    Get approved users with optional server-side search and pagination.
+
+    Query params:
+      search  — case-insensitive filter on username or email
+      limit   — max records to return (default 200, max 500)
+      offset  — pagination offset for future paginated table
+    """
     query = db.query(User)
     if not include_pending:
         query = query.filter(User.is_pending == False)
-    users = query.all()
-    return {"users": [_user_dict(u) for u in users], "total": len(users)}
+
+    # Server-side search — avoids pulling all rows into Python just to filter
+    if search:
+        term = f"%{search.lower()}%"
+        query = query.filter(
+            or_(
+                func.lower(User.username).like(term),
+                func.lower(User.email).like(term),
+            )
+        )
+
+    total = query.count()
+    users = query.order_by(User.created_at.desc()).offset(offset).limit(limit).all()
+
+    return {
+        "users":  [_user_dict(u) for u in users],
+        "total":  total,
+        "limit":  limit,
+        "offset": offset,
+    }
 
 
 @router.post("/admin/users/{user_id}/approve")

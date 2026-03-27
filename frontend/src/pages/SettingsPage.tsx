@@ -73,12 +73,11 @@ export function SettingsPage() {
     const permissionLabel =
         ROLE_PERMISSION_LABELS[user?.role ?? ''] ?? 'Standard';
 
-    // D3: Show last_login_at when the backend provides it.
-    // NOTE: authStore's User interface does not currently include last_login_at.
-    // The value will populate automatically once authStore is updated to forward
-    // the field from the login response. Until then this falls back to 'N/A'.
+    // D3: last_login_at is now properly typed on the User interface in authStore.ts
+    //     (no `as any` cast needed). Falls back to 'N/A' when the backend does not
+    //     yet include the field in the verify/login response.
     const lastLoginDisplay = (() => {
-        const raw = (user as any)?.last_login_at as string | undefined;
+        const raw = user?.last_login_at;
         if (!raw) return 'N/A';
         return new Date(raw).toLocaleDateString('en-US', {
             month: 'short',
@@ -207,7 +206,7 @@ export function SettingsPage() {
                                                 Active
                                             </span>
                                         </div>
-                                        {/* D3: Show real last-login timestamp when available */}
+                                        {/* D3: last_login_at is now typed — no `as any` cast */}
                                         <div className="flex items-center justify-between text-sm">
                                             <span className="text-gray-500 dark:text-gray-400">Last Login</span>
                                             <span className="text-gray-900 dark:text-gray-100 font-medium text-xs">
@@ -342,7 +341,7 @@ export function SettingsPage() {
                                                 </button>
                                             </div>
 
-                                            {/* C14: Password Strength Indicator — driven by hook */}
+                                            {/* C14: Password Strength Indicator */}
                                             {newPassword && (
                                                 <div className="mt-2.5 space-y-1.5">
                                                     <div className="flex items-center justify-between text-xs">
@@ -369,7 +368,6 @@ export function SettingsPage() {
                                         </div>
 
                                         {/* Confirm Password */}
-                                        {/* C8: now has its own show/hide toggle for consistency */}
                                         <div>
                                             <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                                                 Confirm New Password

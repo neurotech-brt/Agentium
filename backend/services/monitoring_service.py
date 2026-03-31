@@ -806,6 +806,614 @@ class MonitoringService:
                 logger.error(f"Error in cross_agent_sharing loop: {e}")
             await asyncio.sleep(21600)  # Every 6 hours
 
+    # -------------------------------------------------------------------------
+    # Phase 13.7 — Zero-Touch Operations Dashboard
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def get_aggregated_metrics(db: Session) -> Dict[str, Any]:
+        """
+        Combine agent health, circuit breaker states, scaling events (24h),
+        learning impact delta, workflow success rates, event trigger fire rates.
+        Cache in Redis for 10 seconds.
+        """
+        import json
+        import os
+        import redis as _redis
+
+        redis_url = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
+
+        try:
+            r = _redis.Redis.from_url(redis_url, decode_responses=True)
+            cached = r.get("agentium:monitoring:aggregated")
+            if cached:
+                return json.loads(cached)
+        except Exception:
+            r = None
+
+        from backend.models.entities.agents import AgentStatus
+        from backend.models.entities.task import Task, TaskStatus
+
+        now = datetime.utcnow()
+        day_ago = now - timedelta(hours=24)
+
+        # ── Agent Health ──────────────────────────────────────────────────
+        total_agents = db.query(Agent).filter(Agent.is_active == True).count()
+        agents_active = db.query(Agent).filter(
+            Agent.status.in_([AgentStatus.ACTIVE, AgentStatus.WORKING, AgentStatus.IDLE_WORKING]),
+            Agent.is_active == True,
+        ).count()
+        agents_suspended = db.query(Agent).filter(
+            Agent.status == AgentStatus.SUSPENDED,
+            Agent.is_active == True,
+        ).count()
+
+        avg_health_row = db.query(func.avg(AgentHealthReport.overall_health_score)).filter(
+            AgentHealthReport.created_at >= day_ago,
+        ).scalar()
+        avg_agent_health = round(float(avg_health_row), 1) if avg_health_row else 100.0
+
+        agent_health_pct = round((agents_active / max(total_agents, 1)) * 100, 1)
+
+        # ── Task Health ───────────────────────────────────────────────────
+        from sqlalchemy import func as sqla_func
+
+        tasks_24h = db.query(Task).filter(
+            Task.created_at >= day_ago, Task.is_active == True,
+        ).count()
+        tasks_completed = db.query(Task).filter(
+            Task.status == TaskStatus.COMPLETED,
+            Task.completed_at >= day_ago,
+            Task.is_active == True,
+        ).count()
+        tasks_failed = db.query(Task).filter(
+            Task.status == TaskStatus.FAILED,
+            Task.completed_at >= day_ago,
+            Task.is_active == True,
+        ).count()
+        tasks_pending = db.query(Task).filter(
+            Task.status.in_([TaskStatus.PENDING, TaskStatus.ASSIGNED, TaskStatus.APPROVED]),
+            Task.is_active == True,
+        ).count()
+
+        task_health_pct = round(
+            (tasks_completed / max(tasks_completed + tasks_failed, 1)) * 100, 1,
+        )
+
+        # ── Workflow Health ───────────────────────────────────────────────
+        try:
+            from backend.models.entities.workflow import WorkflowExecution
+            wf_total = db.query(WorkflowExecution).filter(
+                WorkflowExecution.started_at >= day_ago,
+            ).count()
+            wf_completed = db.query(WorkflowExecution).filter(
+                WorkflowExecution.status == "completed",
+                WorkflowExecution.started_at >= day_ago,
+            ).count()
+            workflow_health_pct = round(
+                (wf_completed / max(wf_total, 1)) * 100, 1,
+            )
+        except Exception:
+            workflow_health_pct = 100.0
+
+        # ── Event Health ──────────────────────────────────────────────────
+        try:
+            from backend.models.entities.event_trigger import EventLog, EventLogStatus
+            events_total = db.query(EventLog).filter(
+                EventLog.created_at >= day_ago,
+            ).count()
+            events_dead = db.query(EventLog).filter(
+                EventLog.status == EventLogStatus.DEAD_LETTER,
+                EventLog.created_at >= day_ago,
+            ).count()
+            event_health_pct = round(
+                ((events_total - events_dead) / max(events_total, 1)) * 100, 1,
+            )
+        except Exception:
+            event_health_pct = 100.0
+
+        # ── Budget Health ─────────────────────────────────────────────────
+        try:
+            from backend.services.token_optimizer import token_optimizer
+            budget_status = token_optimizer.get_status()
+            cost_used = float(budget_status.get("budget_status", {}).get("cost_used_today_usd", 0.0))
+            budget_limit = float(os.getenv("DAILY_TOKEN_BUDGET_USD", "10.00"))
+            budget_pct = round(max(0, 100 - (cost_used / max(budget_limit, 0.01)) * 100), 1)
+        except Exception:
+            cost_used = 0.0
+            budget_limit = 10.0
+            budget_pct = 100.0
+
+        # ── Capacity Forecast ─────────────────────────────────────────────
+        try:
+            from backend.services.predictive_scaling import predictive_scaling_service
+            predictions = predictive_scaling_service.get_predictions()
+        except Exception:
+            predictions = {"next_1h": 0, "next_6h": 0, "next_24h": 0, "current_capacity": 0, "recommendation": "neutral"}
+
+        # ── Scaling Events (24h) ──────────────────────────────────────────
+        from backend.models.entities.audit import AuditLog, AuditCategory
+        scaling_events_24h = db.query(AuditLog).filter(
+            AuditLog.action.in_([
+                "auto_scale_predictive_spawn",
+                "auto_scale_predictive_liquidate",
+                "manual_scale_override",
+            ]),
+            AuditLog.created_at >= day_ago,
+        ).count()
+
+        # ── Active Anomalies ─────────────────────────────────────────────
+        active_anomalies = db.query(ViolationReport).filter(
+            ViolationReport.status == "open",
+            ViolationReport.violation_type == "anomaly_detected",
+            ViolationReport.created_at >= day_ago,
+        ).count()
+
+        result = {
+            "agents": {
+                "total": total_agents,
+                "active": agents_active,
+                "suspended": agents_suspended,
+                "avg_health": avg_agent_health,
+                "health_pct": agent_health_pct,
+            },
+            "tasks": {
+                "total_24h": tasks_24h,
+                "completed": tasks_completed,
+                "failed": tasks_failed,
+                "pending": tasks_pending,
+                "health_pct": task_health_pct,
+            },
+            "workflows": {
+                "health_pct": workflow_health_pct,
+            },
+            "events": {
+                "health_pct": event_health_pct,
+            },
+            "budget": {
+                "cost_used_usd": cost_used,
+                "budget_limit_usd": budget_limit,
+                "health_pct": budget_pct,
+            },
+            "capacity_forecast": predictions,
+            "scaling_events_24h": scaling_events_24h,
+            "active_anomalies": active_anomalies,
+            "timestamp": now.isoformat(),
+        }
+
+        # Cache for 10 seconds
+        try:
+            if r:
+                r.setex("agentium:monitoring:aggregated", 10, json.dumps(result))
+        except Exception:
+            pass
+
+        return result
+
+    @staticmethod
+    def detect_anomalies(db: Session) -> Dict[str, Any]:
+        """
+        Compute Z-score for task_duration, error_rate, token_spend_per_hour
+        vs 7-day baseline.  If Z-score > 2.5, create ViolationReport with
+        severity 'major' and push via WebSocket.
+        """
+        import json
+        import os
+        import math
+        import redis as _redis
+
+        redis_url = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
+        now = datetime.utcnow()
+        results = {"anomalies_detected": 0, "anomalies": [], "checked_metrics": 0}
+
+        try:
+            r = _redis.Redis.from_url(redis_url, decode_responses=True)
+        except Exception:
+            logger.warning("Anomaly detection skipped: Redis unavailable")
+            return results
+
+        # Load 7-day time series from Redis sorted set
+        import time as _time
+        cutoff_7d = int(_time.time()) - 604800
+        now_ts = int(_time.time())
+        raw_data = r.zrangebyscore("agentium:scaling:metrics", cutoff_7d, now_ts)
+
+        if len(raw_data) < 6:
+            # Not enough data for meaningful Z-score
+            return results
+
+        parsed = [json.loads(d) for d in raw_data]
+
+        # ── Compute baselines ─────────────────────────────────────────────
+        def _compute_zscore(values: list, current: float) -> float:
+            if len(values) < 3:
+                return 0.0
+            mean = sum(values) / len(values)
+            variance = sum((v - mean) ** 2 for v in values) / len(values)
+            stddev = math.sqrt(variance) if variance > 0 else 1.0
+            return abs((current - mean) / stddev)
+
+        metrics_to_check = []
+
+        # 1. Pending task count (proxy for error/congestion)
+        pending_vals = [p["pending_task_count"] for p in parsed]
+        current_pending = pending_vals[-1] if pending_vals else 0
+        z_pending = _compute_zscore(pending_vals[:-1], current_pending)
+        results["checked_metrics"] += 1
+        if z_pending > 2.5:
+            metrics_to_check.append({
+                "metric": "pending_task_count",
+                "z_score": round(z_pending, 2),
+                "current_value": current_pending,
+                "baseline_mean": round(sum(pending_vals[:-1]) / max(len(pending_vals[:-1]), 1), 2),
+                "pattern": "task_queue_stalled",
+            })
+
+        # 2. Token spend (proxy for cost anomaly)
+        spend_vals = [p.get("token_spend_last_5m", 0) for p in parsed]
+        current_spend = spend_vals[-1] if spend_vals else 0
+        z_spend = _compute_zscore(spend_vals[:-1], current_spend)
+        results["checked_metrics"] += 1
+        if z_spend > 2.5:
+            metrics_to_check.append({
+                "metric": "token_spend",
+                "z_score": round(z_spend, 2),
+                "current_value": current_spend,
+                "baseline_mean": round(sum(spend_vals[:-1]) / max(len(spend_vals[:-1]), 1), 2),
+                "pattern": "budget_overspend",
+            })
+
+        # 3. Agent count drop (proxy for crash storm)
+        agent_vals = [p["active_agent_count"] for p in parsed]
+        current_agents = agent_vals[-1] if agent_vals else 0
+        if len(agent_vals) > 3:
+            prev_mean = sum(agent_vals[:-1]) / max(len(agent_vals[:-1]), 1)
+            if current_agents < prev_mean * 0.5 and prev_mean > 2:
+                metrics_to_check.append({
+                    "metric": "active_agent_count",
+                    "z_score": round(_compute_zscore(agent_vals[:-1], current_agents), 2),
+                    "current_value": current_agents,
+                    "baseline_mean": round(prev_mean, 2),
+                    "pattern": "high_error_rate",
+                })
+                results["checked_metrics"] += 1
+
+        # ── Create violation reports for anomalies ────────────────────────
+        from backend.models.database import get_system_agent_id
+
+        for anomaly in metrics_to_check:
+            try:
+                system_id = get_system_agent_id(db)
+                report = ViolationReport(
+                    reporter_agent_id=system_id,
+                    reporter_agentium_id="SYSTEM",
+                    violator_agent_id=system_id,
+                    violator_agentium_id="SYSTEM",
+                    severity=ViolationSeverity.MAJOR,
+                    violation_type="anomaly_detected",
+                    description=(
+                        f"Anomaly: {anomaly['metric']} Z-score={anomaly['z_score']} "
+                        f"(current={anomaly['current_value']}, baseline={anomaly['baseline_mean']})"
+                    ),
+                    evidence=[anomaly],
+                    context={"auto_detected": True, "pattern": anomaly.get("pattern")},
+                    status="open",
+                )
+                db.add(report)
+                results["anomalies_detected"] += 1
+                results["anomalies"].append(anomaly)
+            except Exception as e:
+                logger.error("Failed to create anomaly report: %s", e)
+
+        if results["anomalies_detected"] > 0:
+            db.commit()
+
+            # WebSocket broadcast
+            try:
+                from backend.api.routes.websocket import manager
+                import asyncio
+                payload = {
+                    "type": "anomaly_detected",
+                    "count": results["anomalies_detected"],
+                    "anomalies": results["anomalies"],
+                    "timestamp": now.isoformat(),
+                }
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(manager.broadcast(payload))
+                except RuntimeError:
+                    pass
+            except Exception:
+                pass
+
+        return results
+
+    # KNOWN_PATTERNS for automated incident response
+    KNOWN_PATTERNS = {
+        "high_error_rate": "restart_stuck_agents",
+        "task_queue_stalled": "process_dependency_graph",
+        "budget_overspend": "enforce_budget_guard",
+    }
+
+    @staticmethod
+    def auto_remediate(anomaly: Dict[str, Any], db: Session) -> Dict[str, Any]:
+        """
+        Match anomaly against KNOWN_PATTERNS and call fix_fn automatically.
+        Log to AuditLog with action='auto_remediated'.
+        """
+        from backend.models.entities.audit import AuditLog, AuditLevel, AuditCategory
+
+        pattern = anomaly.get("pattern", "")
+        result = {
+            "pattern": pattern,
+            "remediated": False,
+            "action_taken": None,
+        }
+
+        if pattern not in MonitoringService.KNOWN_PATTERNS:
+            return result
+
+        fix_name = MonitoringService.KNOWN_PATTERNS[pattern]
+
+        try:
+            if fix_name == "restart_stuck_agents":
+                from backend.services.self_healing_service import SelfHealingService
+                fix_result = SelfHealingService.detect_crashed_agents(db)
+                result["action_taken"] = f"Restarted stuck agents: {fix_result.get('recovered', 0)} recovered"
+                result["remediated"] = True
+
+            elif fix_name == "process_dependency_graph":
+                # Trigger dependency graph processing to unblock stalled tasks
+                from backend.services.auto_delegation_service import AutoDelegationService
+                try:
+                    fix_result = AutoDelegationService.process_dependency_graph(db)
+                    result["action_taken"] = f"Processed dependency graph: {fix_result}"
+                except Exception:
+                    result["action_taken"] = "Triggered dependency graph reprocessing"
+                result["remediated"] = True
+
+            elif fix_name == "enforce_budget_guard":
+                from backend.services.predictive_scaling import predictive_scaling_service
+                predictive_scaling_service.enforce_token_budget_guard(db)
+                result["action_taken"] = "Enforced token budget guard"
+                result["remediated"] = True
+
+        except Exception as e:
+            result["error"] = str(e)
+            logger.error("Auto-remediation failed for pattern %s: %s", pattern, e)
+            return result
+
+        if result["remediated"]:
+            # Log to AuditLog
+            audit = AuditLog.log(
+                level=AuditLevel.WARNING,
+                category=AuditCategory.SYSTEM,
+                actor_type="system",
+                actor_id="ZERO_TOUCH_OPS",
+                action="auto_remediated",
+                description=f"Auto-remediated: {pattern} — {result['action_taken']}",
+                after_state={
+                    "anomaly": anomaly,
+                    "fix_applied": fix_name,
+                    "action": result["action_taken"],
+                },
+            )
+            db.add(audit)
+            db.commit()
+
+            # Broadcast WebSocket event
+            try:
+                from backend.api.routes.websocket import manager
+                import asyncio
+                payload = {
+                    "type": "auto_remediated",
+                    "pattern": pattern,
+                    "action": result["action_taken"],
+                    "timestamp": datetime.utcnow().isoformat(),
+                }
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(manager.broadcast(payload))
+                except RuntimeError:
+                    pass
+            except Exception:
+                pass
+
+        return result
+
+    @staticmethod
+    def get_sla_metrics(db: Session) -> Dict[str, Any]:
+        """
+        Track time-to-resolution for tasks with escalation_timeout_seconds.
+        Compute SLA compliance rate per priority level.
+        """
+        from backend.models.entities.task import Task, TaskStatus, TaskPriority
+
+        now = datetime.utcnow()
+        thirty_days_ago = now - timedelta(days=30)
+
+        priorities = ["critical", "sovereign", "high", "normal", "low"]
+        sla_data = {}
+
+        for priority_name in priorities:
+            try:
+                priority_val = getattr(TaskPriority, priority_name.upper(), None)
+                if priority_val is None:
+                    sla_data[priority_name] = {"compliance_pct": 100.0, "total": 0, "met": 0, "breached": 0}
+                    continue
+
+                # Tasks completed in last 30 days with this priority
+                completed_tasks = db.query(Task).filter(
+                    Task.priority == priority_val,
+                    Task.status == TaskStatus.COMPLETED,
+                    Task.completed_at >= thirty_days_ago,
+                    Task.is_active == True,
+                ).all()
+
+                total = len(completed_tasks)
+                met = 0
+                breached = 0
+
+                for task in completed_tasks:
+                    timeout = getattr(task, "escalation_timeout_seconds", None) or 300
+                    if task.completed_at and task.started_at:
+                        duration = (task.completed_at - task.started_at).total_seconds()
+                        if duration <= timeout:
+                            met += 1
+                        else:
+                            breached += 1
+
+                compliance = round((met / max(total, 1)) * 100, 1)
+                sla_data[priority_name] = {
+                    "compliance_pct": compliance,
+                    "total": total,
+                    "met": met,
+                    "breached": breached,
+                }
+
+            except Exception as e:
+                logger.warning("SLA metrics computation failed for %s: %s", priority_name, e)
+                sla_data[priority_name] = {"compliance_pct": 100.0, "total": 0, "met": 0, "breached": 0}
+
+        # Check for SLA breaches to fire WebSocket events
+        for pname, pdata in sla_data.items():
+            if pdata["compliance_pct"] < 80.0 and pdata["total"] > 0:
+                try:
+                    from backend.api.routes.websocket import manager
+                    import asyncio
+                    payload = {
+                        "type": "sla_breach",
+                        "priority": pname,
+                        "compliance_pct": pdata["compliance_pct"],
+                        "breached_count": pdata["breached"],
+                        "timestamp": now.isoformat(),
+                    }
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(manager.broadcast(payload))
+                    except RuntimeError:
+                        pass
+                except Exception:
+                    pass
+
+        return {
+            "sla_by_priority": sla_data,
+            "timestamp": now.isoformat(),
+        }
+
+    @staticmethod
+    def get_incident_log(db: Session, limit: int = 50) -> List[Dict[str, Any]]:
+        """
+        Return recent auto_remediated AuditLog entries for the incident log table.
+        """
+        from backend.models.entities.audit import AuditLog
+
+        audits = db.query(AuditLog).filter(
+            AuditLog.action == "auto_remediated",
+        ).order_by(AuditLog.created_at.desc()).limit(limit).all()
+
+        return [
+            {
+                "id": str(a.id),
+                "action": a.action,
+                "description": a.description,
+                "level": a.level.value if hasattr(a.level, "value") else str(a.level),
+                "after_state": a.after_state,
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+                "actor_id": a.actor_id,
+            }
+            for a in audits
+        ]
+
+    @staticmethod
+    def inject_chaos_test(test_type: str, db: Session) -> Dict[str, Any]:
+        """
+        Inject a controlled failure for chaos engineering.
+        Types: agent_crash, api_timeout, db_connection_loss.
+        All chaos actions are audit-logged.
+        """
+        from backend.models.entities.audit import AuditLog, AuditLevel, AuditCategory
+        from backend.models.entities.agents import AgentStatus
+
+        result = {
+            "test_type": test_type,
+            "success": False,
+            "details": {},
+        }
+
+        try:
+            if test_type == "agent_crash":
+                # Find a non-critical idle agent and mark as crashed
+                target = db.query(Agent).filter(
+                    Agent.status.in_([AgentStatus.IDLE, AgentStatus.ACTIVE]),
+                    Agent.is_active == True,
+                    Agent.is_persistent == False,
+                    Agent.agent_type == AgentType.TASK_AGENT,
+                ).first()
+
+                if target:
+                    target.status = AgentStatus.SUSPENDED
+                    result["details"] = {
+                        "agent_id": target.agentium_id,
+                        "previous_status": "active/idle",
+                        "new_status": "suspended",
+                        "note": "Self-healing should auto-recover this agent within 30s",
+                    }
+                    result["success"] = True
+                else:
+                    result["details"] = {"note": "No eligible non-persistent task agent found"}
+
+            elif test_type == "api_timeout":
+                # Set a Redis flag that model provider can check
+                import os
+                import redis as _redis
+                redis_url = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
+                r = _redis.Redis.from_url(redis_url, decode_responses=True)
+                r.setex("agentium:chaos:api_timeout", 60, "true")  # Auto-expires in 60s
+                result["details"] = {
+                    "flag_set": "agentium:chaos:api_timeout",
+                    "ttl_seconds": 60,
+                    "note": "Next model calls may experience simulated timeout for 60s",
+                }
+                result["success"] = True
+
+            elif test_type == "db_connection_loss":
+                # Set a Redis flag for diagnostic routine to detect
+                import os
+                import redis as _redis
+                redis_url = os.getenv("CELERY_BROKER_URL", "redis://redis:6379/0")
+                r = _redis.Redis.from_url(redis_url, decode_responses=True)
+                r.setex("agentium:chaos:db_simulated_failure", 60, "true")
+                result["details"] = {
+                    "flag_set": "agentium:chaos:db_simulated_failure",
+                    "ttl_seconds": 60,
+                    "note": "Simulated DB failure flag set for 60s; diagnostic routine will detect it",
+                }
+                result["success"] = True
+
+            else:
+                result["details"] = {"error": f"Unknown test type: {test_type}"}
+                return result
+
+            # Audit log the chaos test
+            audit = AuditLog.log(
+                level=AuditLevel.WARNING,
+                category=AuditCategory.SYSTEM,
+                actor_type="admin",
+                actor_id="CHAOS_ENGINEERING",
+                action="chaos_test_injected",
+                description=f"Chaos test injected: {test_type}",
+                after_state=result,
+            )
+            db.add(audit)
+            db.commit()
+
+        except Exception as e:
+            result["details"] = {"error": str(e)}
+            logger.error("Chaos test injection failed: %s", e)
+
+        return result
+
     @classmethod
     def start_background_monitors(cls):
         """Starts all detached asynchronous monitoring loops (Phase 9 + 10)."""

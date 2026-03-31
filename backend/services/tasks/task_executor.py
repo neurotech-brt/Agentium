@@ -1279,3 +1279,64 @@ def external_api_poll():
         except Exception as e:
             logger.error(f"external_api_poll failed: {e}")
             return {"error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════
+# Phase 13.7 — Zero-Touch Operations Dashboard Tasks
+# ═══════════════════════════════════════════════════════════
+
+@celery_app.task(name='backend.services.tasks.task_executor.anomaly_detection')
+def anomaly_detection():
+    """
+    Anomaly detection: compute Z-scores for system metrics vs 7-day baseline.
+    Auto-remediates known failure patterns via MonitoringService.
+    Runs every 5 minutes via Celery beat.
+    """
+    with get_task_db() as db:
+        try:
+            from backend.services.monitoring_service import MonitoringService
+            result = MonitoringService.detect_anomalies(db)
+            if result["anomalies_detected"] > 0:
+                logger.warning(
+                    f"🔍 Anomaly detection: {result['anomalies_detected']} anomalies found"
+                )
+                # Auto-remediate known patterns
+                for anomaly in result["anomalies"]:
+                    try:
+                        fix_result = MonitoringService.auto_remediate(anomaly, db)
+                        if fix_result.get("remediated"):
+                            logger.info(
+                                f"✅ Auto-remediated: {anomaly.get('pattern')} — "
+                                f"{fix_result.get('action_taken')}"
+                            )
+                    except Exception as e:
+                        logger.error(f"Auto-remediation failed for {anomaly}: {e}")
+
+            return result
+        except Exception as e:
+            logger.error(f"anomaly_detection failed: {e}")
+            return {"error": str(e)}
+
+
+@celery_app.task(name='backend.services.tasks.task_executor.sla_monitor')
+def sla_monitor():
+    """
+    SLA monitor: track time-to-resolution per priority and broadcast
+    breach events.
+    Runs every 60 seconds via Celery beat.
+    """
+    with get_task_db() as db:
+        try:
+            from backend.services.monitoring_service import MonitoringService
+            result = MonitoringService.get_sla_metrics(db)
+            # Log any breaches
+            for priority, data in result.get("sla_by_priority", {}).items():
+                if data.get("compliance_pct", 100) < 80.0 and data.get("total", 0) > 0:
+                    logger.warning(
+                        f"⚠️ SLA breach: {priority} priority at {data['compliance_pct']}% "
+                        f"compliance ({data['breached']} breached)"
+                    )
+            return result
+        except Exception as e:
+            logger.error(f"sla_monitor failed: {e}")
+            return {"error": str(e)}

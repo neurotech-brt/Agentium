@@ -29,7 +29,7 @@ import {
 const KNOWN_MONITOR_IDS  = ['00001', '00002', '00003'];
 const REFRESH_INTERVAL_MS = 30_000;
 
-type Tab = 'dashboard' | 'violations' | 'recovery';
+type Tab = 'dashboard' | 'violations' | 'recovery' | 'operations' | 'sla' | 'incidents' | 'chaos';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -431,6 +431,323 @@ function RecoveryTab() {
     );
 }
 
+// ─── Operations Tab ─────────────────────────────────────────────────────────────
+
+function OperationsTab() {
+    const [data, setData] = useState<any>(null);
+    const [isLoading, setIsLoading] = useState(true);
+
+    const loadData = useCallback(async () => {
+        setIsLoading(true);
+        try {
+            const res = await monitoringService.getAggregatedMetrics();
+            setData(res);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    useEffect(() => {
+        loadData();
+    }, [loadData]);
+
+    if (isLoading) {
+        return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
+    }
+
+    return (
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+            <div className="flex items-center justify-between mb-2">
+                <h2 className="text-xl font-bold text-gray-900 dark:text-white">Aggregated System Metrics</h2>
+                <button onClick={loadData} className="flex items-center gap-1.5 text-xs font-semibold px-3 py-1.5 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50">
+                    <RefreshCw className="w-3.5 h-3.5" /> Refresh
+                </button>
+            </div>
+
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+                {[
+                    { title: "Agents", pct: data?.agents?.health_pct || 0 },
+                    { title: "Tasks", pct: data?.tasks?.health_pct || 0 },
+                    { title: "Workflows", pct: data?.workflows?.health_pct || 0 },
+                    { title: "Events", pct: data?.events?.health_pct || 0 },
+                    { title: "Budget", pct: data?.budget?.health_pct || 0 },
+                ].map((item, i) => (
+                    <div key={i} className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 p-4 shadow-sm flex flex-col items-center">
+                        <HealthRing score={item.pct} />
+                        <div className={`text-lg font-bold mt-2 ${item.pct >= 90 ? 'text-green-600 dark:text-green-400' : item.pct >= 70 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400'}`}>
+                            {item.pct}%
+                        </div>
+                        <div className="text-sm text-gray-500 dark:text-gray-400 font-medium">{item.title} Health</div>
+                    </div>
+                ))}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden shadow-sm">
+                    <div className="bg-blue-50 dark:bg-blue-950/50 border-b border-blue-100 dark:border-blue-900/60 px-6 py-4">
+                        <h3 className="font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                            <Activity className="w-4 h-4 text-blue-500" />
+                            Live Telemetry Summary
+                        </h3>
+                    </div>
+                    <div className="p-6">
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                                <p className="text-xs text-gray-500 dark:text-gray-400">Scaling Actions (24h)</p>
+                                <p className="text-xl font-bold dark:text-white">{data?.scaling_events_24h ?? 0}</p>
+                            </div>
+                            <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                                <p className="text-xs text-gray-500 dark:text-gray-400">Total Tasks (24h)</p>
+                                <p className="text-xl font-bold dark:text-white">{data?.tasks?.total_24h ?? 0}</p>
+                            </div>
+                            <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                                <p className="text-xs text-gray-500 dark:text-gray-400">Budget Spent ($)</p>
+                                <p className="text-xl font-bold text-indigo-600 dark:text-indigo-400">${data?.budget?.cost_used_usd?.toFixed(2) ?? '0.00'}</p>
+                            </div>
+                            <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                                <p className="text-xs text-gray-500 dark:text-gray-400">Capacity Forecast (24h)</p>
+                                <p className="text-xl font-bold text-purple-600 dark:text-purple-400">
+                                    {(data?.capacity_forecast?.next_24h !== undefined ? Math.round(data.capacity_forecast.next_24h) : 'N/A')}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 overflow-hidden shadow-sm">
+                    <div className="bg-orange-50 dark:bg-orange-950/50 border-b border-orange-100 dark:border-orange-900/60 px-6 py-4">
+                        <h3 className="font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                            <AlertTriangle className="w-4 h-4 text-orange-500" />
+                            Active Anomalies
+                        </h3>
+                    </div>
+                    <div className="p-6">
+                        {data?.active_anomalies > 0 ? (
+                            <div className="flex items-center gap-4 bg-orange-100/50 dark:bg-orange-900/30 rounded-lg p-4 border border-orange-200 dark:border-orange-800/50">
+                                <ShieldAlert className="w-8 h-8 text-orange-500" />
+                                <div>
+                                    <h4 className="font-bold text-orange-900 dark:text-orange-300">{data.active_anomalies} Anomaly Detected</h4>
+                                    <p className="text-sm text-orange-800 dark:text-orange-400">Check the Violations tab for details on anomalies waiting for remediation.</p>
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="text-center py-6">
+                                <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-3" />
+                                <p className="text-gray-900 dark:text-white font-medium">No Anomalies Detected</p>
+                                <p className="text-sm text-gray-500 dark:text-gray-400">System operating within historical baseline limits.</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ─── SLA Tab ──────────────────────────────────────────────────────────────────
+
+function SLATab() {
+    const [data, setData] = useState<any>(null);
+    const [isLoading, setIsLoading] = useState(true);
+
+    const loadData = useCallback(async () => {
+        setIsLoading(true);
+        try {
+            const res = await monitoringService.getSLAMetrics();
+            setData(res);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { loadData(); }, [loadData]);
+
+    if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
+
+    const items = Object.entries(data?.sla_by_priority || {});
+
+    return (
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {items.map(([priority, v]: [string, any]) => {
+                    const pct = v.compliance_pct;
+                    const isBreach = pct < 80;
+                    return (
+                        <div key={priority} className={`bg-white dark:bg-gray-900 rounded-xl border p-6 shadow-sm ${isBreach ? 'border-red-300 dark:border-red-800' : 'border-gray-200 dark:border-gray-800'}`}>
+                            <div className="flex items-center gap-3 mb-2">
+                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: priority === 'critical' || priority === 'sovereign' ? '#ef4444' : priority === 'high' ? '#f97316' : '#3b82f6' }} />
+                                <h3 className="font-bold uppercase text-gray-900 dark:text-white">{priority} Priority</h3>
+                            </div>
+                            <div className={`text-4xl font-bold my-4 ${pct >= 95 ? 'text-green-600' : pct >= 80 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                {pct}%
+                            </div>
+                            <p className="text-sm text-gray-500 dark:text-gray-400">
+                                {v.met} / {v.total} tasks met SLA target (30 day)
+                            </p>
+                            {v.breached > 0 && (
+                                <p className="text-xs text-red-500 mt-2 font-medium">{v.breached} tasks breached</p>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+            {items.length === 0 && (
+                <div className="text-center py-12">
+                    <p className="text-gray-500 dark:text-gray-400">No SLA data available.</p>
+                </div>
+            )}
+        </div>
+    );
+}
+
+// ─── Incidents Tab ────────────────────────────────────────────────────────────
+
+function IncidentsTab() {
+    const [logs, setLogs] = useState<any[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+
+    const loadData = useCallback(async () => {
+        setIsLoading(true);
+        try {
+            const res = await monitoringService.getIncidentLog(50);
+            setLogs(res);
+        } catch (e) {
+            console.error(e);
+        } finally {
+            setIsLoading(false);
+        }
+    }, []);
+
+    useEffect(() => { loadData(); }, [loadData]);
+
+    const handleRollback = async (auditId: string) => {
+        if (!confirm('Revert this auto-remediated action via AuditLog?')) return;
+        try {
+            await monitoringService.rollbackAction(auditId);
+            alert('Revert logged successfully.');
+            loadData();
+        } catch (err: any) {
+            alert(err?.response?.data?.detail || 'Revert failed.');
+        }
+    };
+
+    if (isLoading) return <div className="flex justify-center py-12"><Loader2 className="w-8 h-8 animate-spin text-blue-500" /></div>;
+
+    return (
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden animate-in fade-in slide-in-from-bottom-2 duration-500">
+            <div className="border-b border-gray-200 dark:border-gray-800 px-6 py-4 flex items-center justify-between">
+                <h2 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    <Wrench className="w-5 h-5 text-indigo-500" />
+                    Auto-Remediated Incidents
+                </h2>
+                <button onClick={loadData} className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:text-indigo-400">
+                    Refresh
+                </button>
+            </div>
+            <div className="p-6">
+                {logs.length === 0 ? (
+                    <div className="text-center py-12">
+                        <CheckCircle className="w-12 h-12 text-green-400 mx-auto mb-3" />
+                        <p className="text-gray-900 dark:text-white font-medium">No Auto-Remediations</p>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">The zero-touch ops engine has not needed to intervene.</p>
+                    </div>
+                ) : (
+                    <div className="space-y-4">
+                        {logs.map((log: any) => (
+                            <div key={log.id} className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50 dark:bg-gray-800 text-sm">
+                                <div className="flex justify-between items-start mb-2">
+                                    <div className="font-bold text-gray-900 dark:text-white">{log.description}</div>
+                                    <button
+                                        onClick={() => handleRollback(log.id)}
+                                        className="text-xs px-2 py-1 bg-red-100 text-red-700 hover:bg-red-200 rounded dark:bg-red-900/30 dark:text-red-400 dark:hover:bg-red-900/50"
+                                    >
+                                        Revert
+                                    </button>
+                                </div>
+                                <div className="text-xs text-gray-500 mt-2 font-mono break-all bg-white dark:bg-gray-900 p-2 rounded border border-gray-200 dark:border-gray-700">
+                                    {JSON.stringify(log.after_state)}
+                                </div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                                    {new Date(log.created_at).toLocaleString()}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+
+// ─── Chaos Engineering Tab ────────────────────────────────────────────────────
+
+function ChaosTab() {
+    const [isLoading, setIsLoading] = useState(false);
+    const [result, setResult] = useState<any>(null);
+
+    const handleChaos = async (type: string) => {
+        if (!confirm(`Are you sure you want to inject ${type} failure into the live system?`)) return;
+        setIsLoading(true);
+        setResult(null);
+        try {
+            const res = await monitoringService.injectChaosTest(type);
+            setResult({ success: true, data: res });
+        } catch (e: any) {
+            setResult({ success: false, error: e?.response?.data?.detail || e.message });
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    return (
+        <div className="bg-white dark:bg-gray-900 rounded-xl border border-red-200 dark:border-red-900/50 shadow-sm p-6 animate-in fade-in slide-in-from-bottom-2 duration-500">
+            <h2 className="text-xl font-bold text-red-600 dark:text-red-400 mb-2 flex items-center gap-2">
+                <ShieldAlert /> Chaos Engineering Lab
+            </h2>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                Warning: These tests inject real failures into the live system to verify automated response mechanisms. All actions are audit-logged.
+            </p>
+            
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                <div className="border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+                    <h3 className="font-bold text-gray-900 dark:text-white mb-1">Agent Crash</h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 h-10">Suspends a random non-persistent idle task agent.</p>
+                    <button onClick={() => handleChaos('agent_crash')} disabled={isLoading} className="w-full bg-red-600 hover:bg-red-700 text-white rounded text-sm py-1.5 font-bold disabled:opacity-50">
+                        Inject Crash
+                    </button>
+                </div>
+                <div className="border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+                    <h3 className="font-bold text-gray-900 dark:text-white mb-1">API Timeout</h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 h-10">Simulates LLM API timeouts for 60 seconds.</p>
+                    <button onClick={() => handleChaos('api_timeout')} disabled={isLoading} className="w-full bg-red-600 hover:bg-red-700 text-white rounded text-sm py-1.5 font-bold disabled:opacity-50">
+                        Inject Timeout
+                    </button>
+                </div>
+                <div className="border border-gray-200 dark:border-gray-800 rounded-lg p-4">
+                    <h3 className="font-bold text-gray-900 dark:text-white mb-1">DB Connection Loss</h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-4 h-10">Simulates DB failure for diagnostic routines.</p>
+                    <button onClick={() => handleChaos('db_connection_loss')} disabled={isLoading} className="w-full bg-red-600 hover:bg-red-700 text-white rounded text-sm py-1.5 font-bold disabled:opacity-50">
+                        Inject DB Failure
+                    </button>
+                </div>
+            </div>
+
+            {result && (
+                <div className={`p-4 rounded-lg border ${result.success ? 'bg-green-50 border-green-200 text-green-900 dark:bg-green-900/30 dark:border-green-800/50 dark:text-green-100' : 'bg-red-50 border-red-200 text-red-900 dark:bg-red-900/30 dark:border-red-800/50 dark:text-red-100'}`}>
+                    <h4 className="font-bold mb-1">{result.success ? 'Test Injected Successfully' : 'Injection Failed'}</h4>
+                    <pre className="text-xs font-mono overflow-auto opacity-80 whitespace-pre-wrap">
+                        {JSON.stringify(result.data || result.error, null, 2)}
+                    </pre>
+                </div>
+            )}
+        </div>
+    );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export const MonitoringPage: React.FC = () => {
@@ -626,11 +943,11 @@ export const MonitoringPage: React.FC = () => {
 
                 {/* ── Tabs ────────────────────────────────────────────────── */}
                 <div className="flex gap-1 mb-6 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl p-1 w-fit shadow-sm">
-                    {(['dashboard', 'violations', 'recovery'] as Tab[]).map(tab => (
+                    {(['operations', 'dashboard', 'violations', 'recovery', 'sla', 'incidents', 'chaos'] as Tab[]).map(tab => (
                         <button
                             key={tab}
                             onClick={() => setActiveTab(tab)}
-                            className={`px-4 py-2 rounded-lg text-sm font-medium capitalize transition-colors ${
+                            className={`px-3 py-2 rounded-lg text-sm font-medium capitalize transition-colors whitespace-nowrap ${
                                 activeTab === tab
                                     ? 'bg-blue-600 text-white shadow-sm'
                                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'
@@ -863,6 +1180,26 @@ export const MonitoringPage: React.FC = () => {
                 {/* ══ Recovery Tab ═══════════════════════════════════════════ */}
                 {activeTab === 'recovery' && (
                     <RecoveryTab />
+                )}
+
+                {/* ══ Operations Tab ═════════════════════════════════════════ */}
+                {activeTab === 'operations' && (
+                    <OperationsTab />
+                )}
+
+                {/* ══ SLA Tab ════════════════════════════════════════════════ */}
+                {activeTab === 'sla' && (
+                    <SLATab />
+                )}
+
+                {/* ══ Incidents Tab ══════════════════════════════════════════ */}
+                {activeTab === 'incidents' && (
+                    <IncidentsTab />
+                )}
+
+                {/* ══ Chaos Tab ══════════════════════════════════════════════ */}
+                {activeTab === 'chaos' && (
+                    <ChaosTab />
                 )}
 
             </div>

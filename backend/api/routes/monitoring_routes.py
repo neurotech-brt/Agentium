@@ -684,3 +684,142 @@ async def rollback_from_checkpoint(
             status_code=400,
             detail=f"Rollback failed: {str(e)}"
         )
+
+# -----------------------------------------------------------------------------
+# Phase 13.7 — Zero-Touch Operations Dashboard Routes
+# -----------------------------------------------------------------------------
+
+@router.get("/aggregated")
+async def get_aggregated_dashboard_metrics(
+    current_user: dict = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Returns unified metrics for the Zero-Touch Operations Dashboard.
+    Combines health info across agents, tasks, workflows, events, and budget.
+    """
+    try:
+        from backend.services.monitoring_service import MonitoringService
+        return MonitoringService.get_aggregated_metrics(db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch aggregated metrics: {str(e)}")
+
+
+@router.get("/sla")
+async def get_sla_compliance_metrics(
+    current_user: dict = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Returns time-to-resolution compliance rates grouped by task priority.
+    """
+    try:
+        from backend.services.monitoring_service import MonitoringService
+        return MonitoringService.get_sla_metrics(db)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch SLA metrics: {str(e)}")
+
+
+@router.get("/anomalies")
+async def get_active_anomalies(
+    current_user: dict = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Returns currently open anomaly violation reports.
+    """
+    try:
+        from backend.models.entities.agents import ViolationReport
+        from datetime import datetime, timedelta
+        
+        day_ago = datetime.utcnow() - timedelta(hours=24)
+        anomalies = db.query(ViolationReport).filter(
+            ViolationReport.status == "open",
+            ViolationReport.violation_type == "anomaly_detected",
+            ViolationReport.created_at >= day_ago
+        ).order_by(ViolationReport.created_at.desc()).all()
+        
+        return [a.to_dict() for a in anomalies]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch anomalies: {str(e)}")
+
+
+@router.get("/incidents")
+async def get_incident_log(
+    limit: int = 50,
+    current_user: dict = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Returns the log of auto-remediated incidents via the zero-touch ops engine.
+    """
+    try:
+        from backend.services.monitoring_service import MonitoringService
+        return MonitoringService.get_incident_log(db, limit)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch incident log: {str(e)}")
+
+
+@router.post("/chaos-test")
+async def inject_chaos_test(
+    payload: dict,
+    current_user: dict = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Injects a controlled failure into the system for chaos engineering testing.
+    Requires admin privileges.
+    """
+    if not current_user.get("is_admin", False):
+        raise HTTPException(status_code=403, detail="Admin privileges required for chaos testing")
+        
+    test_type = payload.get("test_type")
+    if not test_type:
+        raise HTTPException(status_code=400, detail="Missing test_type in payload")
+        
+    try:
+        from backend.services.monitoring_service import MonitoringService
+        result = MonitoringService.inject_chaos_test(test_type, db)
+        if not result.get("success"):
+            raise HTTPException(status_code=400, detail=result.get("details", {}).get("error", "Chaos test failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to inject chaos test: {str(e)}")
+
+
+@router.post("/admin/rollback-audit/{audit_id}")
+async def rollback_from_audit(
+    audit_id: str,
+    current_user: dict = Depends(get_current_active_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Admin-only endpoint to revert an auto-remediated action by its AuditLog ID.
+    (This is a placeholder implementation; actual reversal logic depends on the specific action).
+    """
+    if not current_user.get("is_admin", False):
+        raise HTTPException(status_code=403, detail="Admin privileges required for rollback")
+        
+    try:
+        from backend.models.entities.audit import AuditLog
+        audit = db.query(AuditLog).filter_by(id=audit_id).first()
+        if not audit:
+            raise HTTPException(status_code=404, detail="Audit log entry not found")
+            
+        # In a real system, we would parse audit.after_state and apply inverse operations
+        # For now, we just mark it as rolled back in the log.
+        audit.description = f"[ROLLED BACK] {audit.description}"
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": f"Successfully marked audit {audit_id} as rolled back",
+            "audit_id": audit_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Audit rollback failed: {str(e)}")

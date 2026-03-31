@@ -278,5 +278,39 @@ export const monitoringService = {
   rollbackFromCheckpoint: async (checkpointId: string): Promise<{ success: boolean; message: string; checkpoint_id: string }> => {
     const response = await api.post(`/api/v1/monitoring/admin/rollback/${checkpointId}`);
     return response.data;
+  },
+
+  // ─── Phase 13.7: Zero-Touch Operations Dashboard ───────────────────────────
+
+  getAggregatedMetrics: async (): Promise<any> => {
+    const response = await api.get('/api/v1/monitoring/aggregated');
+    return response.data;
+  },
+
+  getSLAMetrics: async (): Promise<any> => {
+    const response = await api.get('/api/v1/monitoring/sla');
+    return response.data;
+  },
+
+  getAnomalies: async (): Promise<any[]> => {
+    const response = await api.get('/api/v1/monitoring/anomalies');
+    return response.data;
+  },
+
+  getIncidentLog: async (limit = 50): Promise<any[]> => {
+    const response = await api.get('/api/v1/monitoring/incidents', {
+      params: { limit }
+    });
+    return response.data;
+  },
+
+  injectChaosTest: async (testType: string): Promise<any> => {
+    const response = await api.post('/api/v1/monitoring/chaos-test', { test_type: testType });
+    return response.data;
+  },
+
+  rollbackAction: async (auditId: string): Promise<{ success: boolean; message: string; audit_id: string }> => {
+    const response = await api.post(`/api/v1/monitoring/admin/rollback-audit/${auditId}`);
+    return response.data;
   }
 };

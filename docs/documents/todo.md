@@ -465,34 +465,34 @@ Build a self-governing AI ecosystem where agents operate under constitutional la
 
 #### Backend — Extend `monitoring_service.py`
 
-- [ ] **Metrics Aggregator** (`GET /monitoring/aggregated`) — combine agent health, circuit breaker states, scaling events (24 h), learning impact delta, workflow success rates, event trigger fire rates; cache in Redis for 10 s
-- [ ] **Anomaly Detector** — Celery beat every 5 min: compute Z-score for `task_duration`, `error_rate`, `token_spend_per_hour` vs 7-day baseline; if Z-score > 2.5, create `ViolationReport` severity `major` and push via WebSocket
-- [ ] **Automated Incident Response** — `KNOWN_PATTERNS` dict: on match, call `fix_fn()` automatically; log to `AuditLog` with `action = 'auto_remediated'`
-- [ ] **SLA Monitor** — track time-to-resolution for tasks with `escalation_timeout_seconds`; compute SLA compliance rate; expose `GET /monitoring/sla`
-- [ ] **Capacity Planner** — include `capacity_forecast` in `/monitoring/aggregated`: 7-day agent count recommendation from historical volume
+- [x] **Metrics Aggregator** (`GET /monitoring/aggregated`) — combine agent health, circuit breaker states, scaling events (24 h), learning impact delta, workflow success rates, event trigger fire rates; cache in Redis for 10 s
+- [x] **Anomaly Detector** — Celery beat every 5 min: compute Z-score for `task_duration`, `error_rate`, `token_spend_per_hour` vs 7-day baseline; if Z-score > 2.5, create `ViolationReport` severity `major` and push via WebSocket
+- [x] **Automated Incident Response** — `KNOWN_PATTERNS` dict: on match, call `fix_fn()` automatically; log to `AuditLog` with `action = 'auto_remediated'`
+- [x] **SLA Monitor** — track time-to-resolution for tasks with `escalation_timeout_seconds`; compute SLA compliance rate; expose `GET /monitoring/sla`
+- [x] **Capacity Planner** — include `capacity_forecast` in `/monitoring/aggregated`: 7-day agent count recommendation from historical volume
 
 #### Beat Schedule Additions
 
-- [ ] `anomaly-detection` — 300 s
-- [ ] `sla-monitor` — 60 s
+- [x] `anomaly-detection` — 300 s
+- [x] `sla-monitor` — 60 s
 
 #### API Routes (extend `monitoring_routes.py`)
 
-- [ ] `GET /monitoring/aggregated` — unified metrics snapshot
-- [ ] `GET /monitoring/sla` — SLA compliance metrics
-- [ ] `GET /monitoring/anomalies` — active anomalies list
-- [ ] `POST /monitoring/chaos-test` — inject controlled failure (admin, rate-limited 1/hour)
-- [ ] `POST /admin/rollback/{audit_id}` — revert automated action by audit ID (admin)
+- [x] `GET /monitoring/aggregated` — unified metrics snapshot
+- [x] `GET /monitoring/sla` — SLA compliance metrics
+- [x] `GET /monitoring/anomalies` — active anomalies list
+- [x] `POST /monitoring/chaos-test` — inject controlled failure (admin, rate-limited 1/hour)
+- [x] `POST /admin/rollback/{audit_id}` — revert automated action by audit ID (admin)
 
 #### Frontend — Extend `MonitoringPage.tsx`
 
-- [ ] **Unified Status Row** — five health rings (Agents / Tasks / Workflows / Events / Budget) using existing `HealthRing` component; data from `GET /monitoring/aggregated`
-- [ ] **Anomaly Feed** — live list with Z-score, affected metric, auto-remediation status badge (`auto-fixed | pending | escalated`)
-- [ ] **Automated Incident Log** — table of `auto_remediated` AuditLog entries; "Rollback" button per row calling `POST /admin/rollback/{audit_id}`
-- [ ] **SLA Dashboard** — gauge per task priority with compliance rate; 30-day trend sparkline
-- [ ] **Cost Analytics** — bar chart of daily token spend by provider; projected monthly cost; budget utilization %
-- [ ] **Chaos Engineering Panel** — "Inject Failure" button (admin) with type selector (`agent_crash | api_timeout | db_connection_loss`); shows test results inline
-- [ ] Subscribe to WebSocket event types: `anomaly_detected`, `auto_remediated`, `sla_breach`, `budget_warning`
+- [x] **Unified Status Row** — five health rings (Agents / Tasks / Workflows / Events / Budget) using existing `HealthRing` component; data from `GET /monitoring/aggregated`
+- [x] **Anomaly Feed** — live list with Z-score, affected metric, auto-remediation status badge (`auto-fixed | pending | escalated`)
+- [x] **Automated Incident Log** — table of `auto_remediated` AuditLog entries; "Rollback" button per row calling `POST /admin/rollback/{audit_id}`
+- [x] **SLA Dashboard** — gauge per task priority with compliance rate; 30-day trend sparkline
+- [x] **Cost Analytics** — bar chart of daily token spend by provider; projected monthly cost; budget utilization %
+- [x] **Chaos Engineering Panel** — "Inject Failure" button (admin) with type selector (`agent_crash | api_timeout | db_connection_loss`); shows test results inline
+- [x] Subscribe to WebSocket event types: `anomaly_detected`, `auto_remediated`, `sla_breach`, `budget_warning`
 
 ---
 

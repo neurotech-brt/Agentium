@@ -161,6 +161,16 @@ celery_app.conf.beat_schedule = {
         'task': 'backend.services.tasks.task_executor.external_api_poll',
         'schedule': 60.0,   # every 60 seconds
     },
+
+    # ── Phase 13.7: Zero-Touch Operations Dashboard ───────────────────
+    'anomaly-detection': {
+        'task': 'backend.services.tasks.task_executor.anomaly_detection',
+        'schedule': 300.0,   # every 5 minutes
+    },
+    'sla-monitor': {
+        'task': 'backend.services.tasks.task_executor.sla_monitor',
+        'schedule': 60.0,    # every 60 seconds
+    },
 }
 
 

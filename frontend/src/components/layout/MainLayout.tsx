@@ -18,7 +18,7 @@ import {
     Inbox,
     FlaskConical,
 } from 'lucide-react';
-import { useState, useRef, useCallback, useEffect, Suspense } from 'react';
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, Suspense } from 'react';
 import { VoiceIndicator } from '@/components/VoiceIndicator';
 
 // ─── Timing constants ─────────────────────────────────────────────────────────
@@ -246,7 +246,7 @@ function KeepAliveOutlet() {
         cache.current.set(location.pathname, currentOutlet);
     }
 
-    useEffect(() => {
+    useLayoutEffect(() => {
         const path    = location.pathname;
         const isFirst = !visited.current.has(path);
 
@@ -309,7 +309,9 @@ function KeepAliveOutlet() {
                                 : 'none',
                         }}
                     >
-                        {outlet}
+                        <Suspense fallback={<PageSkeleton />}>
+                            {outlet}
+                        </Suspense>
                     </div>
                 );
             })}
@@ -511,9 +513,7 @@ export function MainLayout() {
             {/* ── Main content ──────────────────────────────────────────── */}
             {/* position:relative anchors all absolutely-positioned children */}
             <main className="flex-1 min-h-0 overflow-hidden relative">
-                <Suspense fallback={<PageSkeleton />}>
-                    <KeepAliveOutlet />
-                </Suspense>
+                <KeepAliveOutlet />
             </main>
         </div>
     );

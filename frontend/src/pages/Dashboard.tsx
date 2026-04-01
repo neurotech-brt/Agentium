@@ -5,6 +5,7 @@ import APIKeyHealth          from '@/components/monitoring/APIKeyHealth';
 import BudgetControl         from '@/components/BudgetControl';
 import { ChannelHealthWidget } from '@/components/dashboard/ChannelHealthWidget';
 import { ProviderAnalytics }   from '@/components/dashboard/ProviderAnalytics';
+import { ErrorBoundary }       from '@/components/common/ErrorBoundary';
 
 // ── New extracted sub-components ──────────────────────────────────────────────
 import { DashboardHeader } from '@/components/dashboard/DashboardHeader';
@@ -46,52 +47,70 @@ export function Dashboard() {
             <DashboardHeader />
 
             {/* ── KPI stat cards ──────────────────────────────────────────── */}
-            <StatsGrid stats={stats} isLoading={statsLoading} />
+            <ErrorBoundary variant="widget" fallbackHeading="Stats Error">
+                <StatsGrid stats={stats} isLoading={statsLoading} />
+            </ErrorBoundary>
 
             {/* ── Provider analytics ──────────────────────────────────────── */}
             {/* Preserved in original position.                               */}
             <div className="mb-8">
-                <ProviderAnalytics />
+                <ErrorBoundary variant="widget" fallbackHeading="Analytics Error">
+                    <ProviderAnalytics />
+                </ErrorBoundary>
             </div>
 
             {/* ── Budget control panel ────────────────────────────────────── */}
             <div className="mb-8">
-                <BudgetControl />
+                <ErrorBoundary variant="widget" fallbackHeading="Budget Control Error">
+                    <BudgetControl />
+                </ErrorBoundary>
             </div>
 
             {/* ── API key health ──────────────────────────────────────────── */}
             <div className="mb-8">
-                <APIKeyHealth />
+                <ErrorBoundary variant="widget" fallbackHeading="API Key Health Error">
+                    <APIKeyHealth />
+                </ErrorBoundary>
             </div>
 
             {/* ── Channel health ──────────────────────────────────────────── */}
             <div className="mb-8">
-                <ChannelHealthWidget />
+                <ErrorBoundary variant="widget" fallbackHeading="Channel Health Error">
+                    <ChannelHealthWidget />
+                </ErrorBoundary>
             </div>
 
             {/* ── Live activity row: Recent Tasks + Active Agents ─────────── */}
             {/* New section — gives the operator an at-a-glance status view   */}
             {/* without navigating away from the dashboard.                   */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-                <RecentTasks
-                    tasks={recentTasks}
-                    isLoading={isTasksLoading}
-                    isError={isTasksError}
-                    onRetry={refetchTasks}
-                />
-                <AgentsList
-                    agents={activeAgentsList}
-                    isLoading={isAgentsLoading}
-                    isError={isAgentsError}
-                    onRetry={refetchAgents}
-                />
+                <ErrorBoundary variant="widget" fallbackHeading="Recent Tasks Error">
+                    <RecentTasks
+                        tasks={recentTasks}
+                        isLoading={isTasksLoading}
+                        isError={isTasksError}
+                        onRetry={refetchTasks}
+                    />
+                </ErrorBoundary>
+                <ErrorBoundary variant="widget" fallbackHeading="Active Agents Error">
+                    <AgentsList
+                        agents={activeAgentsList}
+                        isLoading={isAgentsLoading}
+                        isError={isAgentsError}
+                        onRetry={refetchAgents}
+                    />
+                </ErrorBoundary>
             </div>
 
             {/* ── Bottom panels: System Status + Quick Actions ─────────────  */}
             {/* Preserved in original position with identical visual output.  */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                <SystemHealth />
-                <QuickActions />
+                <ErrorBoundary variant="widget" fallbackHeading="System Health Error">
+                    <SystemHealth />
+                </ErrorBoundary>
+                <ErrorBoundary variant="widget" fallbackHeading="Quick Actions Error">
+                    <QuickActions />
+                </ErrorBoundary>
             </div>
 
         </div>

@@ -5,6 +5,7 @@ import { Toaster } from 'react-hot-toast';
 import { useAuthStore } from '@/store/authStore';
 import { useBackendStore } from '@/store/backendStore';
 import { GlobalWebSocketProvider } from '@/components/GlobalWebSocketProvider';
+import { ErrorBoundary } from '@/components/common/ErrorBoundary';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { FlatMapAuthBackground } from '@/components/FlatMapAuthBackground';
 import { LoginPage } from '@/pages/LoginPage';
@@ -115,6 +116,7 @@ function AppWithRedirect() {
             />
 
             <GlobalWebSocketProvider>
+                <ErrorBoundary variant="page" fallbackHeading="Application Error">
                 <Routes>
                     {/* Auth Routes */}
                     <Route element={<AuthLayout />}>
@@ -161,6 +163,7 @@ function AppWithRedirect() {
 
                     <Route path="*" element={<Navigate to="/" replace />} />
                 </Routes>
+                </ErrorBoundary>
             </GlobalWebSocketProvider>
         </>
     );

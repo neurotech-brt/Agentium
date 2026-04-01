@@ -575,10 +575,10 @@ Build a self-governing AI ecosystem where agents operate under constitutional la
 
 ### 14.3 Global Frontend Error Boundaries
 
-- [ ] Create `ErrorBoundary.tsx` — React class component implementing `componentDidCatch`; renders a styled fallback UI with "Retry" button and collapsible error details
-- [ ] Wrap every route-level page component in `ErrorBoundary` (update `App.tsx` router)
-- [ ] Add per-widget `ErrorBoundary` around all dashboard cards so one widget failure does not crash the page
-- [ ] Send caught errors to backend `POST /frontend/errors` endpoint (new route); log to `AuditLog` with category `SYSTEM`; display count in `MonitoringPage.tsx` error feed
+- [x] Create `ErrorBoundary.tsx` — React class component implementing `componentDidCatch`; renders a styled fallback UI with "Retry" button and collapsible error details
+- [x] Wrap every route-level page component in `ErrorBoundary` (update `App.tsx` router)
+- [x] Add per-widget `ErrorBoundary` around all dashboard cards so one widget failure does not crash the page
+- [x] Send caught errors to backend `POST /frontend/errors` endpoint (new route); log to `AuditLog` with category `SYSTEM`; display count in `MonitoringPage.tsx` error feed
 
 ---
 

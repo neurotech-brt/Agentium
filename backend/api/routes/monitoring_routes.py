@@ -823,3 +823,47 @@ async def rollback_from_audit(
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=f"Audit rollback failed: {str(e)}")
+
+
+from pydantic import BaseModel
+
+class FrontendErrorRequest(BaseModel):
+    message: str
+    name: str = "Error"
+    stack: str = ""
+    component_stack: str = ""
+    url: str = ""
+
+@router.post("/frontend/errors")
+async def report_frontend_error(
+    error_data: FrontendErrorRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Catch global and widget frontend errors and write them to AuditLog.
+    """
+    from backend.models.entities.audit import AuditLog, AuditCategory, AuditLevel
+    
+    # Store error info inside metadata
+    metadata = {
+        "stack": error_data.stack,
+        "component_stack": error_data.component_stack,
+        "url": error_data.url,
+        "name": error_data.name
+    }
+    
+    # Create an audit log record securely without requiring explicit auth
+    # as some frontend errors might occur before or during login processes.
+    log_entry = AuditLog.log(
+        level=AuditLevel.WARNING,
+        category=AuditCategory.SYSTEM,
+        actor_type="system",
+        actor_id="frontend",
+        action="frontend_error",
+        description=f"Frontend Error ({error_data.name}): {error_data.message}",
+        meta_data=metadata,
+        success=False
+    )
+    db.add(log_entry)
+    db.commit()
+    return {"status": "recorded"}

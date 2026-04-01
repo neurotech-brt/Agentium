@@ -942,6 +942,12 @@ class MonitoringService:
             AuditLog.created_at >= day_ago,
         ).count()
 
+        # ── Frontend Errors (24h) ─────────────────────────────────────────
+        frontend_errors_24h = db.query(AuditLog).filter(
+            AuditLog.action == "frontend_error",
+            AuditLog.created_at >= day_ago,
+        ).count()
+
         # ── Active Anomalies ─────────────────────────────────────────────
         active_anomalies = db.query(ViolationReport).filter(
             ViolationReport.status == "open",
@@ -977,6 +983,7 @@ class MonitoringService:
             },
             "capacity_forecast": predictions,
             "scaling_events_24h": scaling_events_24h,
+            "frontend_errors_24h": frontend_errors_24h,
             "active_anomalies": active_anomalies,
             "timestamp": now.isoformat(),
         }

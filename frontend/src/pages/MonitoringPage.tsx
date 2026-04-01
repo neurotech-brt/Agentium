@@ -512,6 +512,10 @@ function OperationsTab() {
                                     {(data?.capacity_forecast?.next_24h !== undefined ? Math.round(data.capacity_forecast.next_24h) : 'N/A')}
                                 </p>
                             </div>
+                            <div className="p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+                                <p className="text-xs text-gray-500 dark:text-gray-400">Frontend Errors (24h)</p>
+                                <p className="text-xl font-bold text-red-600 dark:text-red-400">{data?.frontend_errors_24h ?? 0}</p>
+                            </div>
                         </div>
                     </div>
                 </div>

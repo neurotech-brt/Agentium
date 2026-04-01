@@ -120,6 +120,7 @@ interface WebSocketState {
      * early — it reset the backoff counter on every reconnect cycle.
      */
     _connectionStable: boolean;
+    _lastMessageTimestamp: string | null;
 
     // Public actions
     connect: () => void;
@@ -144,12 +145,13 @@ interface WebSocketState {
     _handlePong: (timestamp: string) => void;
     _trackProcessedId: (id: string) => void;
     _scheduleReconnect: () => void;
+    _fetchReplay: () => Promise<void>;
 }
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
 const WS_CONFIG = {
-    MAX_RECONNECT_ATTEMPTS:   5,
+    MAX_RECONNECT_ATTEMPTS:   10,
     BASE_RECONNECT_DELAY_MS:  1_000,
     MAX_RECONNECT_DELAY_MS:   30_000,
     PING_INTERVAL_MS:         30_000,
@@ -194,6 +196,7 @@ export const useWebSocketStore = create<WebSocketState>()((set, get) => ({
     _activeToastId:      null,
     _lastConnectTime:    0,       // BUG 3 FIX
     _connectionStable:   false,   // BUG 2 FIX
+    _lastMessageTimestamp: null,
 
     // ── Internal setters ───────────────────────────────────────────────────
     _setConnected:   (connected)  => set({ isConnected: connected }),
@@ -310,6 +313,37 @@ export const useWebSocketStore = create<WebSocketState>()((set, get) => ({
             set({ _connectionStable: true, _reconnectAttempts: 0 });
             get()._updateStats({ reconnectAttempts: 0 });
             console.log('[WebSocket] Connection stable — backoff counter reset');
+            get()._fetchReplay();
+        }
+    },
+
+    _fetchReplay: async () => {
+        const since = get()._lastMessageTimestamp;
+        if (!since) return;
+        try {
+            const token = localStorage.getItem('access_token');
+            const headers: Record<string, string> = {};
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+            
+            const res = await fetch(`/api/v1/ws/replay?since=${encodeURIComponent(since)}`, { headers });
+            if (!res.ok) return;
+            const data = await res.json();
+            if (data.events && Array.isArray(data.events)) {
+                if (data.events.length > 0) {
+                    console.log(`[WebSocket] Replaying ${data.events.length} missed events`);
+                }
+                const wsLikeOnMessage = get()._ws?.onmessage;
+                if (!wsLikeOnMessage) return;
+                
+                data.events.forEach((ev: any) => {
+                    const syntheticEvent = new MessageEvent('message', {
+                        data: JSON.stringify(ev)
+                    });
+                    wsLikeOnMessage(syntheticEvent as any);
+                });
+            }
+        } catch (err) {
+            console.error('[WebSocket] Replay fetch failed:', err);
         }
     },
 
@@ -405,6 +439,10 @@ export const useWebSocketStore = create<WebSocketState>()((set, get) => ({
                         console.warn('[WebSocket] Received auth_required — resending auth');
                         ws.send(JSON.stringify({ type: 'auth', token }));
                         return;
+                    }
+
+                    if (data.timestamp) {
+                        set({ _lastMessageTimestamp: data.timestamp });
                     }
 
                     get()._setLastMessage(data);

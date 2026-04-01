@@ -568,10 +568,10 @@ Build a self-governing AI ecosystem where agents operate under constitutional la
 
 ### 14.2 WebSocket Reconnection Logic
 
-- [ ] **Frontend** (`frontend/src/store/websocketStore.ts`) — implement exponential backoff reconnection: attempt after 1 s, 2 s, 4 s, 8 s, max 30 s; cap total attempts at 10 before showing manual reconnect prompt
-- [ ] Show non-intrusive reconnection banner ("Reconnecting…") during disconnection; dismiss automatically on successful reconnect
-- [ ] On reconnect, re-subscribe to all active WebSocket topics and replay any missed events from a server-side event buffer (Redis list, last 100 events per client, 60 s TTL)
-- [ ] **Backend** — add `GET /ws/replay?since=<timestamp>` endpoint to serve buffered events; integrate with existing `manager.broadcast`
+- [x] **Frontend** (`frontend/src/store/websocketStore.ts`) — implement exponential backoff reconnection: attempt after 1 s, 2 s, 4 s, 8 s, max 30 s; cap total attempts at 10 before showing manual reconnect prompt
+- [x] Show non-intrusive reconnection banner ("Reconnecting…") during disconnection; dismiss automatically on successful reconnect
+- [x] On reconnect, re-subscribe to all active WebSocket topics and replay any missed events from a server-side event buffer (Redis list, last 100 events per client, 60 s TTL)
+- [x] **Backend** — add `GET /ws/replay?since=<timestamp>` endpoint to serve buffered events; integrate with existing `manager.broadcast`
 
 ### 14.3 Global Frontend Error Boundaries
 
@@ -704,7 +704,7 @@ Build a self-governing AI ecosystem where agents operate under constitutional la
 1. **13.2** Agent crash detection and reincarnation service (`reincarnation_service.py`)
 2. **13.1** Task complexity analyzer and sub-task breakdown (`auto_delegation_service.py`)
 3. **13.3** Fix `auto_scale_check` stub — wire real `AgentLifecycleService.spawn_agent()` call
-4. **14.2** WebSocket reconnection with exponential backoff and server-side event buffer
+~~4. **14.2** WebSocket reconnection with exponential backoff and server-side event buffer~~
 5. **14.3** Global frontend error boundaries wrapping all route-level pages
 6. **15.3** Channel health monitoring, message logs, and per-channel settings UI
 

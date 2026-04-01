@@ -36,6 +36,8 @@ from backend.models.entities import Agent, HeadOfCouncil
 from backend.services.chat_service import ChatService
 from backend.core.config import settings
 from backend.models.entities.user import User
+from backend.api.dependencies.auth import get_current_user
+import redis.asyncio as redis
 
 router = APIRouter()
 
@@ -120,6 +122,12 @@ class ConnectionManager:
         self.active_connections: Dict[WebSocket, Dict[str, Any]] = {}
         # username → websocket  (for direct targeting)
         self.user_connections: Dict[str, WebSocket] = {}
+        self.redis_client: Optional[redis.Redis] = None
+
+    async def _get_redis(self) -> redis.Redis:
+        if not self.redis_client:
+            self.redis_client = await redis.from_url(settings.REDIS_URL, decode_responses=True)
+        return self.redis_client
 
     # ── connection lifecycle ─────────────────────────────────────────────────
 
@@ -191,6 +199,17 @@ class ConnectionManager:
 
     async def broadcast(self, message: dict, exclude: Optional[WebSocket] = None) -> None:
         """Broadcast JSON message to all authenticated connections."""
+        try:
+            r = await self._get_redis()
+            msg_str = json.dumps(message)
+            pipeline = r.pipeline()
+            pipeline.lpush("agentium:ws:buffer", msg_str)
+            pipeline.ltrim("agentium:ws:buffer", 0, 99)
+            pipeline.expire("agentium:ws:buffer", 60)
+            await pipeline.execute()
+        except Exception as exc:
+            print(f"[WebSocket] Event buffer push error: {exc}")
+
         disconnected = []
         for connection, user_info in list(self.active_connections.items()):
             if connection is exclude:
@@ -586,3 +605,27 @@ async def websocket_chat_endpoint(
             await websocket.close(code=1011, reason="Internal server error")
         except Exception:
             pass
+
+
+@router.get("/replay")
+async def replay_events(since: str, current_user = Depends(get_current_user)):
+    """Fetch buffered broadcast events for reconnection replay."""
+    try:
+        r = await manager._get_redis()
+        events_str = await r.lrange("agentium:ws:buffer", 0, 99)
+        events = []
+        for e_str in events_str:
+            try:
+                e_obj = json.loads(e_str)
+                # Replay must have timestamp newer than since
+                if e_obj.get("timestamp", "") > since:
+                    events.append(e_obj)
+            except Exception:
+                pass
+        
+        # Return in chronological order
+        events.sort(key=lambda x: x.get("timestamp", ""))
+        return {"events": events}
+    except Exception as exc:
+        print(f"[WebSocket] Replay fetch error: {exc}")
+        return {"events": []}

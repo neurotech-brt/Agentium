@@ -67,24 +67,24 @@ from backend.api.routes import audit_routes as audit_routes_router
 from backend.services.api_key_manager import init_api_key_manager, api_key_manager
 from backend.api.routes import api_keys as api_keys_routes
 from backend.api.routes.mcp_tools import router as mcp_tools_router
-from backend.api.routes import tools as tools_routes  # Phase 6.7: updated tools route
+from backend.api.routes import tools as tools_routes  
 from backend.api.routes import user_preferences as user_preferences_routes
 
 from backend.api.routes import capability_routes
 from backend.api.routes import lifecycle_routes
-from backend.api.routes import critics as critics_routes          # Phase 6.2: Critic Agents
-from backend.api.routes import checkpoints as checkpoints_routes  # Phase 6.5: Time-Travel Recovery
-from backend.api.routes import remote_executor as remote_executor_routes  # Phase 6.6: Remote Execution
-from backend.api.routes import voting as voting_routes            # Phase 7: Voting & Deliberations
+from backend.api.routes import critics as critics_routes          
+from backend.api.routes import checkpoints as checkpoints_routes 
+from backend.api.routes import remote_executor as remote_executor_routes  
+from backend.api.routes import voting as voting_routes           
 from backend.api.routes.ab_testing import router as ab_testing_router
 from backend.api.routes import provider_analytics as provider_analytics_routes
 from backend.api.routes import skills as skills_routes
-from backend.api.routes import browser as browser_routes  # Phase 10.1: Browser Control
-from backend.api.routes import audio as audio_routes      # Phase 10.3: Voice Interface
-from backend.api.routes import dashboard as dashboard_routes  # Dashboard aggregate summary
-from backend.api.routes import outbound_webhooks as outbound_webhooks_routes  # Phase 12: Outbound Webhooks
-from backend.api.routes import workflows as workflows_routes                   # Workflow Engine (006_workflow)
-from backend.api.routes import scaling as scaling_routes                       # Phase 13.3: Scaling Engine
+from backend.api.routes import browser as browser_routes  
+from backend.api.routes import audio as audio_routes     
+from backend.api.routes import dashboard as dashboard_routes  
+from backend.api.routes import outbound_webhooks as outbound_webhooks_routes  
+from backend.api.routes import workflows as workflows_routes                   
+from backend.api.routes import scaling as scaling_routes                       
 
 from backend.core.security_middleware import (
     RateLimitMiddleware,
@@ -92,7 +92,6 @@ from backend.core.security_middleware import (
     InputSanitizationMiddleware,
 )
 
-# Phase 11.1: Observer Role Enforcement
 from backend.core.observer_middleware import ObserverReadOnlyMiddleware
 
 # Configure logging
@@ -116,7 +115,7 @@ def create_default_admin(db: Session):
         admin = User(
             username="admin",
             email="admin@agentium.local",
-            hashed_password=User.hash_password("admin"),  # Change in production!
+            hashed_password=User.hash_password("admin"),  # Change here or can be changed from frontend
             is_active=True,
             is_pending=False,
             is_admin=True
@@ -356,7 +355,7 @@ async def lifespan(app: FastAPI):
         logger.error("   System will continue without full background loops")
 
     # ─────────────────────────────────────────────────────────────
-    # 7. Initialize Capability Registry (Phase 3)
+    # 7. Initialize Capability Registry 
     # ─────────────────────────────────────────────────────────────
     try:
         logger.info("✅ Capability Registry loaded")
@@ -366,7 +365,7 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ Capability Registry initialization failed: {e}")
 
     # ─────────────────────────────────────────────────────────────
-    # 8. Initialize MCP Tool Bridge (Phase 6.7)
+    # 8. Initialize MCP Tool Bridge 
     #    Syncs all approved MCP tools from the database into the
     #    in-memory ToolRegistry so agents can discover and invoke
     #    them through the standard /tools/ endpoints.
@@ -386,7 +385,7 @@ async def lifespan(app: FastAPI):
         logger.error("   System will continue — MCP tools can be synced manually via approve endpoint")
 
     # ─────────────────────────────────────────────────────────────
-    # 9. Bootstrap Vector Knowledge Base (Phase 1)
+    # 9. Bootstrap Vector Knowledge Base 
     # ─────────────────────────────────────────────────────────────
     try:
         db = next(get_db())
@@ -467,9 +466,9 @@ app.add_middleware(InputSanitizationMiddleware)
 app.add_middleware(ObserverReadOnlyMiddleware)
 
 
-from backend.api.routes import scaling as scaling_routes                       # Phase 13.3: Scaling Engine
-from backend.api.routes import improvements as improvements_routes             # Phase 13.4: Continuous Self-Improvement
-from backend.api.routes import events as events_routes                         # Phase 13.6: Intelligent Event Processing
+from backend.api.routes import scaling as scaling_routes                      
+from backend.api.routes import improvements as improvements_routes            
+from backend.api.routes import events as events_routes                         
 
 # ═══════════════════════════════════════════════════════════
 # REGISTER ROUTERS
@@ -510,12 +509,12 @@ app.include_router(rbac_routes.router, prefix="/api/v1")
 app.include_router(federation_routes.router, prefix="/api/v1")
 app.include_router(plugins_routes.router, prefix="/api/v1")
 app.include_router(mobile_routes.router, prefix="/api/v1")
-app.include_router(dashboard_routes.router, prefix="/api/v1")  # Dashboard aggregate summary
-app.include_router(outbound_webhooks_routes.router, prefix="/api/v1")  # Phase 12: Outbound Webhooks
-app.include_router(workflows_routes.router,          prefix="/api/v1")  # Workflow Engine (006_workflow)
-app.include_router(scaling_routes.router,            prefix="/api/v1")  # Phase 13.3: Scaling Engine
-app.include_router(improvements_routes.router,       prefix="/api/v1")  # Phase 13.4: Continuous Self-Improvement
-app.include_router(events_routes.router,             prefix="/api/v1")  # Phase 13.6: Intelligent Event Processing
+app.include_router(dashboard_routes.router, prefix="/api/v1")  
+app.include_router(outbound_webhooks_routes.router, prefix="/api/v1") 
+app.include_router(workflows_routes.router,          prefix="/api/v1")  
+app.include_router(scaling_routes.router,            prefix="/api/v1")  
+app.include_router(improvements_routes.router,       prefix="/api/v1") 
+app.include_router(events_routes.router,             prefix="/api/v1")  
 
 
 

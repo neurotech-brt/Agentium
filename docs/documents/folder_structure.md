@@ -28,6 +28,7 @@ Agentium/
 │   │   │   ├── ab_testing.py        # A/B testing
 │   │   │   ├── admin.py             # Admin endpoints
 │   │   │   ├── api_keys.py          # API key management
+│   │   │   ├── audit_routes.py      # Audit endpoints
 │   │   │   ├── audio.py             # Audio processing
 │   │   │   ├── auth.py              # Authentication
 │   │   │   ├── browser.py           # Browser automation
@@ -66,6 +67,7 @@ Agentium/
 │   │   │   └── browser.py          # Browser automation
 │   │   ├── schemas/                 # Pydantic schemas
 │   │   │   ├── checkpoint.py
+│   │   │   ├── messages.py
 │   │   │   ├── mcp_schemas.py
 │   │   │   ├── remote_executor.py
 │   │   │   ├── task.py
@@ -236,18 +238,6 @@ Agentium/
 │   │   ├── text_editor_tool.py     # Text editing
 │   │   ├── user_preference_tool.py # User preferences
 │   │   └── web_search_tool.py      # Web search
-│   ├── tests/                       # Backend tests
-│   │   ├── services/
-│   │   │   └── test_capability_registry.py
-│   │   ├── unit/
-│   │   │   └── services/
-│   │   ├── test_federation_e2e.py   # Federation E2E tests
-│   │   ├── test_outbound_webhooks.py # Outbound webhooks tests
-│   │   ├── test_plugin_marketplace.py # Plugin marketplace tests
-│   │   ├── test_push_notifications.py # Push notifications tests
-│   │   ├── test_rbac_delegation.py  # RBAC delegation tests
-│   │   ├── test_remote_executor.py  # Remote executor tests
-│   │   └── test_voting.py           # Voting tests
 │   ├── alembic.ini                  # Alembic config
 │   ├── celery_app.py                # Celery async tasks
 │   ├── chroma_data/                 # ChromaDB data (auto-generated)

@@ -196,4 +196,26 @@ export const voiceApi = {
     const response = await api.get(`${API_BASE}/languages`);
     return response.data;
   },
+
+  // ── Speaker Profiles ───────────────────────────────────────────────────────
+
+  registerSpeaker: async (audioBlob: Blob, name: string): Promise<any> => {
+    const formData = new FormData();
+    formData.append('audio', audioBlob, 'speaker.webm');
+    formData.append('name', name);
+
+    const response = await api.post('/api/v1/audio/speakers/register', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
+
+  getSpeakers: async (): Promise<{ speakers: any[] }> => {
+    const response = await api.get('/api/v1/audio/speakers');
+    return response.data;
+  },
+
+  deleteSpeaker: async (id: string): Promise<void> => {
+    await api.delete(`/api/v1/audio/speakers/${id}`);
+  },
 };

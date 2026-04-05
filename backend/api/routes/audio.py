@@ -18,7 +18,8 @@ from backend.api.routes.auth import get_current_active_user
 from backend.core.auth import get_current_user
 from backend.models.database import get_db
 from backend.models.entities.user import User
-from backend.services.audio_service import get_audio_service
+from backend.models.entities.speaker_profile import SpeakerProfile
+from backend.services.audio_service import get_audio_service, get_speaker_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ async def transcribe_audio(
 ):
     """Single-shot audio transcription via OpenAI Whisper."""
     svc = get_audio_service()
+    identifier = get_speaker_identifier()
     try:
         audio_bytes = await audio.read()
         text = await svc.transcribe(
@@ -55,7 +57,14 @@ async def transcribe_audio(
             language=language,
             filename=audio.filename or "audio.wav",
         )
-        return {"text": text, "language": language}
+        speaker_info = identifier.identify(db, audio_bytes)
+        return {
+            "text": text,
+            "language": language,
+            "speaker_id": speaker_info.get("speaker_id"),
+            "speaker_name": speaker_info.get("name"),
+            "speaker_confidence": speaker_info.get("confidence")
+        }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
@@ -89,6 +98,50 @@ async def synthesize_speech(
     except Exception as exc:
         logger.error("Synthesis failed: %s", exc)
         raise HTTPException(status_code=500, detail="Speech synthesis failed")
+
+# ── Speaker Identification Endpoints ────────────────────────────────────────────
+
+@router.post("/speakers/register")
+async def register_speaker(
+    audio: UploadFile = File(...),
+    name: str = Form("Unknown Speaker"),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Enroll a new speaker by uploading a voice sample and an associated name."""
+    identifier = get_speaker_identifier()
+    try:
+        audio_bytes = await audio.read()
+        profile = identifier.enroll(db, str(current_user.id), name, audio_bytes)
+        if not profile:
+            raise HTTPException(status_code=400, detail="Failed to extract embedding from audio sample.")
+        return profile.to_dict()
+    except Exception as exc:
+        logger.error("Speaker registration failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Speaker registration failed")
+
+@router.get("/speakers")
+async def get_speakers(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """List all enrolled speaker profiles."""
+    identifier = get_speaker_identifier()
+    return {"speakers": identifier.list_profiles(db)}
+
+@router.delete("/speakers/{speaker_id}")
+async def delete_speaker(
+    speaker_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """Soft delete a speaker profile."""
+    profile = db.query(SpeakerProfile).filter(SpeakerProfile.id == speaker_id, SpeakerProfile.is_deleted == False).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Speaker profile not found")
+    profile.is_deleted = True
+    db.commit()
+    return {"status": "success", "message": "Speaker profile deleted"}
 
 
 # ── WebSocket Streaming ──────────────────────────────────────────────────────
@@ -145,13 +198,20 @@ async def audio_stream(websocket: WebSocket):
                     try:
                         # Get user from token if available
                         user_id = msg.get("user_id", "system")
+                        audio_b = bytes(audio_buffer)
                         text = await svc.transcribe(
-                            db, user_id, bytes(audio_buffer),
+                            db, user_id, audio_b,
                             language=language,
                         )
+
+                        identifier = get_speaker_identifier()
+                        speaker_info = identifier.identify(db, audio_b)
+
                         await websocket.send_json({
                             "type": "transcript",
                             "text": text,
+                            "speaker_id": speaker_info.get("speaker_id"),
+                            "speaker_name": speaker_info.get("name"),
                         })
 
                         # Optionally respond with TTS

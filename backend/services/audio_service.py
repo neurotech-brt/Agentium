@@ -225,6 +225,7 @@ class AudioService:
 
     async def identify_speaker(
         self,
+        db: Session,
         audio_bytes: bytes,
         speaker_identifier: Optional["SpeakerIdentifier"] = None,
     ) -> Dict[str, Any]:
@@ -237,166 +238,192 @@ class AudioService:
         Returns dict with ``speaker_id``, ``confidence``, and ``is_known``.
         """
         identifier = speaker_identifier or get_speaker_identifier()
-        return identifier.identify(audio_bytes)
+        return identifier.identify(db, audio_bytes)
 
 
 # ---------------------------------------------------------------------------
 # Speaker Identification (Phase 10.3)
 # ---------------------------------------------------------------------------
 
-@dataclass
-class SpeakerProfile:
-    """Voice fingerprint for a known speaker."""
-    user_id: str
-    username: str
-    embedding: List[float] = field(default_factory=list)
-    enrolled_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
-    sample_count: int = 0
-
+from backend.models.entities.speaker_profile import SpeakerProfile
+import uuid
+import tempfile
+import numpy as np
 
 class SpeakerIdentifier:
     """
     Identifies speakers using voice embedding fingerprints.
 
-    Computes a voice embedding from audio (using the text-embedding
-    model as a proxy — in production, replace with a dedicated
-    speaker-verification model like ECAPA-TDNN).
+    Computes a voice embedding from audio using SpeechBrain ECAPA-TDNN.
+    Persists enrolled profiles to the database via SQLAlchemy.
 
     Usage::
 
         si = SpeakerIdentifier()
-        si.enroll("user-1", "alice", audio_bytes)
-        result = si.identify(new_audio_bytes)
-        # result = {"speaker_id": "user-1", "confidence": 0.87, "is_known": True}
+        si.enroll(db, "user-1", "alice", audio_bytes)
+        result = si.identify(db, new_audio_bytes)
     """
 
     # Cosine similarity threshold for positive identification
-    IDENTIFICATION_THRESHOLD = 0.7
+    IDENTIFICATION_THRESHOLD = 0.70
 
     def __init__(self):
-        self._profiles: Dict[str, SpeakerProfile] = {}
-        self._model = None
+        self._classifier = None
 
-    def _get_model(self):
-        """Lazy-load the embedding model."""
-        if self._model is None:
+    def _get_classifier(self):
+        """Lazy-load the ECAPA-TDNN classifier from SpeechBrain."""
+        if self._classifier is None:
             try:
-                from sentence_transformers import SentenceTransformer
-                self._model = SentenceTransformer(
-                    os.getenv("EMBEDDING_MODEL", "sentence-transformers/all-MiniLM-L6-v2")
+                from speechbrain.inference.speaker import EncoderClassifier
+                import os
+                # By default, downloads to a local cache directory
+                run_opts = {}
+                if os.environ.get("CUDA_VISIBLE_DEVICES") and os.environ.get("CUDA_VISIBLE_DEVICES") != "-1":
+                    run_opts["device"] = "cuda"
+                self._classifier = EncoderClassifier.from_hparams(
+                    source="speechbrain/spkrec-ecapa-voxceleb",
+                    savedir="tmp_speechbrain_model",
+                    run_opts=run_opts
                 )
             except ImportError:
-                logger.warning("sentence-transformers not installed; speaker ID unavailable")
-        return self._model
+                logger.warning("speechbrain or torchaudio not installed; speaker ID unavailable")
+            except Exception as e:
+                logger.error(f"Failed to load SpeechBrain model: {e}")
+        return self._classifier
 
-    def _audio_to_text_repr(self, audio_bytes: bytes) -> str:
+    def _extract_embedding(self, audio_bytes: bytes) -> List[float]:
+        """Extract a 1D float array embedding from audio bytes."""
+        classifier = self._get_classifier()
+        if not classifier:
+            return []
+
+        import torchaudio
+        
+        # Write bytes to a temp file, as torchaudio needs a filepath
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            f.write(audio_bytes)
+            f.flush()
+            tmp_path = f.name
+            
+        try:
+            signal, fs = torchaudio.load(tmp_path)
+            # Resample to 16kHz if needed
+            if fs != 16000:
+                resampler = torchaudio.transforms.Resample(orig_freq=fs, new_freq=16000)
+                signal = resampler(signal)
+            
+            # Predict
+            embeddings = classifier.encode_batch(signal)
+            # embeddings shape is usually [batch, 1, dims] -> squeeze to 1D
+            emd_1d = embeddings.squeeze(0).squeeze(0).detach().cpu().numpy()
+            return emd_1d.tolist()
+        except Exception as e:
+            logger.error(f"Embedding extraction failed: {e}")
+            return []
+        finally:
+            os.remove(tmp_path)
+
+    def enroll(self, db: Session, user_id: Optional[str], username: str, audio_bytes: bytes) -> Optional[SpeakerProfile]:
         """
-        Convert audio bytes to a text representation for embedding.
-
-        This is a lightweight proxy: in production, use a dedicated
-        speaker-verification embedding model. Here we use audio byte
-        statistics as a fingerprint proxy.
+        Enroll a speaker by storing their voice embedding into the database.
         """
-        import hashlib
-        # Create a deterministic fingerprint from audio characteristics
-        byte_stats = {
-            "length": len(audio_bytes),
-            "hash": hashlib.sha256(audio_bytes).hexdigest()[:32],
-            "energy": sum(audio_bytes) / max(len(audio_bytes), 1),
-            "variance": sum((b - 128) ** 2 for b in audio_bytes[:1000]) / min(len(audio_bytes), 1000),
-        }
-        return f"speaker_voice energy={byte_stats['energy']:.2f} variance={byte_stats['variance']:.2f} hash={byte_stats['hash']}"
+        embedding = self._extract_embedding(audio_bytes)
+        if not embedding:
+            logger.warning("Enrollment failed: could not extract embedding.")
+            return None
 
-    def enroll(self, user_id: str, username: str, audio_bytes: bytes) -> SpeakerProfile:
-        """
-        Enroll a speaker by storing their voice embedding.
+        # Check if user already has a profile 
+        existing = None
+        if user_id:
+            existing = db.query(SpeakerProfile).filter(SpeakerProfile.user_id == user_id, SpeakerProfile.is_deleted == False).first()
+            if not existing:
+                # Fallback to name if user_id matching missed
+                existing = db.query(SpeakerProfile).filter(SpeakerProfile.name == username, SpeakerProfile.is_deleted == False).first()
+        else:
+            existing = db.query(SpeakerProfile).filter(SpeakerProfile.name == username, SpeakerProfile.is_deleted == False).first()
 
-        Multiple enrollments for the same user_id update the profile.
-        """
-        model = self._get_model()
-        text_repr = self._audio_to_text_repr(audio_bytes)
-
-        embedding: List[float] = []
-        if model:
-            try:
-                emb = model.encode([text_repr], convert_to_numpy=True)
-                embedding = emb[0].tolist()
-            except Exception as exc:
-                logger.warning("Speaker enrollment embedding failed: %s", exc)
-
-        existing = self._profiles.get(user_id)
         if existing:
-            existing.embedding = embedding
+            # We can average embeddings or simply overwrite. For robust updates, keep the new one.
+            # Realistically, exponential moving average is better:
+            old_emb = np.array(existing.embedding)
+            new_emb = np.array(embedding)
+            n = existing.sample_count
+            updated_emb = ((old_emb * n) + new_emb) / (n + 1)
+            
+            existing.embedding = updated_emb.tolist()
             existing.sample_count += 1
+            existing.name = username
+            db.commit()
+            db.refresh(existing)
+            logger.info(f"Speaker profile updated for {username}")
             return existing
 
+        # Create new 
         profile = SpeakerProfile(
+            id=str(uuid.uuid4()),
             user_id=user_id,
-            username=username,
+            name=username,
             embedding=embedding,
             sample_count=1,
+            is_deleted=False
         )
-        self._profiles[user_id] = profile
-        logger.info("Speaker enrolled: %s (%s)", username, user_id)
+        db.add(profile)
+        db.commit()
+        db.refresh(profile)
+        logger.info(f"Speaker enrolled: {username} ({user_id})")
         return profile
 
-    def identify(self, audio_bytes: bytes) -> Dict[str, Any]:
+    def identify(self, db: Session, audio_bytes: bytes) -> Dict[str, Any]:
         """
-        Identify the speaker from audio bytes.
-
-        Returns a dict with speaker_id, confidence, and is_known flag.
-        Falls back gracefully if no profiles are enrolled or embedding fails.
+        Identify the speaker from audio bytes using cosine similarity against DB.
         """
-        if not self._profiles:
-            return {"speaker_id": "unknown", "confidence": 0.0, "is_known": False}
+        profiles = db.query(SpeakerProfile).filter(SpeakerProfile.is_deleted == False).all()
+        if not profiles:
+            return {"speaker_id": "unknown", "confidence": 0.0, "is_known": False, "name": "Unknown Speaker"}
 
-        model = self._get_model()
-        if not model:
-            return {"speaker_id": "unknown", "confidence": 0.0, "is_known": False}
+        classifier = self._get_classifier()
+        if not classifier:
+            return {"speaker_id": "unknown", "confidence": 0.0, "is_known": False, "name": "Unknown Speaker"}
 
-        text_repr = self._audio_to_text_repr(audio_bytes)
+        query_emb_list = self._extract_embedding(audio_bytes)
+        if not query_emb_list:
+            return {"speaker_id": "unknown", "confidence": 0.0, "is_known": False, "name": "Unknown Speaker"}
 
-        try:
-            import numpy as np
-            query_emb = model.encode([text_repr], convert_to_numpy=True)[0]
+        query_emb = np.array(query_emb_list)
+        query_norm = np.linalg.norm(query_emb)
+        if query_norm == 0:
+            return {"speaker_id": "unknown", "confidence": 0.0, "is_known": False, "name": "Unknown Speaker"}
 
-            best_match = "unknown"
-            best_score = 0.0
+        best_match = "unknown"
+        best_name = "Unknown Speaker"
+        best_score = 0.0
 
-            for user_id, profile in self._profiles.items():
-                if not profile.embedding:
-                    continue
-                profile_emb = np.array(profile.embedding)
-                denom = np.linalg.norm(query_emb) * np.linalg.norm(profile_emb)
-                if denom == 0:
-                    continue
-                similarity = float(np.dot(query_emb, profile_emb) / denom)
-                if similarity > best_score:
-                    best_score = similarity
-                    best_match = user_id
+        for profile in profiles:
+            if not profile.embedding:
+                continue
+            profile_emb = np.array(profile.embedding)
+            profile_norm = np.linalg.norm(profile_emb)
+            if profile_norm == 0:
+                continue
+                
+            similarity = float(np.dot(query_emb, profile_emb) / (query_norm * profile_norm))
+            if similarity > best_score:
+                best_score = similarity
+                best_match = profile.id
+                best_name = profile.name
 
-            is_known = best_score >= self.IDENTIFICATION_THRESHOLD
-            return {
-                "speaker_id": best_match if is_known else "unknown",
-                "confidence": round(best_score, 3),
-                "is_known": is_known,
-            }
-        except Exception as exc:
-            logger.debug("Speaker identification failed: %s", exc)
-            return {"speaker_id": "unknown", "confidence": 0.0, "is_known": False}
+        is_known = best_score >= self.IDENTIFICATION_THRESHOLD
+        return {
+            "speaker_id": best_match if is_known else "unknown",
+            "name": best_name if is_known else "Unknown Speaker",
+            "confidence": round(best_score, 3),
+            "is_known": is_known,
+        }
 
-    def list_profiles(self) -> List[Dict[str, Any]]:
+    def list_profiles(self, db: Session) -> List[Dict[str, Any]]:
         """Return summary of all enrolled speaker profiles."""
-        return [
-            {
-                "user_id": p.user_id,
-                "username": p.username,
-                "enrolled_at": p.enrolled_at,
-                "sample_count": p.sample_count,
-                "has_embedding": len(p.embedding) > 0,
-            }
-            for p in self._profiles.values()
-        ]
+        profiles = db.query(SpeakerProfile).filter(SpeakerProfile.is_deleted == False).order_by(SpeakerProfile.created_at.desc()).all()
+        return [p.to_dict() for p in profiles]
 
 
 # ---------------------------------------------------------------------------

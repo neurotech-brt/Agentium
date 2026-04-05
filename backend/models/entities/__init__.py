@@ -149,6 +149,9 @@ from backend.models.entities.workflow import (Workflow, WorkflowExecution, Workf
 # Phase 13.6 — Intelligent Event Processing
 from backend.models.entities.event_trigger import EventTrigger, EventLog, TriggerType, EventLogStatus
 
+# Phase 15.4 — Speaker Identification
+from backend.models.entities.speaker_profile import SpeakerProfile
+
 # All models for Alembic/database creation
 __all__ = [
     # Base
@@ -279,4 +282,7 @@ __all__ = [
     'EventLog',
     'TriggerType',
     'EventLogStatus',
+
+    # Phase 15.4 — Speaker Identification
+    'SpeakerProfile',
 ]

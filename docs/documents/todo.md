@@ -612,12 +612,12 @@ Build a self-governing AI ecosystem where agents operate under constitutional la
 
 ### 15.4 Speaker Identification for Voice System
 
-- [ ] **Backend** — extend `audio.py`: on each audio chunk, run speaker embedding extraction (use `pyannote.audio` speaker diarization or a lightweight ECAPA-TDNN model); map embedding to registered speaker profile in `speaker_profiles` DB table
-- [ ] New `speaker_profiles` table: `id`, `user_id` (FK nullable), `name`, `embedding` (float array stored as JSONB), `created_at`
-- [ ] `POST /audio/speakers/register` — enroll a new speaker from an audio sample; compute and store embedding
-- [ ] `GET /audio/speakers` — list registered speaker profiles
-- [ ] On identification, attach `speaker_id` to incoming `ExternalMessage` before routing to agent; include in task context
-- [ ] **Frontend** — add "Speaker Profiles" section to voice settings; "Register Voice" button with microphone recording UI; list of enrolled speakers with delete option
+- [x] **Backend** — extend `audio.py`: on each audio chunk, run speaker embedding extraction (use `pyannote.audio` speaker diarization or a lightweight ECAPA-TDNN model); map embedding to registered speaker profile in `speaker_profiles` DB table
+- [x] New `speaker_profiles` table: `id`, `user_id` (FK nullable), `name`, `embedding` (float array stored as JSONB), `created_at`
+- [x] `POST /audio/speakers/register` — enroll a new speaker from an audio sample; compute and store embedding
+- [x] `GET /audio/speakers` — list registered speaker profiles
+- [x] On identification, attach `speaker_id` to incoming `ExternalMessage` before routing to agent; include in task context
+- [x] **Frontend** — add "Speaker Profiles" section to voice settings; "Register Voice" button with microphone recording UI; list of enrolled speakers with delete option
 
 ---
 

@@ -26,6 +26,7 @@ import { chatApi } from '@/services/chatApi';
 import { localVoice } from '@/services/localVoice';
 import { useVoiceBridge } from '@/hooks/useVoiceBridge';
 import { VoiceInteractionEvent } from '@/services/voiceBridge';
+import { VoiceSettingsModal } from '@/components/VoiceSettingsModal';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -1098,14 +1099,20 @@ export function ChatPage() {
                                                     <ImageIcon className="w-4 h-4" />
                                                 </button>
                                                 {voiceAvailable && (
-                                                    <button type="button" onClick={handleVoiceButtonClick}
-                                                        className={`p-1.5 rounded-lg transition-colors ${
-                                                            isRecording
-                                                                ? 'bg-red-100 dark:bg-red-500/20 text-red-500 dark:text-red-400'
-                                                                : 'hover:bg-gray-200 dark:hover:bg-[#1e2535] text-gray-400 dark:text-gray-500'
-                                                        }`} title={isRecording ? 'Stop recording' : 'Start voice input'}>
-                                                        {isRecording ? <Pause className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                                                    </button>
+                                                    <>
+                                                        <button type="button" onClick={handleVoiceButtonClick}
+                                                            className={`p-1.5 rounded-lg transition-colors ${
+                                                                isRecording
+                                                                    ? 'bg-red-100 dark:bg-red-500/20 text-red-500 dark:text-red-400'
+                                                                    : 'hover:bg-gray-200 dark:hover:bg-[#1e2535] text-gray-400 dark:text-gray-500'
+                                                            }`} title={isRecording ? 'Stop recording' : 'Start voice input'}>
+                                                            {isRecording ? <Pause className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                                                        </button>
+                                                        <button type="button" onClick={() => setShowVoiceSettings(true)}
+                                                            className="p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-[#1e2535] text-gray-400 dark:text-gray-500 transition-colors" title="Voice Settings">
+                                                            <Settings2 className="w-4 h-4" />
+                                                        </button>
+                                                    </>
                                                 )}
                                                 {isRecording && (
                                                     <span className="text-xs text-red-500 dark:text-red-400 font-mono">
@@ -1359,6 +1366,11 @@ export function ChatPage() {
                             </button>
                         </div>
                     </div>
+                )}
+
+                {/* ── Voice Settings Modal ────────────────────────────────────── */}
+                {showVoiceSettings && (
+                    <VoiceSettingsModal onClose={() => setShowVoiceSettings(false)} />
                 )}
             </div>
         </div>

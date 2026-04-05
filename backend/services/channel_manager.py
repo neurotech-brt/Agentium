@@ -1042,12 +1042,20 @@ class ChannelManager:
                     channel.channel_type, raw_payload
                 )
 
+            # Extract Speaker Info
+            speaker_id = raw_payload.get('speaker_id') if raw_payload else None
+            speaker_name = raw_payload.get('speaker_name') if raw_payload else None
+            
+            final_content = content
+            if speaker_name and speaker_name != "Unknown Speaker":
+                final_content = f"[{speaker_name}]: {content}"
+
             # Create message record
             message = ExternalMessage(
                 channel_id=channel_id,
-                sender_id=sender_id,
-                sender_name=sender_name or sender_id,
-                content=content,
+                sender_id=speaker_id or sender_id,  # Use identified speaker_id if available
+                sender_name=speaker_name or sender_name or sender_id,
+                content=final_content,
                 message_type=message_type,
                 media_url=media_url,
                 raw_payload={
@@ -1056,7 +1064,11 @@ class ChannelManager:
                         'text': rich_media.text if rich_media else content,
                         'attachments': rich_media.attachments if rich_media else [],
                         'metadata': rich_media.metadata if rich_media else {}
-                    }
+                    },
+                    'speaker_info': {
+                        'speaker_id': speaker_id,
+                        'speaker_name': speaker_name
+                    } if speaker_id else None
                 },
                 status="received"
             )

@@ -141,6 +141,10 @@ class WorkflowEngine:
                 success = WorkflowEngine._execute_condition_step(execution, step)
             elif step.step_type == WorkflowStepType.PARALLEL:
                 success = WorkflowEngine._execute_parallel_step(db, execution, step)
+            elif step.step_type == WorkflowStepType.WAIT_POLL:
+                # Suspend; WaitPollService will re-enqueue this execution on resolution
+                WorkflowEngine._execute_wait_step(db, execution, step)
+                return  # break loop — resumed by WaitPollService callback
             elif step.step_type == WorkflowStepType.DELAY:
                 # Delay is handled by enqueuing a celery task with countdown
                 delay_sec = step.config.get("delay_seconds", 60)
@@ -217,6 +221,126 @@ class WorkflowEngine:
         # Stub: dispatch parallel celery tasks
         execution.context_data[f"step_{step.step_index}_parallel"] = "dispatched"
         return True
+
+    @staticmethod
+    def _execute_wait_step(
+        db: Session,
+        execution: WorkflowExecution,
+        step: WorkflowStep,
+    ) -> None:
+        """
+        Phase 16 — Suspend a WorkflowExecution until a WaitCondition resolves.
+
+        Pauses the execution and creates a WaitCondition on the linked task
+        (stored in ``execution.context_data["current_task_id"]`` if available,
+        otherwise uses a synthetic task lookup).  When the condition resolves,
+        ``WaitPollService`` calls ``workflow_step_runner.delay(execution.id)``
+        to resume the workflow from the next step.
+
+        Step config keys
+        ----------------
+        strategy               : WaitStrategy value (required)
+        wait_config            : dict forwarded verbatim to WaitPollService
+        max_attempts           : int  (default 60)
+        poll_interval_seconds  : int  (default 30)
+        timeout_seconds        : int  (optional)
+        """
+        from backend.services.wait_poll_service import WaitPollService
+        from backend.models.entities.wait_condition import WaitStrategy
+        from backend.models.entities.task import Task, TaskStatus
+
+        cfg              = step.config or {}
+        strategy_value   = cfg.get("strategy", WaitStrategy.TIMEOUT.value)
+        wait_config      = cfg.get("wait_config", {})
+        max_attempts     = int(cfg.get("max_attempts", 60))
+        poll_interval    = int(cfg.get("poll_interval_seconds", 30))
+        timeout_seconds  = cfg.get("timeout_seconds")
+
+        try:
+            wait_strategy = WaitStrategy(strategy_value)
+        except ValueError:
+            logger.error(
+                "WorkflowEngine._execute_wait_step: unknown strategy '%s' — "
+                "defaulting to TIMEOUT (60 s)", strategy_value
+            )
+            wait_strategy   = WaitStrategy.TIMEOUT
+            timeout_seconds = timeout_seconds or 60
+
+        # Resolve the task to attach the WaitCondition to
+        task_id = execution.context_data.get("current_task_id") if execution.context_data else None
+        if not task_id:
+            # Fallback: find the most recent IN_PROGRESS task for this workflow
+            task = (
+                db.query(Task)
+                .filter(
+                    Task.workflow_id == execution.workflow_id,
+                    Task.status == TaskStatus.IN_PROGRESS,
+                )
+                .order_by(Task.created_at.desc())
+                .first()
+            )
+            if not task:
+                logger.warning(
+                    "WorkflowEngine._execute_wait_step: no IN_PROGRESS task found "
+                    "for workflow %s — pausing execution without WaitCondition",
+                    execution.workflow_id,
+                )
+                execution.status = WorkflowExecutionStatus.PAUSED
+                db.commit()
+                return
+            task_id = task.id
+
+        condition = WaitPollService.create_condition(
+            db=db,
+            task_id=task_id,
+            strategy=wait_strategy,
+            config=wait_config,
+            max_attempts=max_attempts,
+            poll_interval_seconds=poll_interval,
+            timeout_seconds=int(timeout_seconds) if timeout_seconds else None,
+            created_by_agent_id="workflow_engine",
+        )
+
+        # Store condition ID and next step so the poller can resume correctly
+        ctx = execution.context_data or {}
+        ctx[f"step_{step.step_index}_wait_condition_id"] = str(condition.id)
+        ctx[f"step_{step.step_index}_on_success_step"]   = step.on_success_step
+        execution.context_data = ctx
+
+        execution.status = WorkflowExecutionStatus.PAUSED
+        db.commit()
+
+        logger.info(
+            "WorkflowEngine: execution %s paused at step %s "
+            "(WaitCondition %s, strategy=%s)",
+            execution.id, step.step_index, condition.agentium_id, strategy_value,
+        )
+
+    @staticmethod
+    def resume_after_wait(db: Session, execution_id: str, step_index: int) -> None:
+        """
+        Called by WaitPollService (or a webhook handler) once a WAIT_POLL step
+        condition has resolved.  Advances to on_success_step and re-enqueues
+        the workflow runner.
+        """
+        execution = db.query(WorkflowExecution).filter(
+            WorkflowExecution.id == execution_id
+        ).first()
+        if not execution:
+            logger.warning("resume_after_wait: execution %s not found", execution_id)
+            return
+
+        ctx            = execution.context_data or {}
+        next_step_idx  = ctx.get(f"step_{step_index}_on_success_step")
+
+        if next_step_idx is not None:
+            execution.status = WorkflowExecutionStatus.RUNNING
+            WorkflowEngine._advance_step(db, execution, next_step_idx)
+            workflow_step_runner.delay(execution.id)
+        else:
+            execution.status       = WorkflowExecutionStatus.COMPLETED
+            execution.completed_at = datetime.utcnow()
+            db.commit()
 
     @staticmethod
     def register_cron_schedules():

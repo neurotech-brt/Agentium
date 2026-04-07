@@ -85,6 +85,7 @@ from backend.api.routes import dashboard as dashboard_routes
 from backend.api.routes import outbound_webhooks as outbound_webhooks_routes  
 from backend.api.routes import workflows as workflows_routes                   
 from backend.api.routes import scaling as scaling_routes                       
+from backend.api.routes import wait_poll as wait_poll_routes                   # Phase 16
 
 from backend.core.security_middleware import (
     RateLimitMiddleware,
@@ -515,6 +516,7 @@ app.include_router(workflows_routes.router,          prefix="/api/v1")
 app.include_router(scaling_routes.router,            prefix="/api/v1")  
 app.include_router(improvements_routes.router,       prefix="/api/v1") 
 app.include_router(events_routes.router,             prefix="/api/v1")  
+app.include_router(wait_poll_routes.router,          prefix="/api/v1")  # Phase 16
 
 
 

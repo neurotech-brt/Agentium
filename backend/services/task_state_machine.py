@@ -48,12 +48,18 @@ class TaskStateMachine:
             TaskStatus.COMPLETED,
             TaskStatus.FAILED,
             TaskStatus.RETRYING,
-            TaskStatus.STOPPED
+            TaskStatus.STOPPED,
+            TaskStatus.WAITING,    # Phase 16: task suspends to wait on a condition
         },
         TaskStatus.REVIEW: {
             TaskStatus.COMPLETED,
             TaskStatus.FAILED,
             TaskStatus.RETRYING
+        },
+        TaskStatus.WAITING: {
+            TaskStatus.IN_PROGRESS,   # WaitCondition resolved → resume
+            TaskStatus.FAILED,        # WaitCondition expired / cancelled
+            TaskStatus.CANCELLED,     # Manual cancel while waiting
         },
         TaskStatus.RETRYING: {
             TaskStatus.IN_PROGRESS,

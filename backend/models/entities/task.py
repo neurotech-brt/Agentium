@@ -47,6 +47,9 @@ class TaskStatus(str, enum.Enum):
     ESCALATED = "escalated"    # NEW: Max retries exceeded, escalated to Council
     STOPPED = "stopped"        # NEW: Task manually stopped or liquidated
     
+    # Wait & Poll state (Phase 16)
+    WAITING = "waiting"            # Task suspended until a WaitCondition resolves
+
     # IDLE-specific states
     IDLE_PENDING = "idle_pending"
     IDLE_RUNNING = "idle_running"
@@ -291,6 +294,8 @@ class Task(BaseEntity):
             phase = CheckpointPhase.EXECUTION_COMPLETE
         elif new_status == TaskStatus.COMPLETED:
             phase = CheckpointPhase.CRITIQUE_PASSED
+        elif new_status == TaskStatus.WAITING:
+            phase = CheckpointPhase.WAIT_ENTERED
             
         if phase:
             try:

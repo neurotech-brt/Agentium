@@ -873,6 +873,83 @@ class AgentOrchestrator:
             if len(samples) > self._max_latency_samples:
                 self._metrics["latency_samples"] = samples[-self._max_latency_samples:]
 
+    # ------------------------------------------------------------------
+    # Phase 16 — Wait & Poll
+    # ------------------------------------------------------------------
+
+    def enter_wait(
+        self,
+        task_id: str,
+        strategy: str,
+        config: Dict[str, Any],
+        *,
+        max_attempts: int = 60,
+        poll_interval_seconds: int = 30,
+        timeout_seconds: Optional[int] = None,
+        actor_id: str = "orchestrator",
+    ) -> Dict[str, Any]:
+        """
+        Suspend *task_id* by creating a WaitCondition and transitioning the
+        task to ``WAITING``.
+
+        Parameters mirror ``WaitPollService.create_condition()``.
+
+        Returns the serialised WaitCondition dict so callers can surface the
+        condition ID to the client.
+
+        Raises ``ValueError`` if the task cannot be found or the strategy is
+        invalid.
+        """
+        from backend.models.entities.wait_condition import WaitStrategy
+        from backend.services.wait_poll_service import WaitPollService
+        from backend.models.entities.task import Task, TaskStatus
+
+        # Validate strategy early for a clear error message
+        try:
+            wait_strategy = WaitStrategy(strategy)
+        except ValueError:
+            raise ValueError(
+                f"Unknown wait strategy '{strategy}'. "
+                f"Valid values: {[s.value for s in WaitStrategy]}"
+            )
+
+        task = self.db.query(Task).filter(Task.id == task_id).first()
+        if not task:
+            raise ValueError(f"Task {task_id} not found")
+
+        if task.status == TaskStatus.WAITING:
+            raise ValueError(f"Task {task_id} is already in WAITING state")
+
+        condition = WaitPollService.create_condition(
+            db=self.db,
+            task_id=task_id,
+            strategy=wait_strategy,
+            config=config,
+            max_attempts=max_attempts,
+            poll_interval_seconds=poll_interval_seconds,
+            timeout_seconds=timeout_seconds,
+            created_by_agent_id=actor_id,
+        )
+
+        task.set_status(
+            TaskStatus.WAITING,
+            actor_id=actor_id,
+            note=(
+                f"WaitCondition {condition.agentium_id} created "
+                f"(strategy={strategy})"
+            ),
+        )
+
+        self.db.flush()
+
+        logger.info(
+            "AgentOrchestrator.enter_wait: task %s → WAITING "
+            "(condition=%s, strategy=%s)",
+            task_id, condition.agentium_id, strategy,
+        )
+
+        return condition.to_dict()
+
     def get_metrics(self) -> Dict[str, Any]:
         """Return a snapshot of routing metrics."""
         samples = self._metrics["latency_samples"]

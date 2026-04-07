@@ -1340,3 +1340,26 @@ def sla_monitor():
         except Exception as e:
             logger.error(f"sla_monitor failed: {e}")
             return {"error": str(e)}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Phase 16 — Wait & Poll
+# ══════════════════════════════════════════════════════════════════════════════
+
+@celery_app.task(name='backend.services.tasks.task_executor.poll_wait_conditions')
+def poll_wait_conditions():
+    """
+    Evaluate every ACTIVE WaitCondition and resume or expire parent tasks.
+
+    Runs every 30 seconds via Celery Beat.
+    Delegates all logic to WaitPollService so the Celery layer stays thin.
+    """
+    with get_task_db() as db:
+        try:
+            from backend.services.wait_poll_service import WaitPollService
+            summary = WaitPollService.poll_all_active(db)
+            if any(v > 0 for v in summary.values()):
+                logger.info(f"poll_wait_conditions: {summary}")
+            return summary
+        except Exception as exc:
+            logger.error(f"poll_wait_conditions failed: {exc}", exc_info=True)
+            return {"error": str(exc)}

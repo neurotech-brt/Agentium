@@ -146,6 +146,13 @@ from backend.models.entities.webhook import WebhookSubscription, WebhookDelivery
 # Phase 13.5 — Workflow Automation Pipeline
 from backend.models.entities.workflow import (Workflow, WorkflowExecution, WorkflowStep, WorkflowVersion, WorkflowExecutionStatus, WorkflowStepType)
 
+# Phase 16 — Wait & Poll
+from backend.models.entities.wait_condition import (
+    WaitCondition,
+    WaitStrategy,
+    WaitConditionStatus,
+)
+
 # Phase 13.6 — Intelligent Event Processing
 from backend.models.entities.event_trigger import EventTrigger, EventLog, TriggerType, EventLogStatus
 
@@ -276,6 +283,11 @@ __all__ = [
     'WorkflowVersion',
     'WorkflowExecutionStatus',
     'WorkflowStepType',
+
+    # Wait & Poll (Phase 16)
+    'WaitCondition',
+    'WaitStrategy',
+    'WaitConditionStatus',
 
     # Intelligent Event Processing (Phase 13.6)
     'EventTrigger',

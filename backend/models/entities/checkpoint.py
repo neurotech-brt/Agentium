@@ -1,6 +1,6 @@
 """
 Checkpoint and time-travel models for Agentium.
-Implements Phase 6.5: Session resumption and retry from any point.
+Session resumption and retry from any point.
 """
 
 from datetime import datetime
@@ -17,6 +17,7 @@ class CheckpointPhase(str, enum.Enum):
     EXECUTION_COMPLETE = "execution_complete"
     CRITIQUE_PASSED = "critique_passed"
     MANUAL = "manual"  # User-triggered or arbitrary safe points
+    WAIT_ENTERED = "wait_entered"  # Task entered WAITING state (Phase 16)
 
 
 class ExecutionCheckpoint(BaseEntity):

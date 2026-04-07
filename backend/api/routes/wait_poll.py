@@ -1,0 +1,203 @@
+"""
+Wait & Poll API routes.
+
+Endpoints
+---------
+POST   /api/v1/wait-conditions/              Create a WaitCondition for a task
+GET    /api/v1/wait-conditions/{id}          Get a single WaitCondition
+GET    /api/v1/wait-conditions/task/{task_id} List all conditions for a task
+POST   /api/v1/wait-conditions/{id}/resolve  Manually resolve (WEBHOOK / MANUAL)
+POST   /api/v1/wait-conditions/{id}/cancel   Cancel an active condition
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+
+from backend.core.auth import get_current_user
+from backend.models.database import get_db
+from backend.models.entities.task import Task, TaskStatus
+from backend.models.entities.wait_condition import (
+    WaitCondition,
+    WaitConditionStatus,
+    WaitStrategy,
+)
+from backend.services.wait_poll_service import WaitPollService
+
+logger = logging.getLogger(__name__)
+router = APIRouter(tags=["Wait & Poll"])
+
+
+# ── Request / Response schemas ────────────────────────────────────────────────
+
+class CreateWaitConditionRequest(BaseModel):
+    task_id:               str
+    strategy:              WaitStrategy
+    config:                Dict[str, Any]           = Field(default_factory=dict)
+    max_attempts:          int                       = 60
+    poll_interval_seconds: int                       = 30
+    timeout_seconds:       Optional[int]             = None
+
+
+class ResolveWaitConditionRequest(BaseModel):
+    data: Optional[Dict[str, Any]] = None
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _get_condition_or_404(db: Session, condition_id: str) -> WaitCondition:
+    condition = db.query(WaitCondition).filter(WaitCondition.id == condition_id).first()
+    if not condition:
+        raise HTTPException(status_code=404, detail="WaitCondition not found")
+    return condition
+
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+
+@router.post(
+    "/wait-conditions/",
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a WaitCondition and put the task into WAITING state",
+)
+def create_wait_condition(
+    body: CreateWaitConditionRequest,
+    db:   Session = Depends(get_db),
+    _user = Depends(get_current_user),
+):
+    # Validate task exists
+    task = db.query(Task).filter(Task.id == body.task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    if task.status == TaskStatus.WAITING:
+        raise HTTPException(
+            status_code=409,
+            detail="Task is already in WAITING state",
+        )
+
+    # Create condition
+    condition = WaitPollService.create_condition(
+        db=db,
+        task_id=body.task_id,
+        strategy=body.strategy,
+        config=body.config,
+        max_attempts=body.max_attempts,
+        poll_interval_seconds=body.poll_interval_seconds,
+        timeout_seconds=body.timeout_seconds,
+    )
+
+    # Transition task → WAITING
+    try:
+        task.set_status(
+            TaskStatus.WAITING,
+            actor_id="api",
+            note=f"WaitCondition {condition.agentium_id} created (strategy={body.strategy.value})",
+        )
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=422,
+            detail=f"Could not transition task to WAITING: {exc}",
+        )
+
+    db.commit()
+    db.refresh(condition)
+    return condition.to_dict()
+
+
+@router.get(
+    "/wait-conditions/{condition_id}",
+    summary="Get a WaitCondition by ID",
+)
+def get_wait_condition(
+    condition_id: str,
+    db:           Session = Depends(get_db),
+    _user = Depends(get_current_user),
+):
+    return _get_condition_or_404(db, condition_id).to_dict()
+
+
+@router.get(
+    "/wait-conditions/task/{task_id}",
+    summary="List all WaitConditions for a task",
+)
+def list_wait_conditions_for_task(
+    task_id: str,
+    db:      Session = Depends(get_db),
+    _user = Depends(get_current_user),
+) -> List[Dict]:
+    conditions = (
+        db.query(WaitCondition)
+        .filter(WaitCondition.task_id == task_id)
+        .order_by(WaitCondition.created_at.desc())
+        .all()
+    )
+    return [c.to_dict() for c in conditions]
+
+
+@router.post(
+    "/wait-conditions/{condition_id}/resolve",
+    summary="Manually resolve a WaitCondition (WEBHOOK / MANUAL strategies)",
+)
+def resolve_wait_condition(
+    condition_id: str,
+    body:         ResolveWaitConditionRequest = ResolveWaitConditionRequest(),
+    db:           Session = Depends(get_db),
+    _user = Depends(get_current_user),
+):
+    condition = _get_condition_or_404(db, condition_id)
+
+    if condition.status != WaitConditionStatus.ACTIVE:
+        raise HTTPException(
+            status_code=409,
+            detail=f"WaitCondition is not ACTIVE (current status: {condition.status.value})",
+        )
+
+    success = WaitPollService.resolve_condition(db, condition_id, data=body.data)
+    if not success:
+        raise HTTPException(status_code=500, detail="Resolution failed")
+
+    db.refresh(condition)
+    return condition.to_dict()
+
+
+@router.post(
+    "/wait-conditions/{condition_id}/cancel",
+    summary="Cancel an active WaitCondition",
+)
+def cancel_wait_condition(
+    condition_id: str,
+    db:           Session = Depends(get_db),
+    _user = Depends(get_current_user),
+):
+    condition = _get_condition_or_404(db, condition_id)
+
+    if condition.status not in (WaitConditionStatus.ACTIVE, WaitConditionStatus.PENDING):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot cancel a condition in state: {condition.status.value}",
+        )
+
+    condition.cancel()
+
+    # If the parent task is still WAITING, revert it to IN_PROGRESS
+    task = db.query(Task).filter(Task.id == condition.task_id).first()
+    if task and task.status == TaskStatus.WAITING:
+        try:
+            task.set_status(
+                TaskStatus.IN_PROGRESS,
+                actor_id="api",
+                note=f"WaitCondition {condition.agentium_id} cancelled by user",
+            )
+        except Exception:
+            pass  # Non-fatal; task status is best-effort here
+
+    db.commit()
+    db.refresh(condition)
+    return condition.to_dict()

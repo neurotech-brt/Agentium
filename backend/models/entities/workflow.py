@@ -17,11 +17,12 @@ class WorkflowExecutionStatus(str, enum.Enum):
 
 class WorkflowStepType(str, enum.Enum):
     """Types of steps a workflow can execute."""
-    TASK = "task"
-    CONDITION = "condition"
-    PARALLEL = "parallel"
+    TASK           = "task"
+    CONDITION      = "condition"
+    PARALLEL       = "parallel"
     HUMAN_APPROVAL = "human_approval"
-    DELAY = "delay"
+    DELAY          = "delay"
+    WAIT_POLL      = "wait_poll"   # Phase 16: suspend until a WaitCondition resolves
 
 
 class Workflow(BaseEntity):

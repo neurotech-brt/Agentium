@@ -2,10 +2,6 @@
 Message Bus for Agentium - Redis-backed hierarchical routing.
 Enforces: Task(3xxxx) -> Lead(2xxxx) -> Council(1xxxx) -> Head(0xxxx)
 
-Section 6.4 – Context Ray Tracing:
-  Adds role-based context visibility so each agent tier only
-  receives messages relevant to its function (Planner / Executor / Critic).
-  Sibling agents are mutually blind to each other's work.
 """
 
 import os
@@ -156,15 +152,18 @@ class ContextRayTracer:
             "constitution_query", "escalation", "notification",
             "liquidation", "knowledge_share", "heartbeat",
             "plan", "idle_task", "delegation",
+            "wait_resolved",   # Phase 16: planners need visibility of resumed tasks
         },
         ROLE_EXECUTOR: {
             "delegation", "plan", "execution",
             "escalation", "notification", "heartbeat",
             "idle_task",
+            "wait_resolved",   # Phase 16: executors resume work on this event
         },
         ROLE_CRITIC: {
             "execution", "critique", "critique_result",
             "notification", "heartbeat", "delegation",
+            "wait_resolved",   # Phase 16: critics may re-evaluate after wait resolution
         },
     }
 

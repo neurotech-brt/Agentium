@@ -18,7 +18,10 @@ Agentium/
 │   │   └── versions/                # Migration scripts
 │   │       ├── 001_schema.py        # Initial schema
 │   │       ├── 002_migration.py     # General migration
-│   │       └── 003_consolidated.py  # Consolidated migration (Phases 3-11)
+│   │       ├── 003_consolidated.py  # Consolidated migration (Phases 3-11)
+│   │       ├── 004_event_triggers.py # Event triggers migration
+│   │       ├── 005_speaker_profiles.py # Speaker profiles migration
+│   │       └── 006_wait_poll.py     # Wait/poll condition migration
 │   ├── api/                          # API layer
 │   │   ├── dependencies/
 │   │   │   └── auth.py              # Auth dependencies
@@ -61,6 +64,7 @@ Agentium/
 │   │   │   ├── user_preferences.py  # User preferences
 │   │   │   ├── voice.py             # Voice features
 │   │   │   ├── voting.py            # Voting/constitution
+│   │   │   ├── wait_poll.py         # Wait/poll endpoints
 │   │   │   ├── webhooks.py          # Webhook handlers
 │   │   │   ├── websocket.py         # WebSocket endpoints
 │   │   │   ├── workflows.py         # Workflow automation
@@ -111,6 +115,7 @@ Agentium/
 │   │   │   ├── reasoning_trace.py   # Reasoning traces
 │   │   │   ├── scheduled_task.py    # Scheduled tasks
 │   │   │   ├── skill.py             # Skill definitions
+│   │   │   ├── speaker_profile.py   # Speaker profiles
 │   │   │   ├── system_settings.py   # System config
 │   │   │   ├── task.py              # Task definitions
 │   │   │   ├── task_events.py       # Task events
@@ -122,6 +127,7 @@ Agentium/
 │   │   │   ├── user_config.py       # User config
 │   │   │   ├── user_preference.py   # User preferences
 │   │   │   ├── voting.py            # Voting records
+│   │   │   ├── wait_condition.py    # Wait conditions
 │   │   │   ├── webhook.py           # Webhook entities
 │   │   │   ├── workflow.py          # Workflow definitions
 │   │   │   └── event_trigger.py     # Event triggers
@@ -205,6 +211,7 @@ Agentium/
 │   │   ├── skill_rag.py            # Skill RAG
 │   │   ├── storage_service.py      # Storage service
 │   │   ├── task_state_machine.py    # Task state logic
+│   │   ├── wait_poll_service.py     # Wait/poll service
 │   │   ├── tasks/                   # Task execution
 │   │   │   ├── __init__.py
 │   │   │   ├── task_executor.py

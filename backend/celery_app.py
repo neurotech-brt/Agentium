@@ -176,6 +176,12 @@ celery_app.conf.beat_schedule = {
         'schedule': 30.0,   # every 30 seconds
     },
 
+    # ── Phase 16: Wait & Poll ─────────────────────────────────────────────
+    'poll-wait-conditions': {
+        'task': 'backend.services.tasks.task_executor.poll_wait_conditions',
+        'schedule': 30.0,   # every 30 seconds — matches default poll_interval_seconds
+    },
+
     # ── Phase 15.3: Channel Health Broadcast ──────────────────────────────────
     'channel-health-broadcast': {
         'task': 'backend.celery_app.broadcast_channel_health',

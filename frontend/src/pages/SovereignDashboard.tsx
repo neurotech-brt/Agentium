@@ -144,13 +144,41 @@ const TABS: Tab[] = [
     },
 ];
 
+/**
+ * Maps every TabId to its component.
+ * Defined outside the render function so the object identity is stable
+ * and React never treats these as "new" components on re-render.
+ */
+const TAB_COMPONENTS: Record<TabId, React.ReactNode> = {
+    'system':            <SystemTab />,
+    'mcp-tools':         <MCPToolRegistry />,
+    'financial-burn':    <FinancialBurnDashboard />,
+    'skills':            <SkillsPage />,
+    'tools-marketplace': <ToolMarketplacePage embedded />,
+    'federation':        <FederationPage />,
+    'rbac':              <RBACManagementPage />,
+    'mobile':            <MobilePage />,
+    'webhooks':          <WebhookManagementPage />,
+    'developer-portal':  <DeveloperPortalPage />,
+    'scaling':           <ScalingDashboard />,
+    'improve':           <LearningImpactDashboard />,
+    'events':            <EventTriggerManager />,
+};
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function SovereignDashboard() {
     const { user } = useAuthStore();
     const [activeTab, setActiveTab] = useState<TabId>('system');
+    /**
+     * Tracks which tabs have ever been visited.
+     * A tab is only mounted into the DOM on first visit — thereafter it stays
+     * mounted (hidden via CSS) so its internal state and data are preserved.
+     */
+    const [mountedTabs, setMountedTabs] = useState<Set<TabId>>(new Set(['system']));
     const tabNavRef = useRef<HTMLDivElement>(null);
 
+    // Scroll tab bar horizontally with the mouse wheel
     useEffect(() => {
         const el = tabNavRef.current;
         if (!el) return;
@@ -162,6 +190,17 @@ export function SovereignDashboard() {
         el.addEventListener('wheel', onWheel, { passive: false });
         return () => el.removeEventListener('wheel', onWheel);
     }, []);
+
+    const handleTabChange = (tabId: TabId) => {
+        setActiveTab(tabId);
+        // Lazily mount the tab on first visit; never unmount it again
+        setMountedTabs((prev) => {
+            if (prev.has(tabId)) return prev;
+            const next = new Set(prev);
+            next.add(tabId);
+            return next;
+        });
+    };
 
     // ── Access denied ────────────────────────────────────────────────────────
     if (!user?.is_admin) {
@@ -213,7 +252,7 @@ export function SovereignDashboard() {
                             return (
                                 <button
                                     key={tab.id}
-                                    onClick={() => setActiveTab(tab.id)}
+                                    onClick={() => handleTabChange(tab.id)}
                                     className={`
                                         flex items-center gap-2 px-3.5 py-2.5 rounded-lg text-sm font-medium whitespace-nowrap
                                         transition-all duration-200
@@ -246,21 +285,44 @@ export function SovereignDashboard() {
                 </p>
             </div>
 
-            {/* ── Tab content ──────────────────────────────────────────────── */}
-            <div>
-                {activeTab === 'system'           && <SystemTab />}
-                {activeTab === 'mcp-tools'        && <MCPToolRegistry />}
-                {activeTab === 'financial-burn'   && <FinancialBurnDashboard />}
-                {activeTab === 'skills'           && <SkillsPage />}
-                {activeTab === 'tools-marketplace'&& <ToolMarketplacePage embedded />}
-                {activeTab === 'federation'       && <FederationPage />}
-                {activeTab === 'rbac'             && <RBACManagementPage />}
-                {activeTab === 'mobile'           && <MobilePage />}
-                {activeTab === 'webhooks'         && <WebhookManagementPage />}
-                {activeTab === 'developer-portal' && <DeveloperPortalPage />}
-                {activeTab === 'scaling'          && <ScalingDashboard />}
-                {activeTab === 'improve'          && <LearningImpactDashboard />}
-                {activeTab === 'events'           && <EventTriggerManager />}
+            {/* ── Tab content (keep-alive) ──────────────────────────────────
+             *
+             *  Each tab is only mounted on its first visit (lazy mount).
+             *  Once mounted it is never removed from the DOM — switching
+             *  tabs simply toggles visibility via `display: none`.
+             *
+             *  Benefits:
+             *   • Component state (filters, scroll position, fetched data)
+             *     survives tab switches.
+             *   • No duplicate API calls when revisiting a tab.
+             *   • Instant switching — no React reconciliation overhead.
+             *
+             *  The `hidden` attribute is equivalent to `display: none` and
+             *  is natively ignored by assistive technologies, so accessibility
+             *  is unaffected for the visible tab.
+            ── */}
+            <div className="relative">
+                {TABS.map(({ id }) => {
+                    const isMounted = mountedTabs.has(id);
+                    const isActive  = activeTab === id;
+
+                    // Don't render anything until the tab is first visited
+                    if (!isMounted) return null;
+
+                    return (
+                        <div
+                            key={id}
+                            // `hidden` sets display:none — keeps the node in
+                            // the DOM (state preserved) but invisible & inert.
+                            hidden={!isActive}
+                            // aria-hidden mirrors the visibility state so
+                            // screen readers only announce the active panel.
+                            aria-hidden={!isActive}
+                        >
+                            {TAB_COMPONENTS[id]}
+                        </div>
+                    );
+                })}
             </div>
         </div>
     );
